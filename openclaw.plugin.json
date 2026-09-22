@@ -1,0 +1,25 @@
+{
+  "id": "knowledge",
+  "name": "Knowledge",
+  "description": "Evidence-backed knowledge, inspectable in OpenClaw.",
+  "version": "0.1.0",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  },
+  "activation": {
+    "onStartup": true
+  },
+  "controlUi": {
+    "entry": "dist/control-ui/5b70521089152450a119984627334db5860745d20f004d74ad86eb9af898ab87/index.js",
+    "styles": [
+      "dist/control-ui/5b70521089152450a119984627334db5860745d20f004d74ad86eb9af898ab87/index.css"
+    ]
+  },
+  "contracts": {
+    "tools": [
+      "knowledge_status"
+    ]
+  }
+}
