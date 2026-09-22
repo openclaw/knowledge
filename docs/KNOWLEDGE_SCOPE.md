@@ -16,7 +16,7 @@ The first release should complete this loop:
 
 **Ingest → inspect in OpenClaw Control UI → retrieve → edit → correct → recover.**
 
-Control UI is the primary interface for working with accumulated knowledge and inspecting the plugin as it operates. Markdown remains the portable storage format; Obsidian and ordinary text editors are optional, not required product interfaces. Build the native UI alongside each capability, beginning with a Knowledge sidebar page over the vault and schemas.
+Control UI is the primary interface for working with accumulated knowledge and inspecting the plugin as it operates. Markdown remains the portable storage format; Obsidian and ordinary text editors are optional, not required product interfaces. Build the native UI alongside each capability, beginning with a Knowledge sidebar page over the vault and ontology.
 
 Autonomous intelligence is not a prerequisite for a useful, trustworthy knowledge system.
 
@@ -29,8 +29,8 @@ This document governs **v1 scope** where it differs from [KNOWLEDGE_SPEC.md](KNO
 In particular:
 
 - An editable Markdown vault is in scope, with SQLite indexes and operational state—not SQLite-only authoritative knowledge.
-- Basic configurable types and filing conventions are in scope; a full schema-pack ecosystem is not.
-- A native Knowledge sidebar page with record browsing/editing, schema inspection, and activity/issues is in scope; a separate frontend application is not.
+- Named, versioned ontologies with local inheritance, selective borrowing, typed fields, aliases, and filing conventions are in scope; distribution and discovery are not.
+- A native Knowledge sidebar page with record browsing/editing, ontology inspection, and activity/issues is in scope; a separate frontend application is not.
 - Embeddings, scheduled dreaming, proactive recall, and graph-assisted retrieval are follow-ups.
 - Existing evidence, access, correction, revision, and retry-safety principles remain applicable.
 
@@ -39,8 +39,8 @@ In particular:
 | Area | Required for v1 | Boundary |
 |---|---|---|
 | Portable vault | Markdown/frontmatter, stable record IDs, wikilinks, external-edit detection, conflict preservation, rebuildable indexes | One vault and one OpenClaw publishing instance per agent; transport is user-managed |
-| Schemas | One default taxonomy with locally configurable types, relationship names, and filing conventions; definition validation | No pack marketplace, inheritance system, automatic discovery, or automated taxonomy migration |
-| Native Control UI | Knowledge sidebar page: Records, Schemas, and Activity & issues; basic page editing, evidence/history inspection, and live state refresh | No external knowledge app required; no graph visualization, rich-text editor, or visual schema builder in the foundation |
+| Ontology | One shipped default with named/versioned local inheritance and selective borrowing, typed fields, relationship endpoint constraints, aliases, filing conventions, effective fingerprint and inspection | No distribution marketplace, automatic discovery, or automated taxonomy migration |
+| Native Control UI | Knowledge sidebar page: Records, Ontology, and Activity & issues; basic page editing, evidence/history inspection, and live state refresh | No external knowledge app required; no graph visualization, rich-text editor, or visual schema builder in the foundation |
 | Records and evidence | Pages, entities, attributed claims, inspectable sources, corrections, withdrawals, and mutation history | No prediction-calibration or automatic outcome-grading subsystem |
 | Relationships | Explicit typed relationships, Markdown-derived backlinks, direct neighbor lookup | No multi-hop answer engine, graph-assisted ranking, or inferred relationships |
 | Uncertain extraction | Preserve unresolved identities; distinguish candidate material from accepted records in tools and native record views | No specialized review queue or elaborate promotion-policy engine |
@@ -78,12 +78,12 @@ Capturing a commitment does not schedule a reminder or execute a task. Requested
 | State | Authority |
 |---|---|
 | Pages, entity profiles, portable claims, relationships, citations | Markdown/frontmatter in the vault |
-| Type and filing definitions | Versioned, human-readable schema definitions |
+| Type and filing definitions | Versioned, human-readable ontology definitions |
 | Retained originals and derived source artifacts | Durable artifact files, with provenance and integrity metadata |
 | Search indexes, backlinks, and other derived views | Rebuildable SQLite projections |
 | Receipts, checkpoints, publication recovery, mutation history, withdrawal safeguards | SQLite operational state |
 
-Structured claims and relationships need a documented representation that can be reconstructed without an LLM. Stable identities must survive file renames. Start with one independently addressable page, claim, or relationship per Markdown file; entity profiles are typed pages, not duplicate records. Exact field syntax remains implementation design work. Keep the portable record envelope, configurable domain schemas, and operational database schema distinct.
+Structured claims and relationships need a documented representation that can be reconstructed without an LLM. Stable identities must survive file renames. Start with one independently addressable page, claim, or relationship per Markdown file; entity profiles are typed pages, not duplicate records. Exact field syntax remains implementation design work. Keep the portable record envelope, configurable domain ontology, and operational database schema distinct.
 
 ### Editable vault boundaries
 
@@ -121,7 +121,7 @@ Memory-wiki's compiled-page authority model, complete claim schema, search servi
 
 ### 5.2 Introspection is part of feature delivery
 
-Every capability includes an authorized view of its inputs, durable outputs, current state, and failures. Begin with Records, Schemas, and Activity & issues; extend these as ingestion, retrieval, correction, and recovery arrive. Show real service state, not optimistic completion inferred from agent prose. Distinguish acceptance/lifecycle from publication/index state.
+Every capability includes an authorized view of its inputs, durable outputs, current state, and failures. Begin with Records, Ontology, and Activity & issues; extend these as ingestion, retrieval, correction, and recovery arrive. Show real service state, not optimistic completion inferred from agent prose. Distinguish acceptance/lifecycle from publication/index state.
 
 The page must identify the active agent/vault and distinguish loading, empty, disconnected, invalid, and unavailable states. Reconnect refreshes authoritative snapshots; live notifications are not durable history. Hot reload is a development requirement to exercise, including cleanup and state recovery, not permission to discard in-flight work.
 
@@ -141,7 +141,7 @@ These are independently useful improvements, not a mandatory bundle.
 
 - Scheduled consolidation and dreaming through OpenClaw execution.
 - Cross-document synthesis, pattern discovery, and contradiction review.
-- Schema suggestions, migration tooling, and reusable packs.
+- Ontology suggestions, migration tooling, and reusable distribution artifacts.
 - Prediction models, outcome review, and calibration.
 - Open-loop workflows for outstanding commitments and responses.
 - Continuous ingestion and broader connector coverage.
@@ -162,7 +162,7 @@ Generated hypotheses must retain evidence and remain distinguishable from facts.
 V1 is complete when the following work end to end, with focused executable checks for the critical guarantees:
 
 1. **Capture:** Ingest a document and a meeting transcript into sourced pages, claims, and relationships; unresolved identities remain explicit.
-2. **Inspect:** Open Knowledge from the Control UI sidebar; browse records, structured fields, evidence, raw Markdown, schema definitions, and activity/issues. Also read the vault and navigate working links without OpenClaw using an ordinary editor or Obsidian.
+2. **Inspect:** Open Knowledge from the Control UI sidebar; browse records, structured fields, evidence, raw Markdown, ontology definitions, and activity/issues. Also read the vault and navigate working links without OpenClaw using an ordinary editor or Obsidian.
 3. **Retrieve:** Find records by exact identity, alias, and keywords; return inspectable citations; distinguish ranked results from complete listings.
 4. **Edit:** Create/edit a basic page in Control UI and through an agent operation using the same write contract. Reconcile external edits throughout authoritative documents, including user-authored metadata, and a rename while preserving identity; preserve and report a concurrent edit conflict without relying on designated human-note blocks.
 5. **Correct:** Supersede or withdraw a claim while preserving its history and evidence; exclude withdrawn claims from active retrieval, including after a stale-file import.
@@ -176,7 +176,7 @@ No broad public benchmark suite is required to satisfy these criteria. Use a sma
 
 ## 8. Remaining implementation decisions
 
-Settle the portable record format, schema-definition format, and supported SDK/storage boundary for the first read-only slice. Before writable use, settle the file-publication recovery protocol; complete the concrete backup procedure before v1 acceptance. Final tools, skill packaging, and APIs should serve the scoped workflows rather than mechanically preserve the earlier catalog.
+Settle the portable record format, ontology-definition format, and supported SDK/storage boundary for the first read-only slice. Before writable use, settle the file-publication recovery protocol; complete the concrete backup procedure before v1 acceptance. Final tools, skill packaging, and APIs should serve the scoped workflows rather than mechanically preserve the earlier catalog.
 
 These decisions must not silently expand the release. Prefer the smallest implementation that fulfills the product promise; add intelligence incrementally after the capture-to-recovery loop is reliable.
 
@@ -191,3 +191,11 @@ Build a working Knowledge explorer alongside the data foundation, not a complete
 | 3 — Live behavior and recovery | Event-driven refresh; reconnect snapshots; external-change reconciliation; recovery exercises; browser/backend reload lifecycle cleanup | Observe real changes, inspect a failure, reconnect/reload, and continue with consistent state and preserved unsaved work. No duplicate watchers or stale database handles. |
 
 Do not defer journaling until after writes exist. Keyword indexing can follow the minimal record catalog; graph visualization, rich-text editing, semantic retrieval, and background intelligence are not foundation blockers. See the specification's foundation implementation sequence for concrete contracts and acceptance gates.
+
+## Ontology foundation milestone — 2026-09-22
+
+Implemented local composition, the reviewed gbrain-based default, shared resolver/inspection/filtering, effective fingerprinting, and fail-closed typed validation in the read-only explorer. See [ONTOLOGY.md](ONTOLOGY.md) for the exact contract and taxonomy decisions. The visible sample uses the shipped default unchanged; invalid examples live in test fixtures.
+
+## Real-vault read foundation milestone — 2026-09-22
+
+Implemented one configured agent vault, trusted private/conversation read access, guarded filesystem reads, and a durable SQLite identity checkpoint. See [REAL_VAULT.md](REAL_VAULT.md) for the implemented contract and limitations. Writes remain disabled. Next is Slice 2: shared UI/agent create/edit with journaled publication, revision/hash conflicts, retry-safe receipts/history, and retained text evidence. Ingestion follows the writable foundation.

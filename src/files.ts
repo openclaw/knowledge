@@ -1,0 +1,24 @@
+import { root } from "openclaw/plugin-sdk/file-access-runtime";
+import { parseDocument } from "yaml";
+export const safeRoot = (rootPath: string) => root(rootPath, {
+  maxBytes: 64 * 1024, symlinks: "reject", hardlinks: "reject", nonBlockingRead: true,
+});
+export async function readText(rootPath: string, relative: string): Promise<string> {
+  const result = await (await safeRoot(rootPath)).read(relative);
+  return new TextDecoder("utf-8", { fatal: true }).decode(result.buffer);
+}
+export const parseYaml = (raw: string): unknown => {
+  const doc = parseDocument(raw, { uniqueKeys: true, schema: "core" });
+  if (doc.errors.length || doc.warnings.length) throw Error("Invalid YAML: " + [...doc.errors, ...doc.warnings].map(e => e.message).join("; "));
+  const value = doc.toJS({ maxAliasCount: 0 });
+  // Reject non-JSON values and deep metadata before exposing it through the host.
+  const walk = (x: unknown, depth = 0): void => {
+    if (depth > 20) throw Error("Metadata nesting exceeds 20 levels");
+    if (x === null || typeof x === "string" || typeof x === "boolean") return;
+    if (typeof x === "number" && Number.isFinite(x)) return;
+    if (Array.isArray(x)) { x.forEach(v => walk(v, depth + 1)); return; }
+    if (x && typeof x === "object" && Object.getPrototypeOf(x) === Object.prototype) { Object.values(x).forEach(v => walk(v, depth + 1)); return; }
+    throw Error("Metadata must contain finite JSON-compatible values");
+  };
+  walk(value); return value;
+};

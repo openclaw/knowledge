@@ -1,3 +1,3 @@
 # Synthetic sample vault
 
-All people, organizations, events, and claims are fictional. No private agent vault is connected. Deliberate errors exercise diagnostics. Never put private data here: authenticated UI and agent read operations expose this development fixture.
+All people, organizations, events, and claims are fictional. This vault uses the shipped `knowledge-default@1.0.0` ontology unchanged. Invalid examples live under test/fixtures, not here. No private agent vault is connected. Never put private data here.

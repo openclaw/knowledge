@@ -2,9 +2,9 @@
 
 Evidence-backed knowledge vault and native explorer for OpenClaw.
 
-**Current milestone:** a read-only explorer over a bundled, fictional Markdown vault. Records, Schemas, and Activity & issues are live. Inspect structured fields, original files, directed relationships, and hash-checked evidence. Invalid files remain intact and visible in diagnostics. No private agent vault is connected; writes are disabled.
+**Current milestone:** real-vault identity and authorized read access, with writes disabled. Configure one agent vault to browse private records through Control UI and trusted owner-direct agent turns; shared turns are restricted to their own conversation partition. With no vault configuration, the fictional sample remains available. Records, Ontology, and Activity & issues use the same typed service.
 
-See [the fixture format and design decisions](docs/FORMAT.md).
+See [real-vault setup, authority, and limitations](docs/REAL_VAULT.md), [the ontology contract](docs/ONTOLOGY.md), and [the fixture format](docs/FORMAT.md).
 
 ## Design
 
@@ -15,7 +15,7 @@ See [the fixture format and design decisions](docs/FORMAT.md).
 
 ## Develop
 
-Requires Node 24 and OpenClaw 2026.9.5. The SDK is experimental; the first live verification uses host source commit `8a26ae487b5fb9b72ea2c12bf384e9c776659429`.
+Requires Node 24 and OpenClaw 2026.9.5. The SDK is experimental; use the checkout belonging to the running gateway, not just a matching version label. An older checkout can refuse a newer host state database; do not downgrade or alter that database to build this plugin. See [verification](docs/VERIFICATION.md).
 
 ```sh
 npm install
@@ -41,7 +41,7 @@ Use the CLI belonging to the actual running gateway. Inspect existing configurat
 openclaw plugins install --link --force --accept-capabilities /path/to/knowledge
 ```
 
-These flags acknowledge the local source and the reviewed plugin's capabilities. The checkout stays linked, so rebuilds update the installation. Open **Knowledge** in the sidebar. The shared queries are available to agents as `knowledge_status`, `knowledge_records`, `knowledge_record`, `knowledge_schemas`, and `knowledge_diagnostics` after their tool catalog refreshes. These explicitly expose sample data only.
+These flags acknowledge the local source and the reviewed plugin's capabilities. The checkout stays linked, so rebuilds update the installation. Open **Knowledge** in the sidebar. The shared queries are available to agents as `knowledge_status`, `knowledge_records`, `knowledge_record`, `knowledge_ontology`, and `knowledge_diagnostics` after their tool catalog refreshes. These expose only the caller’s authorized scope, or labeled sample data when no real vault is configured.
 
 ## Live reload
 
@@ -68,8 +68,8 @@ openclaw gateway call plugins.sessionAction --params '{"pluginId":"knowledge","a
 openclaw gateway call plugins.controlUi.status --params '{"pluginId":"knowledge"}' --json
 ```
 
-Expand **Development status** on the page to see the UI revision, backend revision, backend instance, and last query time. **Refresh vault** rereads the sample files and refreshes the current view. Browser activation receipts alone do not prove that the status operation works—exercise the page too.
+The page identifies sample versus private-vault mode and remains read-only. Browser activation receipts alone do not prove that the status operation works—exercise the service too.
 
 ## Boundary
 
-Only the bundled synthetic fixture is exposed. There is no caller-controlled path or private-vault configuration. Real-vault activation must implement the scope/spec access contracts before exposing data. Page disposal cancels pending UI updates and releases subscriptions; reconnect requests fresh state. This slice does not exercise durable-write recovery, because writes do not yet exist.
+Real-vault reads enforce the [documented authority and identity contract](docs/REAL_VAULT.md). Writes, durable revisions/conflicts, publication recovery, and ingestion remain disabled/unimplemented. Page disposal cancels pending UI updates and releases subscriptions; reconnect requests fresh state. This foundation does not claim writable-vault recovery or a complete backup/restore protocol.

@@ -2,6 +2,7 @@ import { defineControlUiPlugin } from "openclaw/plugin-sdk/control-ui";
 import { createFeatureClient, type FeatureOutput } from "openclaw/plugin-sdk/feature-contract";
 import { contract } from "./contract.js";
 import "./control-ui.css";
+import { ontologyView } from "./ontology-view.js";
 
 type Summary = FeatureOutput<typeof contract, "records">["records"][number];
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string, className?: string) {
@@ -25,19 +26,17 @@ export default defineControlUiPlugin({
         const header = el("header"), eyebrow = el("p", "KNOWLEDGE / EXPLORER", "knowledge-eyebrow");
         header.append(eyebrow, el("h1", "A clearer view of what you know."), el("p", "Browse records, follow their evidence, and inspect the definitions behind them."));
         const banner = el("div", undefined, "knowledge-banner");
-        banner.append(el("strong", "Sample vault · Read only"), el("p", "Fictional people and projects for exploring the data model. No private agent vault is connected. Files are never changed."));
-        const status = el("div", "Loading sample vault…", "knowledge-status"); status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
+        banner.append(el("strong", "Read only"), el("p", "Checking the connected vault…"));
+        const status = el("div", "Loading vault…", "knowledge-status"); status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
         const nav = el("nav", undefined, "knowledge-tabs"); nav.setAttribute("aria-label", "Knowledge views");
         const toolbar = el("div", undefined, "knowledge-toolbar"), content = el("div", undefined, "knowledge-content");
-        const refreshButton = button("Refresh vault", () => void refresh());
-        const dev = el("details"); dev.append(el("summary", "Development status")); const devText = el("pre"); dev.append(devText);
-        section.append(header, banner, status, nav, toolbar, content, dev); container.append(section);
-        let tab: "records" | "schemas" | "diagnostics" = "records", offset = 0, query = "", kind = "", selectedId = "";
+        section.append(header, banner, status, nav, toolbar, content); container.append(section);
+        let tab: "records" | "ontology" | "diagnostics" = "records", offset = 0, query = "", kind = "", type = "", selectedId = "";
         let generation = 0, detailGeneration = 0, disposed = false, debounce: ReturnType<typeof setTimeout> | undefined;
         const alive = (n: number) => !disposed && !context.signal.aborted && n === generation && context.host.connection.connected;
         const showError = (error: unknown) => { content.replaceChildren(el("p", "Knowledge unavailable: " + context.host.redact(error instanceof Error ? error.message : String(error)), "knowledge-error")); };
         const tabs = new Map<string, HTMLButtonElement>();
-        for (const [key, label] of [["records", "Records"], ["schemas", "Schemas"], ["diagnostics", "Activity & issues"]] as const) {
+        for (const [key, label] of [["records", "Records"], ["ontology", "Ontology"], ["diagnostics", "Activity & issues"]] as const) {
           const control = button(label, () => { tab = key; selectedId = ""; clearTimeout(debounce); renderToolbar(); void load(); }); tabs.set(key, control); nav.append(control);
         }
         function renderToolbar() {
@@ -49,9 +48,11 @@ export default defineControlUiPlugin({
             const select = el("select"); select.setAttribute("aria-label", "Record kind");
             for (const [value,label] of [["", "All record kinds"], ["page", "Pages"], ["claim", "Claims"], ["relationship", "Relationships"]]) { const option = el("option", label); option.value = value; select.append(option); }
             select.value = kind; select.onchange = () => { kind = select.value; offset = 0; selectedId = ""; void load(); };
-            toolbar.append(search, select);
+            const typeFilter = el("input"); typeFilter.placeholder = "Type or ontology alias"; typeFilter.value = type; typeFilter.setAttribute("aria-label", "Filter by type or ontology alias");
+            typeFilter.oninput = () => { type = typeFilter.value.trim(); offset = 0; selectedId = ""; clearTimeout(debounce); debounce = setTimeout(() => void load(), 200); };
+            toolbar.append(search, select, typeFilter);
           }
-          toolbar.append(refreshButton);
+          toolbar.hidden = tab !== "records";
         }
         async function showDetail(id: string, target: HTMLElement, n: number) {
           const detail = ++detailGeneration; selectedId = id; target.replaceChildren(el("p", "Loading record…"));
@@ -68,7 +69,7 @@ export default defineControlUiPlugin({
               target.append(el("h3", "Evidence"));
               for (const e of result.evidence) {
                 const evidence = el("article", undefined, "knowledge-evidence");
-                evidence.append(el("strong", e.verified ? "Verified sample source" : "Source could not be verified"), el("p", `${e.path} · Lines ${e.start_line}–${e.end_line}`), el("blockquote", e.excerpt || "No verified excerpt available."), rawBlock("Content hash", e.sha256)); target.append(evidence);
+                evidence.append(el("strong", e.verified ? "Verified source" : "Source could not be verified"), el("p", `${e.path} · Lines ${e.start_line}–${e.end_line}`), el("blockquote", e.excerpt || "No verified excerpt available."), rawBlock("Content hash", e.sha256)); target.append(evidence);
               }
             }
             if (result.references.length) {
@@ -89,11 +90,10 @@ export default defineControlUiPlugin({
         async function load() {
           const n = ++generation; ++detailGeneration;
           content.replaceChildren(el("p", context.host.connection.connected ? "Loading…" : "Disconnected — reconnect to read the vault."));
-          refreshButton.disabled = !context.host.connection.connected;
           if (!context.host.connection.connected) return;
           try {
             if (tab === "records") {
-              const result = await feature.invoke("records", { offset, limit: 50, ...(query ? { query } : {}), ...(kind ? { kind: kind as "page" | "claim" | "relationship" } : {}) });
+              const result = await feature.invoke("records", { offset, limit: 50, ...(query ? { query } : {}), ...(type ? { type } : {}), ...(kind ? { kind: kind as "page" | "claim" | "relationship" } : {}) });
               if (!alive(n)) return;
               content.replaceChildren(el("p", result.total ? `${result.total} records${result.nextOffset !== null || offset ? ` · Showing ${offset + 1}–${offset + result.records.length}` : ""}` : "No matching records.", "knowledge-muted"));
               const split = el("div", undefined, "knowledge-split"), list = el("div", undefined, "knowledge-records"), detail = el("article", undefined, "knowledge-detail");
@@ -105,19 +105,15 @@ export default defineControlUiPlugin({
               if (result.nextOffset !== null) pages.append(button("Next", () => { offset = result.nextOffset!; void load(); }));
               content.append(pages);
               if (selectedId) void showDetail(selectedId, detail, n);
-            } else if (tab === "schemas") {
-              const result = await feature.invoke("schemas", {}); if (!alive(n)) return;
-              content.replaceChildren(el("h2", "The shape of this vault"), el("p", "Versioned definitions describe types, fields, relationship endpoints, and primary filing locations. Invalid definitions remain intact and are not activated."));
-              const grid = el("div", undefined, "knowledge-schema-grid");
-              for (const schema of result.schemas) {
-                const card = el("article"); card.append(el("h3", schema.label), el("p", `${schema.valid ? "Effective" : "Invalid · not active"}${schema.version ? ` · ${schema.version}` : ""}`, schema.valid ? "knowledge-muted" : "knowledge-error"), el("code", schema.path), el("p", `${schema.affectedRecords} associated records${schema.directory ? ` · ${schema.directory}` : ""}`));
-                if (schema.issues.length) card.append(issueList(schema.issues));
-                card.append(rawBlock("Definition (YAML)", schema.raw)); grid.append(card);
-              }
-              content.append(grid);
+            } else if (tab === "ontology") {
+              const result = await feature.invoke("ontology", {}); if (!alive(n)) return;
+              content.replaceChildren(ontologyView(result, id => {
+                tab = "records"; selectedId = id; offset = 0; query = ""; kind = ""; type = ""; renderToolbar(); void load();
+              }, () => { tab = "diagnostics"; renderToolbar(); void load(); }));
+
             } else {
               const result = await feature.invoke("diagnostics", {}); if (!alive(n)) return;
-              content.replaceChildren(el("h2", "Activity & issues"), el("p", "Current validation findings, not a mutation history. The sample intentionally includes malformed YAML, an invalid schema, duplicate IDs, and an unresolved reference. No repairs or writes have occurred."), el("p", `${result.total} findings · Checked ${new Date(result.checkedAt).toLocaleTimeString()}${result.truncated ? " · First 1,000 shown" : ""}`));
+              content.replaceChildren(el("h2", "Activity & issues"), el("p", "Current validation findings for this scope, not a mutation history. No repairs or writes have occurred."), el("p", `${result.total} findings · Checked ${new Date(result.checkedAt).toLocaleTimeString()}${result.truncated ? " · First 1,000 shown" : ""}`));
               content.append(result.issues.length ? issueList(result.issues) : el("p", "No validation issues found."));
             }
           } catch (error) { if (alive(n)) showError(error); }
@@ -126,13 +122,13 @@ export default defineControlUiPlugin({
         async function refresh() {
           const n = ++statusGeneration;
           void load();
-          if (!context.host.connection.connected) { status.textContent = "Disconnected — waiting for OpenClaw."; devText.textContent = ""; return; }
-          status.textContent = "Checking sample vault…";
+          if (!context.host.connection.connected) { status.textContent = "Disconnected — waiting for OpenClaw."; return; }
+          status.textContent = "Checking vault…";
           try {
             const report = await feature.invoke("status", {});
             if (disposed || context.signal.aborted || n !== statusGeneration || !context.host.connection.connected) return;
-            status.textContent = `${report.records} records · ${report.validRecords} valid · ${report.schemas} active schemas · ${report.issues} findings · Writes disabled`;
-            devText.textContent = `UI revision: explorer-1\nBackend revision: ${report.backendRevision}\nBackend instance: ${report.instanceId}\nAgent: ${report.agent}\nVault: ${report.vault}\nChecked: ${report.checkedAt}`;
+            banner.replaceChildren(el("strong", report.sample ? "Sample vault · Read only" : `${report.agent} · Private vault · Read only`), el("p", report.sample ? "Fictional people and projects for exploring the data model. No private agent vault is connected." : "Your agent’s knowledge. Record writes are not enabled yet."));
+            status.textContent = `${report.records} ${report.sample ? "sample " : ""}records${report.issues ? ` · ${report.issues} issues to review` : ""}`;
           } catch (error) { if (!disposed && n === statusGeneration) status.textContent = "Knowledge unavailable: " + context.host.redact(error instanceof Error ? error.message : String(error)); }
         }
         let connected = context.host.connection.connected;

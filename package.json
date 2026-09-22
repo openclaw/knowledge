@@ -15,7 +15,11 @@
     "openclaw.plugin.json",
     "README.md",
     "fixtures/sample-vault",
-    "docs/FORMAT.md"
+    "docs/FORMAT.md",
+    "ontologies",
+    "THIRD_PARTY_NOTICES.md",
+    "docs/ONTOLOGY.md",
+    "docs/REAL_VAULT.md"
   ],
   "peerDependencies": {
     "openclaw": ">=2026.9.5"

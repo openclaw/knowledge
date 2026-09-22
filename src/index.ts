@@ -1,34 +1,20 @@
-import { randomUUID } from "node:crypto";
+import { Type } from "typebox";
 import { defineFeaturePlugin } from "openclaw/plugin-sdk/feature-plugin";
+import { definePluginEntry, buildJsonPluginConfigSchema } from "openclaw/plugin-sdk/plugin-entry";
+import { getToolPluginMetadata, toolPluginMetadataSymbol } from "openclaw/plugin-sdk/tool-plugin";
 import { contract } from "./contract.js";
-import { SampleVault } from "./vault.js";
+import { createKnowledgeService } from "./service.js";
+import { VaultConfig } from "./real-vault.js";
 
-export default defineFeaturePlugin({
+const feature = defineFeaturePlugin({
   contract, name: "Knowledge", description: "Evidence-backed knowledge, inspectable in OpenClaw.",
-  setup() {
-    const instanceId = randomUUID(), startedAt = new Date().toISOString(), vault = new SampleVault();
-    return {
-      status: async () => {
-        const data = await vault.scan();
-        return {
-          service: "knowledge", phase: "read-only-explorer", backendRevision: "explorer-1", instanceId, startedAt,
-          checkedAt: data.checkedAt, vault: "bundled-sample", agent: "none — synthetic sample", writesEnabled: false,
-          records: data.records.length, validRecords: data.records.filter(r => r.valid).length,
-          schemas: data.schemas.filter(s => s.valid).length, issues: data.issues.length,
-        } as const;
-      },
-      records: input => vault.list(input),
-      record: input => vault.detail(input.id),
-      schemas: async () => {
-        const data = await vault.scan();
-        return { schemas: data.schemas.map(s => ({
-          path: s.path, raw: s.raw, valid: s.valid, name: s.definition?.name ?? "", version: s.definition?.version ?? "",
-          label: s.definition?.label ?? "Invalid definition", kind: s.definition?.kind ?? "", directory: s.definition?.directory ?? "",
-          affectedRecords: data.records.filter(r => r.type === (s.definition?.name ?? s.path.split("/").pop()!.replace(/\.ya?ml$/, ""))).length,
-          issues: data.issues.filter(i => i.path === s.path).slice(0, 1000),
-        })) };
-      },
-      diagnostics: async () => { const data = await vault.scan(); return { issues: data.issues.slice(0, 1000), total: data.issues.length, truncated: data.issues.length > 1000, checkedAt: data.checkedAt }; },
-    };
-  },
+  setup: createKnowledgeService,
 });
+// This host's feature helper has no config option. Compose its shared adapters
+// with the public entry/config and build-metadata SDK, without duplicating them.
+const configSchema = Type.Object({ vault: Type.Optional(VaultConfig) }, { additionalProperties: false });
+const entry = definePluginEntry({ ...feature, configSchema: buildJsonPluginConfigSchema({ ...configSchema }) });
+Object.defineProperty(entry, toolPluginMetadataSymbol, {
+  value: { ...getToolPluginMetadata(feature), configSchema }, enumerable: false,
+});
+export default entry;

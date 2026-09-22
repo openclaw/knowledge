@@ -5,24 +5,64 @@
   "version": "0.1.0",
   "configSchema": {
     "type": "object",
-    "additionalProperties": false,
-    "properties": {}
+    "properties": {
+      "vault": {
+        "type": "object",
+        "required": [
+          "root",
+          "statePath",
+          "agentId",
+          "vaultId",
+          "publicationId",
+          "operatorRead"
+        ],
+        "properties": {
+          "root": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "statePath": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "agentId": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+          },
+          "vaultId": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$"
+          },
+          "publicationId": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$"
+          },
+          "operatorRead": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "additionalProperties": false
   },
   "activation": {
     "onStartup": true
   },
   "controlUi": {
-    "entry": "dist/control-ui/cd109f61745ec97d0f8315198439d854cb2a25ee623ffca1ac7d80efce672e63/index.js",
+    "entry": "dist/control-ui/843d3f3a16d91a299b5710c5a48c7d2508d5631f3bd3ebfa18da9e2d2d279e2a/index.js",
     "styles": [
-      "dist/control-ui/cd109f61745ec97d0f8315198439d854cb2a25ee623ffca1ac7d80efce672e63/index.css"
+      "dist/control-ui/843d3f3a16d91a299b5710c5a48c7d2508d5631f3bd3ebfa18da9e2d2d279e2a/index.css"
     ]
   },
   "contracts": {
     "tools": [
       "knowledge_diagnostics",
+      "knowledge_ontology",
       "knowledge_record",
       "knowledge_records",
-      "knowledge_schemas",
       "knowledge_status"
     ]
   }

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cp, mkdtemp, readdir, readFile, writeFile, rename, symlink, rm } from 'node:fs/promises';
+import { cp, mkdtemp, mkdir, readdir, readFile, writeFile, rename, symlink, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { SampleVault, SAMPLE_ROOT, digest } from '../dist/vault.js';
@@ -9,6 +9,7 @@ import { Check } from 'typebox/value';
 async function fixture(t) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'knowledge-test-'));
   await cp(SAMPLE_ROOT, root, { recursive: true });
+  await mkdir(path.join(root, "notes"), { recursive: true });
   t.after(() => rm(root, { recursive: true, force: true }));
   return { root, vault: new SampleVault(root) };
 }
@@ -17,12 +18,13 @@ async function hashes(root) {
   for (const entry of await readdir(root, { recursive: true, withFileTypes: true })) if (entry.isFile()) { const p = path.join(entry.parentPath, entry.name); found[path.relative(root, p)] = digest(await readFile(p, 'utf8')); }
   return found;
 }
-test('representative vault: records, schemas, diagnostics, citations, and zero writes', async () => {
+test('representative vault: records, ontology, diagnostics, citations, and zero writes', async () => {
   const before = await hashes(SAMPLE_ROOT), vault = new SampleVault(), data = await vault.scan();
-  assert.equal(data.records.length, 11);
+  assert.equal(data.records.length, 7);
   assert.equal(data.records.filter(r => r.valid).length, 7);
-  assert.equal(data.schemas.filter(s => s.valid).length, 8);
-  assert.deepEqual(new Set(data.issues.map(i => i.code)), new Set(['invalid-schema','invalid-record','schema-unavailable','broken-reference','duplicate-id']));
+  assert.equal(data.ontology.definitions.length, 38);
+  assert.equal(Check(contract.operations.ontology.output, await vault.inspectOntology()), true);
+  assert.deepEqual(data.issues, []);
   const result = await vault.detail('sample_claim_pilot');
   assert.equal(result.evidence[0].verified, true);
   assert.match(result.evidence[0].excerpt, /small pilot garden/);
@@ -33,7 +35,7 @@ test('representative vault: records, schemas, diagnostics, citations, and zero w
 test('bounded listing supports exhaustive pagination, aliases and kind filters', async () => {
   const vault = new SampleVault(); let offset = 0, rows = [];
   do { const result = await vault.list({offset, limit: 3}); assert.ok(Check(contract.operations.records.output, result)); rows.push(...result.records); offset = result.nextOffset; } while (offset !== null);
-  assert.equal(rows.length, 11); assert.equal(new Set(rows.map(r => r.path)).size, 11);
+  assert.equal(rows.length, 7); assert.equal(new Set(rows.map(r => r.path)).size, 7);
   assert.ok((await vault.list({query:'Garden pilot'})).records.some(r => r.id === 'sample_project_garden'));
   assert.equal((await vault.list({kind:'claim'})).total, 1);
   assert.equal((await vault.list({query:'not here'})).total, 0);
@@ -47,25 +49,17 @@ test('rename preserves identity and metadata; duplicate IDs never pick a winner'
   const after = await vault.detail('sample_person_alex');
   assert.equal(after.record.hash, before.record.hash); assert.equal(after.record.path, 'people/renamed.md');
   assert.equal(JSON.parse(after.record.metadata).custom_note, 'Unknown user metadata is preserved.');
+  await cp(new URL('./fixtures/invalid-vault/', import.meta.url), root, { recursive: true });
   assert.equal((await vault.detail('sample_duplicate_id')).record, null);
   assert.equal((await vault.detail('missing-id')).record, null);
 });
-test('invalid edits deactivate schema and preserve source bytes', async t => {
+test('invalid record fixtures stay separate from the visible sample and remain byte-preserved', async t => {
   const {root, vault} = await fixture(t);
-  const file = path.join(root,'schemas/project.yaml');
-  await writeFile(file, 'format: [invalid\n'); const before = await hashes(root);
-  const data = await vault.scan();
-  assert.equal(data.schemas.find(s => s.path === 'schemas/project.yaml').valid, false);
-  assert.ok(data.issues.some(i => i.path === 'projects/community-garden.md' && i.code === 'schema-unavailable'));
-  assert.equal(data.schemas.find(s => s.path === 'schemas/leads.yaml').valid, false);
-  assert.deepEqual(await hashes(root), before);
-});
-test('ambiguous schema definitions are all rejected', async t => {
-  const {root,vault} = await fixture(t);
-  await cp(path.join(root,'schemas/person.yaml'), path.join(root,'schemas/person-copy.yaml'));
-  const data = await vault.scan();
-  assert.equal(data.schemas.filter(s => s.definition?.name === 'person' && s.valid).length, 0);
-  assert.ok(data.issues.some(i => i.code === 'duplicate-schema'));
+  await cp(new URL('./fixtures/invalid-vault/', import.meta.url), root, {recursive:true});
+  const before = await hashes(root), data = await vault.scan();
+  assert.deepEqual(new Set(data.issues.map(i=>i.code)), new Set(['invalid-record','ontology-unavailable','broken-reference','duplicate-id']));
+  assert.equal(data.records.length,11);
+  assert.deepEqual(await hashes(root),before);
 });
 test('changed source invalidates evidence without serving unverified content', async t => {
   const {root,vault} = await fixture(t);

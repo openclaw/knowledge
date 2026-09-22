@@ -43,7 +43,7 @@ This document consolidates the revised proposal, including the deeper skills rev
 - Source mounts, brain selection, repository federation, or a model-facing source-routing API.
 - An internal LLM, extraction service, synthesis agent, job scheduler, or agent-management runtime.
 - A separate MCP server, OAuth service, or remote-client platform.
-- Arbitrary graph queries, generated SQL, schema-pack distribution/inheritance/automatic migration, or specialized code intelligence. Basic local schema configuration is included.
+- Arbitrary graph queries, generated SQL, ontology distribution/automatic migration, or specialized code intelligence. Named/versioned local ontology composition is included.
 - Embeddings, reranking, query expansion, multi-hop/graph-assisted retrieval, proactive recall, and scheduled dreaming in v1; these are follow-up candidates.
 - Automatic Git/cloud synchronization, multi-machine writers, or a sophisticated automatic merge service.
 - Built-in email/recorder/account connectors, paid enrichment dependencies, or mandatory cloud storage.
@@ -135,10 +135,10 @@ Start with one independently addressable page, claim, or explicit relationship p
 Keep three contracts distinct:
 
 - **Portable envelope:** stable ID, structural record kind, format version, revision, title/aliases and timestamps where applicable, access scope, applicable acceptance/lifecycle states, attribution, evidence/dependencies, authored Markdown body, and preserved extra metadata. Structural kinds such as page/claim/relationship are distinct from domain types such as person/project/meeting and from claim-kind vocabulary.
-- **Domain schemas:** versioned human-readable definitions of types, typed fields, required fields/constraints, relationship labels and permitted endpoint types, and filing conventions. Optional display hints are limited to labels and field order; no executable schema code. Ship one locally configurable default taxonomy. Pack distribution, inheritance, automatic discovery, visual schema authoring, and migration automation are deferred.
+- **Domain ontology:** versioned human-readable definitions of types, typed fields, required fields/constraints, relationship labels and permitted endpoint types, and filing conventions. Optional display hints are limited to labels and field order; no executable schema code. Ship one locally configurable default taxonomy. Local inheritance and selective borrowing are included; distribution, automatic discovery, visual ontology authoring, and migration automation are deferred. See [ONTOLOGY.md](ONTOLOGY.md) for the implemented foundation contract.
 - **Operational schema:** vault identity/format, path/ID/hash catalog, publication journal, receipts/history, revisions/conflicts, and rebuildable projections. Operational progress is not portable record acceptance or lifecycle state.
 
-Validate definitions before activating them. The schema inspector shows the effective version and definition, plus invalid edits and affected records. Malformed or unsupported definitions remain intact; do not silently adopt them or reinterpret existing records. A previously validated definition may remain explicitly labeled as last-known-good; without one, affected typed operations are unavailable. Schema-dependent writes must check the effective version and reject incompatible or unresolved definitions. Exact activation/migration mechanics remain an implementation decision; no automatic taxonomy migration is implied.
+Validate definitions before activating them. The Ontology inspector shows the effective version, resolved fingerprint, definition provenance, plus invalid edits and affected records. Malformed or unsupported definitions remain intact; do not silently adopt them or reinterpret existing records. A previously validated definition may remain explicitly labeled as last-known-good; without one, affected typed operations are unavailable. Ontology-dependent writes must check the effective resolved fingerprint and reject incompatible or unresolved definitions. Exact activation/migration mechanics remain an implementation decision; no automatic taxonomy migration is implied.
 
 ### 4.5 Links and relationships
 
