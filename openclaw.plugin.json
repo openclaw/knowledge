@@ -12,13 +12,17 @@
     "onStartup": true
   },
   "controlUi": {
-    "entry": "dist/control-ui/5b70521089152450a119984627334db5860745d20f004d74ad86eb9af898ab87/index.js",
+    "entry": "dist/control-ui/cd109f61745ec97d0f8315198439d854cb2a25ee623ffca1ac7d80efce672e63/index.js",
     "styles": [
-      "dist/control-ui/5b70521089152450a119984627334db5860745d20f004d74ad86eb9af898ab87/index.css"
+      "dist/control-ui/cd109f61745ec97d0f8315198439d854cb2a25ee623ffca1ac7d80efce672e63/index.css"
     ]
   },
   "contracts": {
     "tools": [
+      "knowledge_diagnostics",
+      "knowledge_record",
+      "knowledge_records",
+      "knowledge_schemas",
       "knowledge_status"
     ]
   }
