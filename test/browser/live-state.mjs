@@ -65,18 +65,18 @@ try {
   await page.locator('.knowledge-feed-item').first().waitFor();
   assert.equal(await page.getByRole('button',{name:/New page|New claim|New relationship|Edit page|Resume save|Retry Git/}).count(),0);
   assert.equal(await page.getByRole('button',{name:'Recent',exact:true}).getAttribute('aria-pressed'),'true');
-  await page.screenshot({path:base+'/recent-desktop.png'});
+  await page.screenshot({animations:"disabled",path:base+'/recent-desktop.png'});
   await page.getByRole('button',{name:'Browse',exact:true}).click();
   await page.locator('.knowledge-table').waitFor();
   assert.ok((await page.locator('.knowledge-pagination').innerText()).includes('complete inventory'));
-  await page.screenshot({path:base+'/browse-desktop.png'});
+  await page.screenshot({animations:"disabled",path:base+'/browse-desktop.png'});
   await page.getByRole('button',{name:'Northwind launch',exact:true}).click();
   await page.locator('.knowledge-claim[data-kind=commitment]').waitFor();
   assert.equal(await page.locator('.knowledge-claim').count(),3);
   await page.getByText('Agent inferred',{exact:true}).waitFor();
-  await page.locator('.knowledge-claim[data-kind=belief]').getByText('Evidence · 1 source files',{exact:true}).click();
+  await page.locator('.knowledge-claim[data-kind=belief]').locator('summary').filter({hasText:'Evidence · 1 source files'}).click();
   await page.getByText('This is the agent’s inference, not a quoted source statement. Supporting material, if any, is shown below.',{exact:true}).waitFor();
-  await page.locator('.knowledge-claim[data-kind=commitment]').getByText('Evidence · 1 source files',{exact:true}).click();
+  await page.locator('.knowledge-claim[data-kind=commitment]').locator('summary').filter({hasText:'Evidence · 1 source files'}).click();
   await page.evaluate(()=>{window.showSaveFilePicker=undefined});
   const downloaded=page.waitForEvent('download');
   await page.locator('.knowledge-claim[data-kind=commitment]').getByRole('button',{name:'Download original'}).click();
@@ -84,7 +84,8 @@ try {
   assert.equal((await fs.readFile(await download.path(),'utf8')),'Alex will deliver on Friday.\nLaunch happened yesterday.');
   await page.locator('.knowledge-claim details[open] > summary').evaluateAll(nodes=>nodes.forEach(node=>node.click()));
   await page.evaluate(()=>window.scrollTo(0,0));
-  await page.screenshot({path:base+'/entity-desktop.png',fullPage:true});
+  await page.screenshot({animations:"disabled",path:base+'/entity-desktop.png',fullPage:true});
+  await page.locator('.knowledge-claim[data-kind=commitment]').locator('summary').filter({hasText:'Evidence · 1 source files'}).click();
   await page.locator('.knowledge-claim[data-kind=commitment]').getByRole('button',{name:'Correct in chat'}).click();
   const prompt=await page.getByLabel('Chat request').inputValue();
   assert.match(prompt,/Observed revision: 1/);assert.match(prompt,/Observed SHA-256: [a-f0-9]{64}/);
@@ -96,8 +97,9 @@ try {
   await page.getByRole('button',{name:'Dismiss',exact:true}).click();
   await page.setViewportSize({width:390,height:844});
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
-  await page.screenshot({path:base+'/entity-mobile.png'});
+  await page.screenshot({animations:"disabled",path:base+'/entity-mobile.png'});
   await page.getByRole('button',{name:'← Knowledge',exact:true}).click();
+  await page.locator('.knowledge-table').waitFor();
   await page.getByLabel('Search knowledge').fill('Alex');
   await page.clock.runFor(250);
   await page.locator('.knowledge-suggestions').getByRole('button',{name:'Alex Rivera'}).waitFor();
@@ -142,16 +144,42 @@ try {
     dark+=await fs.readFile(designRoot+'/tokens/colors.css','utf8')+await fs.readFile(designRoot+'/tokens/typography.css','utf8')+await fs.readFile(designRoot+'/tokens/spacing.css','utf8');
     for(const [family,file] of [['Instrument Sans','instrument-sans-latin.woff2'],['JetBrains Mono','jetbrains-mono-latin.woff2']]) dark+=`@font-face{font-family:'${family}';src:url(data:font/woff2;base64,${(await fs.readFile(designRoot+'/assets/fonts/'+file)).toString('base64')}) format('woff2');font-weight:100 900;font-style:normal;font-display:block}`;
   }
-  await page.addStyleTag({content:dark}); await page.evaluate(()=>document.fonts.ready); await page.setViewportSize({width:1280,height:1000}); await page.evaluate(()=>window.scrollTo(0,0));
+  const hostRoot=process.env.KNOWLEDGE_HOST_UI_ROOT;
+  if(hostRoot) {
+    const hostHtml=await fs.readFile(hostRoot+'/index.html','utf8');
+    const asset=hostHtml.match(/rel="stylesheet"[^>]*href="\.\/([^"]+)"/)[1];
+    const hostCss=await fs.readFile(hostRoot+'/'+asset,'utf8');
+    await page.addStyleTag({content:hostCss+'\n'+await fs.readFile('src/control-ui.css','utf8')});
+    await page.evaluate(()=>{document.documentElement.dataset.theme='dark';document.documentElement.dataset.themeMode='dark';});
+  }
+  await page.addStyleTag({content:dark+'main{padding:16px 20px 32px}@media(max-width:650px){main{padding:0}}'});
+  await page.evaluate(()=>document.fonts.ready); await page.setViewportSize({width:1182,height:900}); await page.evaluate(()=>window.scrollTo(0,0)); await page.clock.runFor(200);
+  const geometry=await page.evaluate(()=>{ const bounds=s=>{const r=document.querySelector(s).getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height}};return {header:bounds('.knowledge-header'),tabs:bounds('.knowledge-tabs'),title:bounds('.knowledge-header h1'),body:bounds('.knowledge-page-body'),entityIcon:bounds('.knowledge-entity-header > .knowledge-tile'),aside:bounds('.knowledge-entity-aside'),claim:bounds('.knowledge-claim-row')}; });
+  assert.equal(geometry.body.width,1120,'Reference content width');
+  assert.equal(geometry.aside.width,300,'Reference entity sidebar width');
+  assert.equal(geometry.entityIcon.width,48,'Reference entity tile size');
+  assert.ok(geometry.claim.height<90,'Claims use compact disclosure rows');
+  assert.ok(geometry.tabs.y < geometry.header.y+geometry.header.height,'Tabs share the desktop header');
+  await fs.writeFile(base+'/visual-metrics.json',JSON.stringify(geometry,null,2));
   await page.getByRole('button',{name:'Alex will deliver on Monday.',exact:true}).waitFor();
   assert.equal(await page.locator('.knowledge-page').count(),1);
-  await page.screenshot({path:base+'/entity-dark-desktop.png',fullPage:true});
-  await page.setViewportSize({width:390,height:844}); await page.waitForTimeout(150); await page.screenshot({path:base+'/entity-dark-mobile.png'});
+  await page.screenshot({animations:"disabled",path:base+'/entity-dark-desktop.png',fullPage:true});
+  await page.setViewportSize({width:390,height:844}); assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false); await page.clock.runFor(200); await page.screenshot({animations:"disabled",path:base+'/entity-dark-mobile.png'});
+  await page.setViewportSize({width:1182,height:900});
+  await page.getByRole('button',{name:'Browse',exact:true}).click(); await page.locator('.knowledge-table').waitFor();
+  assert.equal(await page.locator('.knowledge-table .knowledge-tile svg').count(),3);
+  await page.getByLabel('Search knowledge').fill('');
+  await page.clock.runFor(200); await page.screenshot({animations:"disabled",path:base+'/browse-dark-desktop.png'});
+  for(const width of [760,390]) { await page.setViewportSize({width,height:900}); assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,`Browse does not overflow at ${width}px`); await page.screenshot({animations:"disabled",path:base+`/browse-dark-${width}.png`}); }
+  await page.setViewportSize({width:1182,height:900});
+  await page.keyboard.press('/'); assert.equal(await page.getByLabel('Search knowledge').evaluate(n=>document.activeElement===n),true);
+  await page.getByLabel('Search knowledge').fill('');
   await page.getByRole('button',{name:'Recent',exact:true}).click();
   await page.locator('.knowledge-historical-notice').filter({hasText:'Current status: withdrawn'}).first().waitFor();
   assert.equal(await page.locator('.knowledge-feed').getByText('Readiness inference',{exact:true}).count(),0);
   assert.equal(await page.locator('.knowledge-feed').getByText('Release commitment',{exact:true}).count(),0);
-  await page.setViewportSize({width:1280,height:1000}); await page.screenshot({path:base+'/recent-dark-desktop.png',fullPage:true});
+  await page.setViewportSize({width:1182,height:900}); await page.clock.runFor(200); await page.screenshot({animations:"disabled",path:base+'/recent-dark-desktop.png',fullPage:true});
+  const searchGap=await page.evaluate(()=>document.querySelector('.knowledge-feed').getBoundingClientRect().top-document.querySelector('.knowledge-search input').getBoundingClientRect().bottom); assert.equal(searchGap,28,'Host form margins must not change reference section spacing');
   await page.locator('.knowledge-historical-notice').filter({hasText:'Current status: withdrawn'}).first().getByRole('button',{name:'Inspect historical record'}).click();
   await page.getByText('The readiness inference was withdrawn in chat.',{exact:true}).waitFor();
   await page.getByText(/withdrawn — historical knowledge/).waitFor();
@@ -161,7 +189,7 @@ try {
   await page.locator('.knowledge-feed').waitFor();
   assert.deepEqual(await page.evaluate(()=>window.subscriptions()),{events:1,connections:1});
   assert.deepEqual(errors,[]);
-  console.log(JSON.stringify({passed:['read-only browser contract','agent correction live refresh and historical linkage','withdrawal removes active claims and redacts historical feed titles','search offset cap','design-token dark screenshots','recent default and observed history','ontology-derived browse','native commitment/event/inference cards','attribution and retained inference premise evidence','byte-exact evidence download','revision/hash chat request and no autosend','handoff preserved across periodic refresh','exact name suggestions','ranked search','disconnect and reconnect','subscription cleanup','mobile overflow','no page errors'],artifacts:base},null,2));
+  console.log(JSON.stringify({passed:['reference layout measurements and type icons','search keyboard shortcut','read-only browser contract','agent correction live refresh and historical linkage','withdrawal removes active claims and redacts historical feed titles','search offset cap','design-token dark screenshots','recent default and observed history','ontology-derived browse','native commitment/event/inference cards','attribution and retained inference premise evidence','byte-exact evidence download','revision/hash chat request and no autosend','handoff preserved across periodic refresh','exact name suggestions','ranked search','disconnect and reconnect','subscription cleanup','mobile overflow','no page errors'],artifacts:base},null,2));
 } catch (error) {
   console.error(JSON.stringify({errors,page:await page?.locator('main').innerText()},null,2));throw error;
 } finally {services.forEach(s=>s.stop());await browser.close();}

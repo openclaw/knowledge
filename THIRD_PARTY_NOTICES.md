@@ -30,3 +30,11 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## OpenClaw Control UI glyphs
+
+The static SVG glyph subset in `src/ui-icons.ts` is copied from the supplied
+OpenClaw design kit (`assets/icons/icons.json`), derived from OpenClaw
+`ui/src/components/icons.ts` and `icons-tools.ts`.
+
+Copyright (c) 2026 OpenClaw Foundation. Used under the MIT License reproduced above.

@@ -82,3 +82,31 @@ extracted design archive directory when running the browser suite. It loads that
 archive's exact color/typography/spacing tokens and embeds its local Instrument
 Sans and JetBrains Mono font assets. No network font requests are made. Without
 that directory, the test uses dark host-token values and the system font fallback.
+
+## Visual-fidelity refinement
+
+The follow-up pass uses the supplied `KnowledgeV2Screen.jsx` design directly:
+
+- One three-column header, centered text tabs with the actual page inventory
+  count, a live-status dot, and a compact vocabulary icon action. Vault status
+  remains available inside Vocabulary.
+- A 1,120px content frame, 210px Browse type rail, 300px entity sidebar, and the
+  reference title/body/eyebrow sizes, surface radii, hairlines, and spacing.
+- A small static subset of the supplied SVG glyphs, not a runtime icon library.
+  Type-colored tiles appear in the feed, facets, table, entity header, and linked
+  entities; claims have kind and provenance icons. Vocabulary uses the same
+  glyph system instead of Unicode symbols.
+- Compact grouped claim rows. Their chevrons reveal retained evidence,
+  attribution, and correction actions; the statement still opens its record.
+- Search in the Browse table toolbar, exact-match suggestions, and `/` to focus
+  search. Enter explicitly runs ranked search; typing does not pretend to filter
+  the complete paginated inventory.
+- Unavailable backend information is still omitted, not populated from the mock.
+  Explanatory implementation limitations are under “About this list/activity.”
+
+For production-style visual verification, set `KNOWLEDGE_HOST_UI_ROOT` to the
+running host's `dist/control-ui` directory as well as `KNOWLEDGE_DESIGN_ROOT`.
+The browser suite loads the host's built stylesheet before the plugin stylesheet,
+uses the prototype's equivalent 1,182px content viewport (1,440px minus its
+258px sidebar), checks key layout measurements and icons, and captures desktop,
+760px, and 390px views. Assertions continue to prohibit browser knowledge writes.

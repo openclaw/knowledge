@@ -1,22 +1,23 @@
+import { icon as glyph, type IconName } from "./ui-icons.js";
 import type { FeatureOutput } from "openclaw/plugin-sdk/feature-contract";
 import type { contract } from "./contract.js";
 
 type Ontology = FeatureOutput<typeof contract, "ontology"> & { definitions: NonNullable<FeatureOutput<typeof contract, "ontology">["definitions"]> };
 type Definition = Ontology["definitions"][number];
 const categories = [
-  { id: "entity", label: "People & things", subtitle: "The people and organizations that make up your world.", icon: "◎" },
-  { id: "concept", label: "Ideas & projects", subtitle: "What you’re thinking about, learning, and working toward.", icon: "◇" },
-  { id: "media", label: "Sources & writing", subtitle: "What you read, watch, create, and draw knowledge from.", icon: "▤" },
-  { id: "temporal", label: "Events & conversations", subtitle: "What happened, what was said, and how things unfold.", icon: "◷" },
-  { id: "annotation", label: "Annotations", subtitle: "Small observations that add context to the bigger picture.", icon: "✧" },
+  { id: "entity", label: "People & things", subtitle: "The people and organizations that make up your world.", icon: "users" },
+  { id: "concept", label: "Ideas & projects", subtitle: "What you’re thinking about, learning, and working toward.", icon: "spark" },
+  { id: "media", label: "Sources & writing", subtitle: "What you read, watch, create, and draw knowledge from.", icon: "fileText" },
+  { id: "temporal", label: "Events & conversations", subtitle: "What happened, what was said, and how things unfold.", icon: "calendarClock" },
+  { id: "annotation", label: "Annotations", subtitle: "Small observations that add context to the bigger picture.", icon: "pencil" },
 ];
 const relationshipGroups = [
-  { id: "people", label: "People & responsibility", subtitle: "How people and organizations work together.", icon: "◎", names: ["partner_of", "founded", "works_at", "invested_in", "advises", "leads", "supports"] },
-  { id: "references", label: "Connections & references", subtitle: "What a page connects to, mentions, or discusses.", icon: "↗", names: ["relates_to", "mentions", "discusses"] },
-  { id: "origins", label: "Sources & authorship", subtitle: "Where knowledge comes from and who contributed it.", icon: "▤", names: ["sourced_from", "derived_from", "authored", "attributed_to"] },
-  { id: "participation", label: "Participation & follow-up", subtitle: "Who was there, what is owed, and who you’re waiting on.", icon: "◷", names: ["attended", "owes_to", "awaiting_reply_from"] },
-  { id: "history", label: "Changes over time", subtitle: "How pages replace or point toward one another.", icon: "↪", names: ["supersedes", "redirects_to"] },
-  { id: "other", label: "Other connections", subtitle: "Additional relationships in your vocabulary.", icon: "◇", names: [] },
+  { id: "people", label: "People & responsibility", subtitle: "How people and organizations work together.", icon: "users", names: ["partner_of", "founded", "works_at", "invested_in", "advises", "leads", "supports"] },
+  { id: "references", label: "Connections & references", subtitle: "What a page connects to, mentions, or discusses.", icon: "link", names: ["relates_to", "mentions", "discusses"] },
+  { id: "origins", label: "Sources & authorship", subtitle: "Where knowledge comes from and who contributed it.", icon: "fileText", names: ["sourced_from", "derived_from", "authored", "attributed_to"] },
+  { id: "participation", label: "Participation & follow-up", subtitle: "Who was there, what is owed, and who you’re waiting on.", icon: "calendarClock", names: ["attended", "owes_to", "awaiting_reply_from"] },
+  { id: "history", label: "Changes over time", subtitle: "How pages replace or point toward one another.", icon: "clock", names: ["supersedes", "redirects_to"] },
+  { id: "other", label: "Other connections", subtitle: "Additional relationships in your vocabulary.", icon: "spark", names: [] },
 ];
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string, className?: string) {
   const node = document.createElement(tag);
@@ -95,11 +96,11 @@ export function ontologyView(data: Ontology, openRecord: (id: string) => void, b
     const groups = (mode === "page" ? categories : relationshipGroups).filter(g => definitions.some(d => categoryOf(d) === g.id));
     const activeNavigation = navigation.contains(document.activeElement) ? (document.activeElement as HTMLElement).dataset.category : undefined;
     navigation.replaceChildren(); body.replaceChildren();
-    for (const group of [{ id: "all", label: "All categories", icon: "⊞" }, ...groups]) {
+    for (const group of [{ id: "all", label: "All categories", icon: "book" }, ...groups]) {
       const count = definitions.filter(d => group.id === "all" || categoryOf(d) === group.id).length;
       const control = button("", () => { selected = group.id; render(); }); control.dataset.category = group.id;
       control.setAttribute("aria-pressed", String(selected === group.id));
-      const icon = el("span", group.icon, "knowledge-category-icon"); icon.setAttribute("aria-hidden", "true");
+      const icon = el("span", undefined, "knowledge-category-icon"); icon.setAttribute("aria-hidden", "true"); icon.append(glyph(group.icon as IconName));
       control.append(icon, el("span", group.label), el("span", String(count), "knowledge-category-count"));
       navigation.append(control);
       if (activeNavigation === group.id) control.focus();
@@ -110,7 +111,7 @@ export function ontologyView(data: Ontology, openRecord: (id: string) => void, b
       const items = definitions.filter(d => categoryOf(d) === group.id); if (!items.length) continue;
       shown += items.length;
       const section = el("section", undefined, `knowledge-type-group knowledge-category-${group.id}`), heading = el("header", undefined, "knowledge-type-group-heading"), title = el("div");
-      const icon = el("span", group.icon, "knowledge-group-icon"); icon.setAttribute("aria-hidden", "true");
+      const icon = el("span", undefined, "knowledge-group-icon"); icon.setAttribute("aria-hidden", "true"); icon.append(glyph(group.icon as IconName));
       title.append(el("h3", group.label), el("p", group.subtitle)); heading.append(icon, title, el("span", String(items.length), "knowledge-group-count"));
       const grid = el("div", undefined, "knowledge-type-grid");
       for (const d of items) grid.append(card(d));
