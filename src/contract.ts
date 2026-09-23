@@ -1,4 +1,5 @@
 import { ConnectionsInput, ConnectionsOutput } from "./connections-contract.js";
+import { RecentInput, RecentOutput } from "./recent.js";
 import { AttachInput, AttachOutput, AttachmentInput, AttachmentOutput } from "./attachment-contract.js";
 import { SearchInput, SearchOutput, LookupInput, LookupOutput } from "./retrieval-contract.js";
 import { Type } from "typebox";
@@ -15,6 +16,10 @@ const issues = Type.Array(issue, { maxItems: 1000 });
 export const contract = defineFeatureContract({
   pluginId: "knowledge",
   operations: {
+    recent: {
+      kind: "query", description: "Read scoped activity with one item per published correction/withdrawal. Cursor paging pins an upper history sequence; current eligibility is rechecked on every read. Inactive assertion content stays in explicit history. Imports are observations, not inferred creations.",
+      input: RecentInput, output: RecentOutput,
+    },
     attach: {
       kind: "action", description: "Retain an original source file in the authorized vault scope. Send base64 chunks of up to 48 KiB decoded, sequential byte offsets, the same requestId/filename/attribution for all chunks, and final=true on the last chunk. Retry identical chunks after interruption. No total file-size or evidence-count cap. A complete receipt returns evidence to append via save_page.attachments. Uploading alone does not create a page. No local filesystem path is accepted.",
       input: AttachInput, output: AttachOutput, tool: { name: "knowledge_attach", label: "Attach knowledge source file" },

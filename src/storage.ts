@@ -1,4 +1,5 @@
 import { connections } from "./connections.js";
+import { recentActivity, type RecentInput } from "./recent.js";
 import type { ConnectionsInput } from "./connections-contract.js";
 import type { Static } from "typebox";
 import path from "node:path";
@@ -62,6 +63,16 @@ export class KnowledgeStorage {
       const data = await vault.scan();
       access.assertCurrent();
       return this.store.withDatabase(db => connections(data, input, withdrawnIds(db, this.retrievalBinding(access))));
+    });
+  }
+  async recent(input: Static<typeof RecentInput>, access: VaultAccess) {
+    return this.run(access, async vault => {
+      const data = await vault.scan();
+      access.assertCurrent();
+      return this.store.withDatabase(db => {
+        const result = recentActivity(db, scopeKey(access.scope), eligible(data, withdrawnIds(db, this.retrievalBinding(access)), false), input);
+        access.assertCurrent(); return result;
+      });
     });
   }
   async initialize(access: VaultAccess) {
@@ -454,4 +465,3 @@ export class KnowledgeStorage {
     this.flushGit(access);
   }
 }
-

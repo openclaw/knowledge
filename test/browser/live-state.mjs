@@ -175,9 +175,11 @@ try {
   await page.keyboard.press('/'); assert.equal(await page.getByLabel('Search knowledge').evaluate(n=>document.activeElement===n),true);
   await page.getByLabel('Search knowledge').fill('');
   await page.getByRole('button',{name:'Recent',exact:true}).click();
-  await page.locator('.knowledge-historical-notice').filter({hasText:'Current status: withdrawn'}).first().waitFor();
-  assert.equal(await page.locator('.knowledge-feed').getByText('Readiness inference',{exact:true}).count(),0);
-  assert.equal(await page.locator('.knowledge-feed').getByText('Release commitment',{exact:true}).count(),0);
+  await page.locator('.knowledge-feed-item[data-change=withdrawn]').waitFor();
+  assert.equal(await page.locator('.knowledge-feed-item[data-change=corrected]').count(),1);
+  assert.equal(await page.locator('.knowledge-feed').getByText('Updated release commitment',{exact:true}).count(),0,'Replacement creation is part of the correction, not another new item');
+  await page.locator('.knowledge-feed-item[data-change=withdrawn]').getByText('Readiness inference',{exact:true}).waitFor();
+  await page.locator('.knowledge-feed-item[data-change=corrected]').getByText('Release commitment',{exact:true}).waitFor();
   await page.setViewportSize({width:1182,height:900}); await page.clock.runFor(200); await page.screenshot({animations:"disabled",path:base+'/recent-dark-desktop.png',fullPage:true});
   const searchGap=await page.evaluate(()=>document.querySelector('.knowledge-feed').getBoundingClientRect().top-document.querySelector('.knowledge-search input').getBoundingClientRect().bottom); assert.equal(searchGap,28,'Host form margins must not change reference section spacing');
   // Test the real host's light-mode cascade, not just alternate color tokens.
@@ -197,6 +199,25 @@ try {
   // Detail fidelity must cover standalone claims as well as entity pages, and
   // must load an actual light palette (not just change data-theme-mode).
   if (hostRoot) await page.addStyleTag({content:await fs.readFile(hostRoot+'/themes/phosphor.css','utf8')});
+  for(const mode of ['dark','light']) {
+    await page.evaluate(mode=>{document.documentElement.dataset.theme=mode==='light'?'phosphor-light':'dark';document.documentElement.dataset.themeMode=mode;},mode);
+    await page.screenshot({animations:'disabled',path:base+`/activity-${mode}-desktop.png`,fullPage:true});
+    const correctionRow=page.locator('.knowledge-feed-item[data-change=corrected]');
+    await correctionRow.locator('.knowledge-activity-summary').click();
+    await correctionRow.getByText('A corrected version is now used instead. The earlier version is kept in history.',{exact:true}).waitFor();
+    assert.equal(await correctionRow.getByText('The delivery date was corrected in chat.',{exact:true}).isVisible(),false,'Raw audit reasons are not the human-facing explanation');
+    await correctionRow.getByText('Recorded reason',{exact:true}).click();
+    await correctionRow.getByText('The delivery date was corrected in chat.',{exact:true}).waitFor();
+    await correctionRow.getByText('Recorded reason',{exact:true}).click();
+    await page.screenshot({animations:'disabled',path:base+`/activity-${mode}-expanded.png`,fullPage:true});
+    for(const width of [760,390]) {
+      await page.setViewportSize({width,height:844});
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'Lifecycle activity fits narrow screens');
+      await page.screenshot({animations:'disabled',path:base+`/activity-${mode}-${width}.png`,fullPage:true});
+    }
+    await page.setViewportSize({width:1182,height:900});
+    await correctionRow.locator('.knowledge-activity-summary').click();
+  }
   await page.getByRole('button',{name:'Browse',exact:true}).click();
   await page.getByRole('button',{name:'Northwind launch',exact:true}).click();
   await page.getByRole('button',{name:'Alex will deliver on Monday.',exact:true}).waitFor();
@@ -251,8 +272,8 @@ try {
   await page.screenshot({animations:'disabled',path:base+'/claim-detail-light-mobile.png',fullPage:true});
   await page.setViewportSize({width:1182,height:900});
   await page.getByRole('button',{name:'Recent',exact:true}).click();
-  await page.locator('.knowledge-historical-notice').first().waitFor();
-  await page.locator('.knowledge-historical-notice').filter({hasText:'Current status: withdrawn'}).first().getByRole('button',{name:'Inspect historical record'}).click();
+  await page.locator('.knowledge-feed-item[data-change=withdrawn] .knowledge-activity-summary').click();
+  await page.locator('.knowledge-feed-item[data-change=withdrawn]').getByRole('button',{name:'View history'}).click();
   await page.getByText('The readiness inference was withdrawn in chat.',{exact:true}).waitFor();
   await page.getByText(/withdrawn — historical knowledge/).waitFor();
   await page.getByRole('button',{name:'Vocabulary',exact:true}).click();
@@ -261,7 +282,7 @@ try {
   await page.locator('.knowledge-feed').waitFor();
   assert.deepEqual(await page.evaluate(()=>window.subscriptions()),{events:1,connections:1});
   assert.deepEqual(errors,[]);
-  console.log(JSON.stringify({passed:['quote-first evidence, compact attribution and icon action row in dark/light','standalone claim details, scoped correction actions, and about links','grouped file details, history and hash-checked Markdown in light mode','light/dark text-tab styling under the production host cascade','reference layout measurements and type icons','search keyboard shortcut','read-only browser contract','agent correction live refresh and historical linkage','withdrawal removes active claims and redacts historical feed titles','search offset cap','design-token dark screenshots','recent default and observed history','ontology-derived browse','native commitment/event/inference cards','attribution and retained inference premise evidence','byte-exact evidence download','revision/hash chat request and no autosend','handoff preserved across periodic refresh','exact name suggestions','ranked search','disconnect and reconnect','subscription cleanup','mobile overflow','no page errors'],artifacts:base},null,2));
+  console.log(JSON.stringify({passed:['quote-first evidence, compact attribution and icon action row in dark/light','standalone claim details, scoped correction actions, and about links','grouped file details, history and hash-checked Markdown in light mode','light/dark text-tab styling under the production host cascade','reference layout measurements and type icons','search keyboard shortcut','read-only browser contract','agent correction live refresh and historical linkage','one logical lifecycle event, redacted historical assertions and explicit history navigation','search offset cap','design-token dark screenshots','recent default and observed history','ontology-derived browse','native commitment/event/inference cards','attribution and retained inference premise evidence','byte-exact evidence download','revision/hash chat request and no autosend','handoff preserved across periodic refresh','exact name suggestions','ranked search','disconnect and reconnect','subscription cleanup','mobile overflow','no page errors'],artifacts:base},null,2));
 } catch (error) {
   console.error(JSON.stringify({errors,page:await page?.locator('main').innerText()},null,2));throw error;
 } finally {services.forEach(s=>s.stop());await browser.close();}

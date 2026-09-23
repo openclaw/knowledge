@@ -62,8 +62,25 @@
 .knowledge-feed-title { color: var(--text-strong, var(--text)); font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
 .knowledge-feed-meta { color: var(--muted); font-size: 12px; font-weight: 400; }
 .knowledge-feed-item:hover { background: color-mix(in srgb, var(--bg-hover) 60%, transparent); }
-.knowledge-historical-notice { flex-wrap: wrap; font-size: 12px; color: var(--muted); }
-.knowledge-historical-notice > button { margin-left: auto; font-size: 12px; }
+.knowledge-activity-event { display: block; padding: 0; }
+.knowledge-activity-details { min-width: 0; }
+.knowledge-activity-summary { display: flex; align-items: center; gap: 12px; padding: 12px 14px; cursor: pointer; list-style: none; }
+.knowledge-activity-summary::-webkit-details-marker { display: none; }
+.knowledge-activity-summary .knowledge-feed-copy { flex: 1; }
+.knowledge-activity-summary > .knowledge-icon { color: var(--muted); transition: transform 100ms; }
+.knowledge-activity-details[open] .knowledge-activity-summary > .knowledge-icon { transform: rotate(180deg); }
+.knowledge-activity-body { padding: 0 40px 14px 54px; display: grid; gap: 8px; }
+.knowledge-page .knowledge-activity-reason { font-size: 13px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.knowledge-activity-links { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.knowledge-page .knowledge-activity-links button { padding: 0; font-size: 12px; }
+.knowledge-activity-audit { color: var(--muted); font-size: 12px; }
+.knowledge-activity-audit > summary { cursor: pointer; }
+.knowledge-activity-audit > p { margin-top: 8px; }
+@media (max-width: 540px) {
+  .knowledge-activity-summary { gap: 8px; padding: 12px; flex-wrap: wrap; }
+  .knowledge-activity-summary .knowledge-chip { font-size: 10px; padding: 3px 7px; }
+  .knowledge-activity-body { padding: 0 16px 14px 48px; }
+}
 .knowledge-browse { display: grid; grid-template-columns: 210px minmax(0,1fr); gap: 24px; align-items: start; }
 .knowledge-facets { display: grid; gap: 2px; position: sticky; top: 0; }
 .knowledge-facets .knowledge-eyebrow { margin: 18px 8px 4px; font-size: 10px; }

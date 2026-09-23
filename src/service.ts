@@ -41,6 +41,7 @@ export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureE
     return accessFor(context, write);
   };
   return {
+    recent: async (input, context) => storage ? storage.recent(input, authority(context)) : { items: [], upperSequence: 0, nextBefore: null },
     attach: async (input, context) => { const access = authority(context, true); return storage!.attach(input, access); },
     attachment: (input, context) => run(context, vault => vault.attachment(input)),
     save_page: async (input, context) => { const access = authority(context, true); try { return await storage!.save(input, access, context.source === "tool" ? "agent" : "operator"); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); } },
@@ -70,7 +71,7 @@ export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureE
       if (scope === "agent-private") live?.ensureWatching();
       const data = await vault.scan();
       return {
-        service: "knowledge", phase: config?.writesEnabled ? "structured-writes" : "read-only-explorer", backendRevision: "correction-withdrawal-1", instanceId, startedAt,
+        service: "knowledge", phase: config?.writesEnabled ? "structured-writes" : "read-only-explorer", backendRevision: "recent-activity-2", instanceId, startedAt,
         checkedAt: data.checkedAt, vault: config?.vaultId ?? "bundled-sample", agent: config?.agentId ?? "none — synthetic sample", scope, sample: !config, writesEnabled: Boolean(config?.writesEnabled && (() => { try { authority(context, true); return true; } catch { return false; } })()),
         live: scope === "agent-private" ? live?.state ?? "stopped" : "stopped",
         records: eligible(data, undefined, false).length, validRecords: eligible(data, undefined, false).length,

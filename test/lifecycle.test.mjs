@@ -51,6 +51,51 @@ const correction = (f,r,extra={}) => {
 };
 const withdrawal = r => ({requestId:randomUUID(),...target(r),reason:'Retracted explicitly by the user'});
 
+test('recent groups exact lifecycle publications before paging, suppresses inactive assertions, and pins new activity',async t=>{
+  const f=await foundation(t), original=await f.service.create_claim(f.claim(),f.owner);
+  const dependent=await f.service.save_page({...draft(),title:'Dependent summary',dependencies:[original.id]},f.owner);
+  const input=correction(f,original), corrected=await f.service.correct(input,f.owner);
+  await f.service.correct(input,f.owner);
+  const withdrawn=await f.service.withdraw(withdrawal(corrected),f.owner);
+  const all=await f.service.recent({limit:50},f.owner);
+  assert.ok(Check(contract.operations.recent.output,all));
+  assert.deepEqual(all.items.slice(0,2).map(r=>[r.change,r.id]),[['withdrawn',corrected.id],['corrected',original.id]]);
+  assert.equal(all.items.filter(r=>r.change==='corrected').length,1,'paired observations and identical retries yield one event');
+  assert.equal(all.items[0].at,withdrawn.at); assert.equal(all.items[1].at,corrected.at);
+  assert.equal(all.items[1].replacementActive,false);
+  assert.equal(all.items.some(r=>r.id===dependent.id),false);
+  assert.equal(all.items[0].title,'Corrected option C','withdrawal identifies the withdrawn record');
+  assert.equal(all.items[1].title,'Option B decision','correction identifies the original record');
+  assert.equal(JSON.stringify(all).includes('Alex chose option B.'),false,'historical bodies stay out of the feed');
+  assert.equal(all.items.filter(r=>r.title).length,5,'current pages and explicitly labeled lifecycle events have names');
+  const first=await f.service.recent({limit:1},f.owner);
+  await f.service.save_page({...draft(),title:'New arrival'},f.owner);
+  const rest=[]; let cursor=first.nextBefore;
+  while(cursor!==null) {
+    const page=await f.service.recent({limit:1,upperSequence:first.upperSequence,beforeSequence:cursor},f.owner);
+    rest.push(...page.items);cursor=page.nextBefore;
+  }
+  assert.deepEqual([first.items[0],...rest],all.items,'keyset paging cannot split a correction or shift after a new save');
+  assert.equal((await f.service.recent({},f.operator)).items[0].title,'New arrival');
+  f.setEntry({sessionId:f.owner.tool.sessionId,chatType:'group'});
+  assert.deepEqual((await f.service.recent({},f.owner)).items,[],'private activity never appears in conversation scope');
+});
+
+test('recent distinguishes imports from writes and rechecks dependency eligibility on each page',async t=>{
+  const f=await foundation(t), claim=await f.service.create_claim(f.claim(),f.owner);
+  const before=await f.service.recent({},f.owner);
+  const record=(await f.service.record({id:f.pages.person.id,view:'raw'},f.owner)).record;
+  const raw=record.raw.replace(record.id,randomUUID()).replace('title: person','title: Imported person');
+  await writeFile(path.join(f.root,'private','people','imported.md'),raw);
+  const imported=await f.service.recent({},f.owner);
+  assert.equal(imported.items[0].change,'observed');
+  await writeFile(path.join(f.root,'private','people','imported.md'),raw.replace('Imported person','Edited import'));
+  assert.equal((await f.service.recent({},f.owner)).items[0].change,'external');
+  await f.service.withdraw(withdrawal(f.pages.project),f.owner);
+  const pinned=await f.service.recent({upperSequence:before.upperSequence},f.owner);
+  assert.equal(pinned.items.some(r=>r.id===claim.id||r.id===f.pages.project.id),false,'pinning order never pins stale content visibility');
+});
+
 test('correction is one logical batch preserving originals, evidence, provenance, chains and unresolved impact',async t=>{
   const f=await foundation(t), original=await f.service.create_claim(f.claim(),f.owner);
   const dependent=await f.service.save_page({...draft(),title:'Derived summary',dependencies:[original.id]},f.owner);
@@ -95,7 +140,7 @@ for(const stage of ['after-accept','after-first-record','after-second-record','a
     if(where===stage || (stage==='after-first-record' && written===1) || (stage==='after-second-record' && written===2)) throw Error('crash');
   });
   await assert.rejects(publisher.correct(input,f.access(),'agent'),/crash/);
-  for(const [method,arg] of [['records',{}],['record',{id:original.id}],['grep',{query:'option'}],['lookup',{query:original.id}],['connections',{id:f.pages.project.id}],['ontology',{}],['status',{}]]) await assert.rejects(f.service[method](arg,f.owner),/pending|identity|storage/);
+  for(const [method,arg] of [['records',{}],['record',{id:original.id}],['grep',{query:'option'}],['lookup',{query:original.id}],['connections',{id:f.pages.project.id}],['ontology',{}],['status',{}],['recent',{}]]) await assert.rejects(f.service[method](arg,f.owner),/pending|identity|storage/);
   const recovered=await createKnowledgeService(f.api).correct(input,f.owner);
   assert.equal(recovered.state,'published');assert.deepEqual(await f.service.correct(input,f.owner),recovered);
   assert.equal((await f.service.records({kind:'claim'},f.owner)).total,1);

@@ -8,7 +8,9 @@ browser draft storage is left untouched.
 
 ## Available now
 
-- **Recent** is the default, with paginated observed history grouped by date.
+- **Recent** is the default, with cursor-paginated activity grouped by date.
+  Published corrections and withdrawals each occupy one logical event; earlier
+  revisions of inactive or dependency-hidden records remain in record history.
   Rows identify the observed revision and open the current authorized record.
 - **Browse** uses ontology categories/counts, hides empty page types, and switches
   among pages, claims, and relationships. No full-vault client-side loading.
@@ -40,7 +42,7 @@ These are not simulated or filled with prototype sample data:
 - The host cannot prefill its composer or attach structured reference chips.
   The fallback is **Copy request → Open chat → paste, review, send**.
 - No trusted conversation origins or conversation-grouped recent operation exist;
-  date-grouped history is shown instead. “Learned in” says provenance is unavailable.
+  date-grouped activity is shown instead. “Learned in” says provenance is unavailable.
 - No attention operation/unresolved-mention storage exists; no fabricated
   “Needs a look” section or totals are shown.
 - Record summaries lack timestamps and eligible claim/connection counts. Browse
@@ -72,9 +74,12 @@ remain in `test/structured-writes.test.mjs`.
 The lifecycle browser case calls `correct` and `withdraw` through a trusted
 agent-tool fixture (not browser/operator actions), verifies live replacement and
 withdrawal, and inspects reason/original/replacement navigation. In Recent,
-inactive records get minimal historical notices with their **current** lifecycle;
-old history timestamps are not relabeled as correction/withdrawal event times.
-Their assertion titles do not appear as current feed cards. Search also stops
+published correction/withdrawal receipts provide exact event times and paired
+record identities. Each correction renders once, with a type icon, quiet badge,
+and a disclosure for its reason and original/replacement navigation. Withdrawn
+and superseded assertion titles do not appear as current feed cards. Imports are
+labeled Observed, not inferred New from revision numbers. Activity uses a scoped
+upper-sequence/keyset cursor; every page rechecks current eligibility. Search also stops
 before the server's maximum paging offset.
 
 For reference-fidelity dark screenshots, set `KNOWLEDGE_DESIGN_ROOT` to the
@@ -120,3 +125,31 @@ when provenance is absent. File details groups revision/history, Markdown, and
 technical metadata in one sidebar surface. Visual checks include expanded entity
 evidence, standalone claims, and File details in both the reference dark palette
 and the host's actual Phosphor light stylesheet, plus mobile overflow checks.
+
+## Recent activity follow-up
+
+`recent({ limit?, upperSequence?, beforeSequence? })` is a shared read-only feature
+operation, separate from the audit-oriented `history` operation. Exact published
+record ID/hash/revision/actor snapshots connect history sequences to receipts;
+correction pairs are grouped before pagination. No timestamp similarity or current
+lifecycle inference identifies operations. No schema migration or content rewrite
+is needed for existing receipts. Unknown imports remain observations.
+
+The default activity feed omits earlier non-lifecycle entries for currently
+ineligible records (including expiry and hidden dependencies); those revisions
+are still available through explicit historical inspection. Lifecycle event
+original/replacement links are disclosed on demand. Lifecycle rows identify the
+record by its saved title, always alongside an explicit corrected/withdrawn label;
+historical bodies and evidence are not copied into the activity response. Expanded
+rows explain the effect in plain language, with verbatim audit reasons behind a
+separate “Recorded reason” disclosure, not presented as product explanations.
+Current eligible saves
+use their current display titles. First-page refresh sees new events; older pages
+retain their upper sequence while rechecking visibility.
+
+This reuses the existing SQLite journal and design-kit glyphs; no additional UI
+library or activity store is needed. The gbrain version-history privacy tests
+reinforce applying current authorization to historical views; Knowledge keeps its
+existing trusted scope boundary rather than adopting gbrain's source federation.
+Conversation provenance/grouping and a seven-day window with widening remain
+follow-ups; this operation pages the retained activity without fabricating origins.

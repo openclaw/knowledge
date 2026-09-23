@@ -39,7 +39,11 @@ export default defineControlUiPlugin({
       header.append(title, nav, actions);
       const body = el("div", undefined, "knowledge-page-body"); body.append(banner, toolbar, content);
       root.append(header, body); container.append(root);
-      let tab: "recent" | "browse" | "search" | "ontology" | "diagnostics" = "recent", selectedId = "", query = "", kind: "page" | "claim" | "relationship" = "page", type = "", offset = 0, historyOffset = 0;
+      let tab: "recent" | "browse" | "search" | "ontology" | "diagnostics" = "recent", selectedId = "", query = "", kind: "page" | "claim" | "relationship" = "page", type = "", offset = 0;
+      type RecentCursor = { upperSequence: number; beforeSequence: number } | undefined;
+      let recentCursor: RecentCursor;
+      const recentBack: RecentCursor[] = [];
+      const recentExpanded = new Set<number>();
       let generation = 0, statusGeneration = 0, disposed = false, identity = "", vaultChanged = false, agentId = "";
       let searchSnapshot: string | null | undefined;
       let browseSearch: HTMLFormElement | undefined;
@@ -49,7 +53,7 @@ export default defineControlUiPlugin({
       const errorText = (error: unknown) => context.host.redact(error instanceof Error ? error.message : String(error));
       const failure = (error: unknown) => el("p", errorText(error), "knowledge-error");
       const empty = (heading: string, text: string) => { const n = el("div", undefined, "knowledge-empty"); n.append(el("h2", heading), el("p", text)); return n; };
-      function navigate(next: typeof tab) { tab = next; selectedId = ""; offset = 0; historyOffset = 0; renderToolbar(); void load(); }
+      function navigate(next: typeof tab) { tab = next; selectedId = ""; offset = 0; recentCursor = undefined; recentBack.length = 0; renderToolbar(); void load(); }
       function open(id: string) { selectedId = id; renderToolbar(); void load(); }
       function ask(record: NonNullable<Detail["record"]>, correct = false) {
         root.querySelector(".knowledge-chat-handoff")?.remove();
@@ -254,22 +258,59 @@ export default defineControlUiPlugin({
         const results = el("div", undefined, "knowledge-browse-results"); results.append(panel); layout.append(facets, results); content.replaceChildren(layout);
       }
       async function recent(n: number) {
-        const history = await feature.invoke("history", { offset: historyOffset, limit: 20 }); if (!live(n)) return;
+        const activity = await feature.invoke("recent", { limit: 20, ...recentCursor }); if (!live(n)) return;
         const feed = el("div", undefined, "knowledge-feed");
-        const details = await Promise.all(history.entries.map(entry => feature.invoke("record", { id: entry.id, view: "summary" }))); if (!live(n)) return;
         let currentDay = "", group: HTMLElement | undefined;
-        for (const [i, entry] of history.entries.entries()) { const r = details[i].record; if (!r) continue; const day = new Date(entry.at).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" }); if (day !== currentDay) { currentDay = day; feed.append(el("h2", new Date(entry.at).toDateString() === new Date().toDateString() ? "Today" : day, "knowledge-eyebrow")); group = el("section", undefined, "knowledge-surface"); feed.append(group); } const row = el("article", undefined, "knowledge-feed-item"); if (r.lifecycle !== "active") {
-            row.classList.add("knowledge-historical-notice");
-            row.append(el("span", `${human(r.kind)} · Current status: ${human(r.lifecycle)}`), el("small", `Recorded revision ${entry.revision} · ${date(entry.at)}`, "knowledge-muted"), button("Inspect historical record", () => open(r.id), "knowledge-quiet"));
-          } else {
-            const item = button("", () => open(r.id), "knowledge-feed-link"), copy = el("span", undefined, "knowledge-feed-copy");
-            copy.append(el("span", r.title, "knowledge-feed-title"), el("span", `${label(r.type)} · Revision ${entry.revision} · ${new Date(entry.at).toLocaleTimeString(undefined, {hour:"numeric", minute:"2-digit"})}`, "knowledge-feed-meta"));
-            item.append(tile(r.type, 28, r.kind), copy); const badge = chip(entry.provenance === "external" ? "Edited outside OpenClaw" : entry.revision === 1 ? "New" : "Updated");
-            if (entry.provenance !== "external" && entry.revision === 1) badge.classList.add("knowledge-chip-new"); row.append(item, badge);
+        for (const entry of activity.items) {
+          const day = new Date(entry.at).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" });
+          if (day !== currentDay) {
+            currentDay = day;
+            feed.append(el("h2", new Date(entry.at).toDateString() === new Date().toDateString() ? "Today" : day, "knowledge-eyebrow"));
+            group = el("section", undefined, "knowledge-surface"); feed.append(group);
           }
-          group!.append(row); }
-        if (!history.entries.length) feed.append(empty("No recorded activity yet", "Knowledge saved by your agent will appear here. Existing vault records are available in Browse."));
-        const pages = el("div", undefined, "knowledge-pagination"); if (historyOffset) pages.append(button("Newer activity", () => { historyOffset = Math.max(0, historyOffset - 20); void load(); })); if (history.nextOffset !== null) pages.append(button("Older activity", () => { historyOffset = history.nextOffset!; void load(); })); feed.append(pages); content.replaceChildren(feed);
+          const lifecycle = entry.change === "corrected" || entry.change === "withdrawn";
+          const row = el("article", undefined, "knowledge-feed-item"); row.dataset.change = entry.change;
+          const copy = el("span", undefined, "knowledge-feed-copy");
+          const kindLabel = entry.kind === "relationship" ? "Connection" : label(entry.type);
+          const time = new Date(entry.at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+          const badgeLabel = ({created:"New", updated:"Updated", observed:"Observed", external:"Edited", corrected:"Corrected", withdrawn:"Withdrawn"})[entry.change];
+          const badge = chip(badgeLabel); if (entry.change === "created") badge.classList.add("knowledge-chip-new");
+          copy.append(el("span", entry.title || `${kindLabel} ${entry.change}`, "knowledge-feed-title"));
+          const description = entry.change === "corrected" ? `${kindLabel} · Corrected` : entry.change === "withdrawn" ? `${kindLabel} · Withdrawn` : entry.change === "external" ? `${kindLabel} · Edited outside OpenClaw` : kindLabel;
+          copy.append(el("span", `${description} · ${time}`, "knowledge-feed-meta"));
+          if (lifecycle) {
+            row.classList.add("knowledge-activity-event");
+            const disclosure = el("details", undefined, "knowledge-activity-details"), summary = el("summary", undefined, "knowledge-activity-summary");
+            disclosure.open = recentExpanded.has(entry.sequence);
+            disclosure.ontoggle = () => { if (disclosure.isConnected) { if (disclosure.open) recentExpanded.add(entry.sequence); else recentExpanded.delete(entry.sequence); } };
+            summary.append(tile(entry.type, 28, entry.kind), copy, badge, icon("chevronDown", 14));
+            const detail = el("div", undefined, "knowledge-activity-body");
+            const explanation = entry.change === "withdrawn"
+              ? "This is no longer used as current knowledge. You can still read it in history."
+              : entry.replacementActive
+                ? "A corrected version is now used instead. The earlier version is kept in history."
+                : "A corrected version was saved, but it is no longer current either. Both versions are kept in history.";
+            detail.append(el("p", explanation, "knowledge-activity-reason"));
+            const links = el("div", undefined, "knowledge-activity-links");
+            links.append(button(entry.change === "corrected" ? "View original" : "View history", () => open(entry.id), "knowledge-quiet"));
+            if (entry.replacementId) links.append(button(entry.replacementActive ? "View replacement" : "View replacement history", () => open(entry.replacementId!), "knowledge-quiet"));
+            detail.append(links); disclosure.append(summary, detail); row.append(disclosure);
+            if (entry.reason) {
+              const reason = el("details", undefined, "knowledge-activity-audit");
+              reason.append(el("summary", "Recorded reason"), el("p", entry.reason, "knowledge-activity-reason"));
+              detail.append(reason);
+            }
+          } else {
+            const item = button("", () => open(entry.id), "knowledge-feed-link");
+            item.append(tile(entry.type, 28, entry.kind), copy); row.append(item, badge);
+          }
+          group!.append(row);
+        }
+        if (!activity.items.length) feed.append(empty("No recent activity", "Knowledge saved by your agent will appear here. Earlier revisions remain in each record’s history."));
+        const pages = el("div", undefined, "knowledge-pagination");
+        if (recentBack.length) pages.append(button("Newer activity", () => { recentCursor = recentBack.pop(); void load(); }));
+        if (activity.nextBefore !== null) pages.append(button("Older activity", () => { recentBack.push(recentCursor); recentCursor = { upperSequence: activity.upperSequence, beforeSequence: activity.nextBefore! }; void load(); }));
+        feed.append(pages); content.replaceChildren(feed);
       }
       async function load() {
         const n = ++generation; if (vaultChanged) return;

@@ -230,6 +230,12 @@ a page does not satisfy the stable paging guarantee.
 
 ## 6. Recent feed
 
+**Partial implementation (September 23):** the `recent` feature query now groups
+published correction pairs, preserves operation timestamps, labels observations
+honestly, and supports scoped upper-sequence/keyset pagination with eligibility
+rechecks. The conversation-grouped/windowed interface below remains the target.
+See `UI_REDESIGN_IMPLEMENTATION.md` for the shipped boundary.
+
 Add `recent({ since?, until?, limit?, cursor?, attention? })`, returning ordered
 groups with origin, optional batch identity, first/last time, individually
 identified changes, unresolved mentions, and `nextCursor`.

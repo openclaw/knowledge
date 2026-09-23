@@ -16,7 +16,7 @@ test('packaged skills have discoverable metadata and self-contained readable ref
   assert.deepEqual(manifest.skills, ['./skills']);
   const skills = (await readdir(path.join(root, 'skills'))).filter(n => n.startsWith('knowledge-')).sort();
   assert.deepEqual(skills, names);
-  const tools = new Set(Object.values(contract.operations).map(op => op.tool.name));
+  const tools = new Set(Object.values(contract.operations).flatMap(op => op.tool ? [op.tool.name] : []));
   for (const name of names) {
     const dir = path.join(root, 'skills', name);
     const pending = ['SKILL.md'], seen = new Set();
