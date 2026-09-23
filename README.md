@@ -15,9 +15,10 @@ Evidence-backed knowledge vault and native explorer for OpenClaw.
 | Browser drafts | One tab-local draft per authorized agent/vault/scope; survives navigation, page reload and plugin UI remount, retaining original edit preconditions and uncertain-save request |
 | Keyword retrieval and exact identity | Scoped SQLite FTS5, filters, bounded citations and native Search; [retrieval guide](docs/RETRIEVAL.md) |
 | Embeddings | Not implemented or required |
-| Document/meeting ingestion | Five bundled agent workflow skills over supported page/file tools; [workflow guide](docs/WORKFLOWS.md) |
+| Document/meeting ingestion | Six bundled agent workflow skills over supported page/file tools; [workflow guide](docs/WORKFLOWS.md) |
 | Structured claims, relationships and entity metadata | Implemented through tools and native UI, with evidence, temporal validation and retry recovery |
-| Correction/withdrawal and durable ingestion checkpoints | Not implemented |
+| Correction/withdrawal | Agent-only exact-target operations, recoverable two-record correction, durable lifecycle safeguards and dependency impact; [contract](docs/CORRECTIONS.md) |
+| Durable ingestion checkpoints | Not implemented |
 | Live refresh | Private-vault filesystem invalidations, authorized snapshot refresh, reconnect and 30-second visible-page fallback; retired services are fenced |
 | Full backup/restore | Not implemented |
 
@@ -26,7 +27,7 @@ See [setup and authority](docs/REAL_VAULT.md), [model-facing API](docs/MODEL_API
 ## Bundled skills
 
 `knowledge-recall`, `knowledge-capture`, `knowledge-ingest`,
-`knowledge-meeting-ingest`, and `knowledge-entities` ship with the plugin. They
+`knowledge-meeting-ingest`, `knowledge-entities`, and `knowledge-correct` ship with the plugin. They
 retain sources, resolve identities conservatively, and verify published pages.
 They are agent workflows, not an autonomous ingestion engine; host extraction
 and structured claim/relationship mutation have explicit limits. See the

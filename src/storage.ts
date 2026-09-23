@@ -16,15 +16,17 @@ import { parseDocument, stringify } from "yaml";
 import { Manifest, RealVault, type VaultConfig } from "./real-vault.js";
 import { SqliteIdentityStore } from "./identity-store.js";
 import { PublicationFiles, type FileChange } from "./publication-files.js";
-import { SavePage, ClaimInput, RelationshipInput, type WriteInput, type WriteKind, type Receipt } from "./mutation-contract.js";
+import { SavePage, ClaimInput, RelationshipInput, CorrectInput, WithdrawInput, type WriteInput, type WriteKind, type Receipt } from "./mutation-contract.js";
 import { digest } from "./vault.js";
 import { Envelope, type LoadedRecord, type Scope } from "./model.js";
+import { lifecycleRecord, lifecycleImpact, assertLifecycleTarget, applyLifecycleGuards } from "./lifecycle.js";
 import type { VaultAccess } from "./access.js";
 
 const canonical = (x: unknown): string => JSON.stringify(x, (_, v) => v && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => a.localeCompare(b))) : v);
 export const scopeKey = (scope: Scope) => scope.visibility === "conversation" ? `conversations/${scope.sessionId}` : "private";
 const blocked = () => Error("Knowledge publication pending or conflicted; inspect mutation history and retry the original request. No partial catalog returned.");
-type Plan = { rootIdentity: string; before: Manifest; after: Manifest; changes: FileChange[]; actor: string; scope: string; record: LoadedRecord };
+type Plan = { rootIdentity: string; before: Manifest; after: Manifest; changes: FileChange[]; actor: string; scope: string; record: LoadedRecord; records?: LoadedRecord[] };
+type Prepared = { record: LoadedRecord; artifacts: Record<string, string>; previous?: LoadedRecord; data: Awaited<ReturnType<SampleVault["scan"]>>; snapshot: string; additional?: { before: LoadedRecord; after: LoadedRecord }[]; lifecycle?: CorrectInput | WithdrawInput };
 type Row = { scope: string; request: string; intent: string; state: Receipt["state"]; plan: string; receipt: string };
 export type PublicationHook = (stage: string) => void;
 
@@ -99,7 +101,30 @@ export class KnowledgeStorage {
   save(input: SavePage, access: VaultAccess, actor: string) { return this.publish(input, "page", access, actor); }
   createClaim(input: ClaimInput, access: VaultAccess, actor: string) { return this.publish(input, "claim", access, actor); }
   createRelationship(input: RelationshipInput, access: VaultAccess, actor: string) { return this.publish(input, "relationship", access, actor); }
-  private async publish(payload: WriteInput, kind: WriteKind, access: VaultAccess, actor: string): Promise<Receipt> {
+  async correct(input: CorrectInput, access: VaultAccess, actor: string): Promise<Receipt> {
+    if (!Check(CorrectInput, input) || !input.reason.trim()) throw Error("Invalid correction input.");
+    const { kind, ...replacement } = input.replacement;
+    return this.publish({ ...replacement, requestId: input.requestId, expectedVaultId: input.expectedVaultId, expectedOntologyFingerprint: input.expectedOntologyFingerprint } as WriteInput, kind, access, actor, input);
+  }
+  async withdraw(input: WithdrawInput, access: VaultAccess, actor: string): Promise<Receipt> {
+    if (!Check(WithdrawInput, input) || !input.reason.trim()) throw Error("Invalid withdrawal input.");
+    access.assertCurrent();
+    if (!this.config.writesEnabled) throw Error("Knowledge writes are disabled.");
+    if (input.expectedVaultId && input.expectedVaultId !== this.config.vaultId) throw Error("Connected vault changed; no publication accepted.");
+    const scope = scopeKey(access.scope), intent = digest(canonical({ operation: "withdraw", input }));
+    const prior = this.store.withDatabase(db => this.row(db, scope, input.requestId));
+    if (prior) { this.checkReplay(prior, intent); return this.resume(access, input.requestId); }
+    this.assertReadable();
+    const prepared = await this.real.run(access, async vault => {
+      const snapshot = new PublicationFiles(this.config.root).snapshot(scope), data = await vault.scan();
+      const previous = assertLifecycleTarget(data.records, input, false);
+      const record = lifecycleRecord(previous, "withdrawn", input, actor);
+      if (new PublicationFiles(this.config.root).snapshot(scope) !== snapshot) throw Error("Edit conflict: vault changed during validation.");
+      return { record, previous, artifacts: {}, data, snapshot, lifecycle: input };
+    });
+    return this.accept(input.requestId, intent, prepared, access, actor);
+  }
+  private async publish(payload: WriteInput, kind: WriteKind, access: VaultAccess, actor: string, correction?: CorrectInput): Promise<Receipt> {
     const schema = kind === "page" ? SavePage : kind === "claim" ? ClaimInput : RelationshipInput;
     if (!Check(schema, payload)) throw Error("Invalid structured write input.");
     // Unified preparation only after validating the operation-specific closed contract.
@@ -108,7 +133,7 @@ export class KnowledgeStorage {
     if (input.expectedVaultId && input.expectedVaultId !== this.config.vaultId) throw Error("Connected vault changed; this draft belongs to a different vault. No publication was accepted.");
     if (!this.config.writesEnabled) throw Error("Knowledge writes are disabled.");
     if (Boolean(input.id) !== Boolean(input.expectedHash && input.expectedRevision) || (!input.id && (input.expectedHash || input.expectedRevision))) throw Error("Create requires no preconditions; edit requires ID, observed revision, and hash.");
-    const scope = scopeKey(access.scope), intent = digest(canonical(kind === "page" ? input : { operation: kind, input }));
+    const scope = scopeKey(access.scope), intent = digest(canonical(correction ? { operation: "correct", input: correction } : kind === "page" ? input : { operation: kind, input }));
     const prior = this.store.withDatabase(db => this.row(db, scope, input.requestId));
     if (prior) { this.checkReplay(prior, intent); return this.resume(access, input.requestId); }
     this.assertReadable();
@@ -128,13 +153,17 @@ export class KnowledgeStorage {
       const snapshot = new PublicationFiles(this.config.root).snapshot(scope);
       const data = await vault.scan();
       if (input.expectedOntologyFingerprint && input.expectedOntologyFingerprint !== data.ontology?.fingerprint) throw Error("Ontology changed; inspect the current definitions before submitting a new request.");
+      const corrected = correction ? assertLifecycleTarget(data.records, correction, true) : undefined;
+      if (corrected && corrected.kind !== kind) throw Error("A correction must preserve record kind.");
       const allowed = this.store.withDatabase(db => eligible(data, withdrawnIds(db, this.retrievalBinding(access)), false));
       const references = [...(input.dependencies ?? []), ...(input.entities ?? []), ...[input.from, input.to, input.owner].filter((id): id is string => Boolean(id))];
+      const affected = corrected ? new Set([corrected.id, ...lifecycleImpact(data.records, corrected.id).items.map(r => r.id)]) : undefined;
+      if (affected && references.some(id => affected.has(id))) throw Error("Replacement cannot depend on its superseded original.");
       if (references.some(id => !allowed.some(r => r.id === id))) throw Error("Reference unavailable or inactive in this scope.");
       if ([...(input.entities ?? []), ...[input.from, input.to, input.owner].filter((id): id is string => Boolean(id))].some(id => !allowed.some(r => r.id === id && r.kind === "page"))) throw Error("Entity, owner and endpoint references must be pages.");
       const matches = data.records.filter(r => r.id === input.id);
       const previous = input.id && matches.length === 1 ? matches[0] : undefined;
-      if (input.id && (!previous || !allowed.some(r => r.id === previous.id) || !previous.valid || previous.kind !== "page" || previous.hash !== input.expectedHash || previous.revision !== input.expectedRevision)) throw Error("Edit conflict: record changed, disappeared, is ambiguous, or is invalid. No files were changed by this request, and this draft was not saved. Retain your proposed text, reread the current record, and reconcile before creating a new request.");
+      if (input.id && (!previous || previous.lifecycle !== "active" || !previous.valid || previous.kind !== "page" || previous.hash !== input.expectedHash || previous.revision !== input.expectedRevision)) throw Error("Edit conflict: record changed, disappeared, is ambiguous, or is invalid. No files were changed by this request, and this draft was not saved. Retain your proposed text, reread the current record, and reconcile before creating a new request.");
       const type = kind === "claim" ? input.claim_kind : kind === "relationship" ? input.label : input.type ?? previous?.type;
       const definition = data.ontology?.definitions.find(d => d.definition.name === type && d.definition.kind === kind)?.definition;
       if (kind !== "claim" && !definition) throw Error("Choose a valid type from the current ontology.");
@@ -146,6 +175,10 @@ export class KnowledgeStorage {
         format: "knowledge-record-v1", id, revision, kind, title: input.title, scope: access.scope,
         ...(kind === "page" ? { type, fields: {} } : {}), recorded_at: now, updated_at: now, lifecycle: "active",
       };
+      if (corrected && correction) {
+        metadata.supersedes = corrected.id;
+        metadata.lifecycle_change = { reason: correction.reason, at: now, actor, request_id: correction.requestId };
+      }
       // Legacy approval metadata has no meaning; remove it on the next journaled save.
       delete (metadata as Record<string, unknown>).acceptance;
       const portable = ["aliases", "tags", "dependencies", ...(kind === "page" ? [] : ["attribution", "evidence", "valid_from", "valid_until", "expires_at"]),
@@ -183,12 +216,17 @@ export class KnowledgeStorage {
       const preview = await vault.scan({ record, artifacts });
       if (!record.valid) throw Error("Record validation failed: " + preview.issues.filter(i => i.path === relative).map(i => i.code).join(", "));
       if (new PublicationFiles(this.config.root).snapshot(scope) !== snapshot) throw Error("Edit conflict: vault changed during validation.");
-      return { record, artifacts, previous, data, snapshot };
+      const additional = corrected && correction ? [{ before: corrected, after: lifecycleRecord(corrected, "superseded", correction, actor, id) }] : undefined;
+      return { record, artifacts, previous, data, snapshot, additional, lifecycle: correction };
     });
+    return this.accept(input.requestId, intent, prepared, access, actor);
+  }
+  private accept(requestId: string, intent: string, prepared: Prepared, access: VaultAccess, actor: string): Receipt {
+    const scope = scopeKey(access.scope);
     this.hook("before-accept");
     access.assertCurrent();
     this.transaction(db => {
-      const rival = this.row(db, scope, input.requestId);
+      const rival = this.row(db, scope, requestId);
       if (rival) { this.checkReplay(rival, intent); return; }
       if (db.prepare("SELECT 1 FROM mutations WHERE state!='published' LIMIT 1").get()) throw blocked();
       const files = new PublicationFiles(this.config.root), before = this.identity(db, files);
@@ -198,28 +236,36 @@ export class KnowledgeStorage {
       for (const source of prepared.data.sources.filter(s => !s.path.startsWith("bundled:"))) {
         if (files.read(`${scope}/${source.path}`) !== source.raw) throw Error("Ontology changed during validation.");
       }
-      for (const evidence of prepared.record.metadata.evidence ?? []) if (!(evidence.path in prepared.artifacts)) inspectEvidence(path.join(this.config.root, scope), evidence);
+      for (const evidence of prepared.lifecycle && !("replacement" in prepared.lifecycle) ? [] : prepared.record.metadata.evidence ?? []) if (!(evidence.path in prepared.artifacts)) inspectEvidence(path.join(this.config.root, scope), evidence);
       const stillActive = eligible(prepared.data, withdrawnIds(db, this.retrievalBinding(access)), false);
       const m = prepared.record.metadata;
       const references = [...(m.dependencies ?? []), ...(m.entities ?? []), ...[m.from, m.to, m.owner].filter((id): id is string => Boolean(id))];
-      if (references.some(id => !stillActive.some(r => r.id === id))) throw Error("Reference unavailable or inactive in this scope.");
+      if ((!prepared.lifecycle || "replacement" in prepared.lifecycle) && references.some(id => !stillActive.some(r => r.id === id))) throw Error("Reference unavailable or inactive in this scope.");
       const after = { ...before, generation: before.generation + 1, publicationId: randomUUID() };
       const changes: FileChange[] = [];
       const add = (target: string, old: string | null, raw: string) => {
         const n = changes.length;
-        changes.push({ path: target, before: old, after: raw, backup: `${scope}/.knowledge-history/${input.requestId}/${n}.before`, stage: `${scope}/.knowledge-history/${input.requestId}/${n}.stage` });
+        changes.push({ path: target, before: old, after: raw, backup: `${scope}/.knowledge-history/${requestId}/${n}.before`, stage: `${scope}/.knowledge-history/${requestId}/${n}.stage` });
       };
       for (const [p, raw] of Object.entries(prepared.artifacts)) add(`${scope}/${p}`, null, raw);
       add(`${scope}/${prepared.record.path}`, prepared.previous?.raw ?? null, prepared.record.raw);
+      for (const change of prepared.additional ?? []) add(`${scope}/${change.after.path}`, change.before.raw, change.after.raw);
       add("vault.json", files.read("vault.json"), JSON.stringify(after) + "\n");
       for (const change of changes) if (files.read(change.path) !== change.before) throw Error("Edit conflict: destination changed or already exists.");
-      const receipt: Receipt = { requestId: input.requestId, state: "accepted", id: prepared.record.id, path: prepared.record.path, revision: prepared.record.revision, hash: prepared.record.hash, at: new Date().toISOString(), message: "Accepted for publication; not yet saved.", indexed: false };
-      const plan: Plan = { rootIdentity: files.identity(), before, after, changes, actor, scope, record: prepared.record };
+      const receipt: Receipt = { requestId: requestId, state: "accepted", id: prepared.record.id, path: prepared.record.path, revision: prepared.record.revision, hash: prepared.record.hash, at: new Date().toISOString(), message: "Accepted for publication; not yet saved.", indexed: false };
+      if (prepared.lifecycle) {
+        receipt.operation = "replacement" in prepared.lifecycle ? "correct" : "withdraw";
+        receipt.targetId = prepared.lifecycle.id;
+        if (receipt.operation === "correct") receipt.replacementId = prepared.record.id;
+        receipt.reason = prepared.lifecycle.reason;
+        receipt.impact = lifecycleImpact(prepared.data.records, prepared.lifecycle.id);
+      }
+      const plan: Plan = { rootIdentity: files.identity(), before, after, changes, actor, scope, record: prepared.record, records: [prepared.record, ...(prepared.additional ?? []).map(c => c.after)] };
       access.assertCurrent();
-      db.prepare("INSERT INTO mutations VALUES (?,?,?,?,?,?)").run(scope, input.requestId, intent, "accepted", JSON.stringify(plan), JSON.stringify(receipt));
+      db.prepare("INSERT INTO mutations VALUES (?,?,?,?,?,?)").run(scope, requestId, intent, "accepted", JSON.stringify(plan), JSON.stringify(receipt));
     });
     this.hook("after-accept");
-    return this.resume(access, input.requestId);
+    return this.resume(access, requestId);
   }
   resume(access: VaultAccess, requestId: string): Receipt {
     access.assertCurrent();
@@ -249,7 +295,9 @@ export class KnowledgeStorage {
         access.assertCurrent();
         db.prepare("UPDATE identities SET manifest=? WHERE agent_key=?").run(JSON.stringify(plan.after), `agent:${this.config.agentId}`);
         receipt.state = "published"; receipt.message = "Published and available to exact reads; keyword indexing is pending until the next search reconciles this scope.";
-        this.recordObservation(db, plan.scope, plan.record, plan.actor);
+        const records = plan.records ?? [plan.record];
+        observeWithdrawals(db, records, this.retrievalBinding(access));
+        for (const record of records) this.recordObservation(db, plan.scope, record, plan.actor);
         this.enqueueGit(db, plan.scope, plan.changes.filter(c => c.path !== "vault.json").map(c => ({ path: c.path, raw: c.after })), plan.actor, this.publicationToken(plan.scope, requestId));
         receipt.git = { state: "pending", message: "Published; local Git checkpoint pending." };
       } catch (e) {
@@ -276,7 +324,7 @@ export class KnowledgeStorage {
       this.identity(db, files, plan?.after, fallback);
       const scope = scopeKey(access.scope), offset = input.offset ?? 0, limit = input.limit ?? 50;
       const rows = db.prepare("SELECT sequence,id,provenance,at,path,revision,hash FROM history WHERE scope=? AND (? IS NULL OR id=?) ORDER BY sequence DESC LIMIT ? OFFSET ?").all(scope, input.id ?? null, input.id ?? null, limit + 1, offset);
-      const mutations = db.prepare("SELECT receipt FROM mutations WHERE scope=? AND (? IS NULL OR json_extract(receipt,'$.id')=?) ORDER BY rowid DESC LIMIT ? OFFSET ?").all(scope, input.id ?? null, input.id ?? null, limit + 1, offset).map(r => JSON.parse(String(r.receipt)) as Receipt);
+      const mutations = db.prepare("SELECT receipt FROM mutations WHERE scope=? AND (? IS NULL OR json_extract(receipt,'$.id')=? OR json_extract(receipt,'$.targetId')=?) ORDER BY rowid DESC LIMIT ? OFFSET ?").all(scope, input.id ?? null, input.id ?? null, input.id ?? null, limit + 1, offset).map(r => JSON.parse(String(r.receipt)) as Receipt);
       access.assertCurrent();
       return { git: this.gitStatus(db, scope), entries: rows.slice(0, limit) as unknown as { sequence: number; id: string; provenance: string; at: string; path: string; revision: number; hash: string }[], mutations: mutations.slice(0, limit), nextOffset: rows.length > limit || mutations.length > limit ? offset + limit : null };
     });
@@ -402,6 +450,7 @@ export class KnowledgeStorage {
         db.prepare("UPDATE observations SET hash='',revision=revision+1 WHERE scope=? AND id=?").run(key, prior.id!);
       }
     });
+    this.store.withDatabase(db => applyLifecycleGuards(db, records, this.retrievalBinding(access)));
     this.flushGit(access);
   }
 }

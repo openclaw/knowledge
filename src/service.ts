@@ -1,6 +1,6 @@
 import { connections } from "./connections.js";
 import { DatabaseSync } from "node:sqlite";
-import { keywordSearch, exactLookup } from "./retrieval.js";
+import { keywordSearch, exactLookup, eligible } from "./retrieval.js";
 import { randomUUID } from "node:crypto";
 import type { FeatureHandlers, FeatureEventEmitter, FeatureInvocationContext } from "openclaw/plugin-sdk/feature-plugin";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
@@ -46,6 +46,16 @@ export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureE
     save_page: async (input, context) => { const access = authority(context, true); try { return await storage!.save(input, access, context.source === "tool" ? "agent" : "operator"); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); } },
     create_claim: async (input, context) => { const access = authority(context, true); try { return await storage!.createClaim(input, access, context.source === "tool" ? "agent" : "operator"); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); } },
     create_relationship: async (input, context) => { const access = authority(context, true); try { return await storage!.createRelationship(input, access, context.source === "tool" ? "agent" : "operator"); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); } },
+    correct: async (input, context) => {
+      if (context.source !== "tool") throw Error("Knowledge changes must be requested through chat and agent tools.");
+      const access = authority(context, true);
+      try { return await storage!.correct(input, access, "agent"); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); }
+    },
+    withdraw: async (input, context) => {
+      if (context.source !== "tool") throw Error("Knowledge changes must be requested through chat and agent tools.");
+      const access = authority(context, true);
+      try { return await storage!.withdraw(input, access, "agent"); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); }
+    },
     connections: (input, context) => storage ? storage.connections(input, authority(context)) : run(context, async vault => connections(await vault.scan(), input)),
     resume: async (input, context) => { const access = authority(context, true); try { return await storage!.resume(access, input.requestId); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); } },
     revision: async (input, context) => { const access = authority(context); return storage!.revision(access, input.sequence); },
@@ -60,10 +70,10 @@ export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureE
       if (scope === "agent-private") live?.ensureWatching();
       const data = await vault.scan();
       return {
-        service: "knowledge", phase: config?.writesEnabled ? "structured-writes" : "read-only-explorer", backendRevision: "structured-writes-1", instanceId, startedAt,
+        service: "knowledge", phase: config?.writesEnabled ? "structured-writes" : "read-only-explorer", backendRevision: "correction-withdrawal-1", instanceId, startedAt,
         checkedAt: data.checkedAt, vault: config?.vaultId ?? "bundled-sample", agent: config?.agentId ?? "none — synthetic sample", scope, sample: !config, writesEnabled: Boolean(config?.writesEnabled && (() => { try { authority(context, true); return true; } catch { return false; } })()),
         live: scope === "agent-private" ? live?.state ?? "stopped" : "stopped",
-        records: data.records.length, validRecords: data.records.filter(r => r.valid).length,
+        records: eligible(data, undefined, false).length, validRecords: eligible(data, undefined, false).length,
         definitions: data.ontology?.definitions.length ?? 0, ontologyAvailable: Boolean(data.ontology), ontologyFingerprint: data.ontology?.fingerprint ?? "", issues: data.issues.length,
       } as const;
     }),

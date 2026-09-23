@@ -84,7 +84,7 @@ the original to make it fit.
   is an agent work log, not a Knowledge ingestion checkpoint. If it is lost,
   inspect history and existing pages before proceeding. When uncertain whether
   an item was published, stop that item rather than create a possible duplicate.
-  No multi-record atomicity, rollback, dedup or job-resume guarantee is available.
+  No general multi-record ingestion atomicity, rollback, semantic dedup or job-resume guarantee is available. Explicit correction is the one supported two-record logical mutation.
 
 ## Supported structured assertions
 
@@ -104,9 +104,11 @@ timezone); unknown values remain absent. Valid_from/valid_until/expires_at use t
 exact snake-case keys `valid_from`, `valid_until`, `expires_at` and UTC timestamps.
 Capture never schedules work. Unresolved speakers remain attributed source labels.
 
-These tools do not deduplicate semantically, overwrite claims, supersede or withdraw.
+These create tools do not deduplicate semantically or overwrite claims. Use
+`knowledge_correct` for a revision-fenced evidence-backed replacement and
+`knowledge_withdraw` for an explicit retraction; follow the knowledge-correct skill.
 Use the same publication/retry/readback rules above. Inspect typed metadata with
 `knowledge_record` and incoming/outgoing edges, reverse dependencies or entity
 claims with `knowledge_connections`; paginate and verify evidence. Do not report
 full ingestion completion merely because individual assertions published. Full
-workflow upgrades still await correction and durable multi-record checkpoints.
+workflow upgrades still await durable multi-record checkpoints.

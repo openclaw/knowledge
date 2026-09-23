@@ -6,7 +6,7 @@ import { defineFeatureContract } from "openclaw/plugin-sdk/feature-contract";
 import { text } from "./model.js";
 import { RecordInput, RecordOutput, OntologyInput, OntologyOutput, Summary } from "./inspection-contract.js";
 
-import { SavePage, ClaimInput, RelationshipInput, Receipt, HistoryEntry, GitStatus, requestId } from "./mutation-contract.js";
+import { SavePage, ClaimInput, RelationshipInput, CorrectInput, WithdrawInput, Receipt, HistoryEntry, GitStatus, requestId } from "./mutation-contract.js";
 
 const empty = Type.Object({}, { additionalProperties: false });
 const issue = Type.Object({ path: text(500), code: text(80), message: text(1000) });
@@ -35,6 +35,14 @@ export const contract = defineFeatureContract({
       kind: "action", description: "Publish one directed, evidenced relationship between existing active pages. Inspect knowledge_ontology for label, fields, endpoint constraints and required current fingerprint. Attribution and nonempty retained evidence are mandatory. Same endpoint pair is not automatically merged. Exact retries reuse the receipt. Markdown links are not asserted relationships.",
       input: RelationshipInput, output: Receipt, tool: { name: "knowledge_create_relationship", label: "Create knowledge relationship" },
     },
+    correct: {
+      kind: "action", description: "Agent-only explicit correction of an exact claim or typed relationship. Inspect the target's revision/hash and current ontology first. Publish a complete evidence-backed replacement of the same kind and supersede the original in one recoverable logical mutation. User correction evidence may be retained with knowledge_attach. Reason is required; contradiction alone is not authorization. Same request/payload returns the same receipt; pending/conflicted publication blocks reads. Receipt includes original/replacement IDs and known unresolved dependencies; no automatic propagation rewrite or erasure.",
+      input: CorrectInput, output: Receipt, tool: { name: "knowledge_correct", label: "Correct knowledge" },
+    },
+    withdraw: {
+      kind: "action", description: "Agent-only withdrawal of one exact page, claim, or explicit relationship by ID, observed revision/hash, and reason. Preserves original/evidence/history; not physical erasure. A durable tombstone prevents stale restores from resurrecting the record. Active retrieval excludes known dependents without rewriting them. Withdraw an edge by its record ID, never by endpoint pair. Reuse identical request/payload for retries.",
+      input: WithdrawInput, output: Receipt, tool: { name: "knowledge_withdraw", label: "Withdraw knowledge" },
+    },
     connections: {
       kind: "query", description: "Inspect explicit incoming/outgoing relationships, reverse dependencies, and entity/owner claims. Access and active validity/expiry filtering precede counts and pagination. historical=true includes inactive/superseded but never withdrawn records. Follow nextOffset and compare snapshot across pages. Evidence here is a bounded preview; inspect each record for complete evidence. No inferred Markdown backlinks.",
       input: ConnectionsInput, output: ConnectionsOutput, tool: { name: "knowledge_connections", label: "Inspect knowledge connections" },
@@ -53,7 +61,7 @@ export const contract = defineFeatureContract({
     mutation: {
       kind: "query", description: "Inspect a scoped receipt and retained before/proposed/displaced text for publication recovery. Does not resolve or overwrite a conflict.",
       input: Type.Object({ requestId }, { additionalProperties: false }),
-      output: Type.Object({ receipt: Type.Union([Receipt, Type.Null()]), files: Type.Array(Type.Object({ path: text(500), before: Type.Union([text(65536), Type.Null()]), proposed: text(65536), displaced: Type.Union([text(65536), Type.Null()]) }), { maxItems: 2 }) }),
+      output: Type.Object({ receipt: Type.Union([Receipt, Type.Null()]), files: Type.Array(Type.Object({ path: text(500), before: Type.Union([text(65536), Type.Null()]), proposed: text(65536), displaced: Type.Union([text(65536), Type.Null()]) }), { maxItems: 3 }) }),
       tool: { name: "knowledge_mutation", label: "Inspect knowledge publication" },
     },
     history: {
@@ -83,11 +91,11 @@ export const contract = defineFeatureContract({
       input: LookupInput, output: LookupOutput, tool: { name: "knowledge_lookup", label: "Resolve knowledge identity" },
     },
     records: {
-      kind: "query", description: "List authorized records exhaustively using pagination, with optional kind, ontology type/alias, or ID/title/alias filtering.",
+      kind: "query", description: "List current eligible authorized records exhaustively using pagination, with optional kind, ontology type/alias, or ID/title/alias filtering. lifecycle=all is an explicit historical inventory including inactive/invalid records; originals remain available by exact record/history inspection.",
       input: Type.Object({
         offset: Type.Optional(Type.Integer({ minimum: 0, maximum: 500 })), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
         kind: Type.Optional(Type.Union([Type.Literal("page"), Type.Literal("claim"), Type.Literal("relationship")])),
-        type: Type.Optional(text(64)), query: Type.Optional(text(200)),
+        type: Type.Optional(text(64)), query: Type.Optional(text(200)), lifecycle: Type.Optional(Type.Union([Type.Literal("active"), Type.Literal("all")])),
       }, { additionalProperties: false }),
       output: Type.Object({ records: Type.Array(record, { maxItems: 100 }), total: Type.Integer(), offset: Type.Integer(), nextOffset: Type.Union([Type.Integer(), Type.Null()]), checkedAt: text(40) }),
       tool: { name: "knowledge_records", label: "Browse knowledge" },

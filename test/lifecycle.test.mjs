@@ -1,0 +1,239 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, mkdir, writeFile, readFile, rm, rename } from 'node:fs/promises';
+import { writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { Check } from 'typebox/value';
+import { Publisher } from '../dist/publisher.js';
+import { SqliteIdentityStore } from '../dist/identity-store.js';
+import { createKnowledgeService } from '../dist/service.js';
+import { authorizeVault } from '../dist/access.js';
+import { contract } from '../dist/contract.js';
+
+async function fixture(t) {
+  const base = await mkdtemp(path.join(os.tmpdir(), 'knowledge-write-'));
+  t.after(() => rm(base, { recursive: true, force: true }));
+  const root = path.join(base, 'vault'); await mkdir(root); await mkdir(path.join(root, 'private'));
+  const manifest = { format: 'knowledge-vault-v1', vaultId: randomUUID(), agentId: 'main', generation: 0, publicationId: randomUUID() };
+  await writeFile(path.join(root, 'vault.json'), JSON.stringify(manifest));
+  const config = { root, statePath: path.join(base, 'state.sqlite'), agentId: 'main', vaultId: manifest.vaultId, publicationId: manifest.publicationId, operatorRead: true, writesEnabled: true };
+  let entry = { sessionId: randomUUID(), chatType: 'direct' };
+  const api = { pluginConfig: { vault: config }, runtime: { agent: { session: { getSessionEntry: () => entry } } } };
+  const owner = { source: 'tool', api, tool: { agentId: 'main', sessionId: entry.sessionId, sessionKey: 'agent:main:write-test', senderIsOwner: true, assertInvocationCurrent() {} } };
+  const operator = { source: 'session-action', api, action: { client: { connId: 'test', scopes: ['operator.write'] } } };
+  const store = new SqliteIdentityStore(config.statePath), service = createKnowledgeService(api);
+  const access = () => authorizeVault(owner, 'main', true, true);
+  return { base, root, config, manifest, api, owner, operator, store, service, access, setEntry: v => { entry = v; } };
+}
+const draft = () => ({ requestId: randomUUID(), title: 'Publication test', type: 'note', body: 'Authored text.\n' });
+const edit = (record, fields = {}) => ({ requestId: randomUUID(), id: record.id, expectedRevision: record.revision, expectedHash: record.hash, title: record.title, body: record.body, ...fields });
+
+
+async function foundation(t) {
+  const f = await fixture(t);
+  f.fingerprint = (await f.service.ontology({}, f.owner)).fingerprint;
+  f.pages = {};
+  for (const type of ['person','project','meeting']) f.pages[type] = await f.service.save_page({ ...draft(), title: type, type }, f.owner);
+  f.source = await f.service.attach({requestId:randomUUID(),filename:'meeting.txt',mediaType:'text/plain',attribution:'Meeting transcript',offset:0,data:Buffer.from('Alex: We chose option B.\nAlex: I will deliver by Friday.\nSpeaker 2: I disagree.').toString('base64'),final:true},f.owner);
+  f.evidence = {...f.source.evidence,start_line:1,end_line:1,quote:'We chose option B.'};
+  f.claim = (extra={}) => ({requestId:randomUUID(),expectedOntologyFingerprint:f.fingerprint,title:'Option B decision',body:'Alex chose option B.',claim_kind:'decision',assertion_origin:'source',attribution:'Alex, meeting transcript line 1',evidence:[f.evidence],entities:[f.pages.project.id],dependencies:[f.pages.meeting.id],...extra});
+  f.edge = (extra={}) => ({requestId:randomUUID(),expectedOntologyFingerprint:f.fingerprint,title:'Meeting discusses project',body:'Explicit meeting/project connection',from:f.pages.meeting.id,to:f.pages.project.id,label:'discusses',attribution:'Meeting transcript',evidence:[f.evidence],...extra});
+  return f;
+}
+
+
+const target = r => ({ id:r.id, expectedRevision:r.revision, expectedHash:r.hash });
+const correction = (f,r,extra={}) => {
+  const {requestId,expectedOntologyFingerprint,...replacement}=f.claim({title:'Corrected option C',body:'Alex actually chose option C.'});
+  return {requestId,expectedOntologyFingerprint,...target(r),reason:'User corrected the mistaken decision',replacement:{kind:'claim',...replacement},...extra};
+};
+const withdrawal = r => ({requestId:randomUUID(),...target(r),reason:'Retracted explicitly by the user'});
+
+test('correction is one logical batch preserving originals, evidence, provenance, chains and unresolved impact',async t=>{
+  const f=await foundation(t), original=await f.service.create_claim(f.claim(),f.owner);
+  const dependent=await f.service.save_page({...draft(),title:'Derived summary',dependencies:[original.id]},f.owner);
+  const indirect=await f.service.save_page({...draft(),title:'Second summary',dependencies:[dependent.id]},f.owner);
+  const before=(await f.service.record({id:original.id,includeMetadata:true},f.owner)).record;
+  const input=correction(f,original), receipt=await f.service.correct(input,f.owner);
+  assert.equal(receipt.state,'published');assert.equal(receipt.operation,'correct');assert.equal(receipt.targetId,original.id);assert.equal(receipt.id,receipt.replacementId);
+  assert.ok(Check(contract.operations.correct.output,receipt));
+  assert.deepEqual(receipt.impact.items.map(r=>[r.id,r.direct]).sort(),[[dependent.id,true],[indirect.id,false]].sort());
+  const old=(await f.service.record({id:original.id,includeMetadata:true},f.owner)).record;
+  const fresh=(await f.service.record({id:receipt.id,includeMetadata:true},f.owner)).record;
+  assert.equal(old.lifecycle,'superseded');assert.equal(old.body,before.body);assert.deepEqual(old.metadata.evidence,before.metadata.evidence);
+  assert.equal(old.metadata.superseded_by,receipt.id);assert.equal(fresh.metadata.supersedes,old.id);assert.equal(old.metadata.lifecycle_change.reason,input.reason);
+  assert.equal((await f.service.lookup({query:old.id},f.owner)).total,0);
+  assert.equal((await f.service.lookup({query:old.id,lifecycle:'all'},f.owner)).total,1);
+  assert.equal((await f.service.lookup({query:dependent.id},f.owner)).total,0);
+  assert.equal((await f.service.lookup({query:indirect.id},f.owner)).total,0);
+  assert.equal((await f.service.records({},f.owner)).total,4);
+  assert.equal((await f.service.status({},f.owner)).records,4);
+  assert.equal((await f.service.ontology({name:'note'},f.owner)).definitions[0].recordCount,0);
+  assert.equal((await f.service.records({lifecycle:'all'},f.owner)).total,7);
+  assert.deepEqual(await f.service.correct(input,f.owner),receipt);
+  assert.equal((await f.service.history({id:old.id},f.owner)).mutations[0].requestId,input.requestId);
+  const mutation=await f.service.mutation({requestId:input.requestId},f.owner);
+  assert.ok(Check(contract.operations.mutation.output,mutation));assert.equal(mutation.files.length,2);
+  const next=await f.service.correct(correction(f,receipt),f.owner);
+  assert.equal((await f.service.lookup({query:receipt.id},f.owner)).total,0);
+  assert.equal((await f.service.lookup({query:next.id},f.owner)).total,1);
+  assert.equal((await f.service.record({id:receipt.id,includeMetadata:true},f.owner)).record.metadata.superseded_by,next.id);
+  // Restore stale active bytes; durable guards survive recreation of the service and keyword projections.
+  await writeFile(path.join(f.root,'private',old.path),(await f.service.revision({sequence:(await f.service.history({id:old.id},f.owner)).entries.at(-1).sequence},f.owner)).raw);
+  const restored=createKnowledgeService(f.api);
+  assert.equal((await restored.lookup({query:old.id},f.owner)).total,0);
+  assert.equal((await restored.record({id:old.id,includeMetadata:true},f.owner)).record.metadata.superseded_by,receipt.id);
+});
+
+for(const stage of ['after-accept','after-first-record','after-second-record','after-link:vault.json','before-receipt']) test(`correction recovery at ${stage} never exposes a half-applied catalog`,async t=>{
+  const f=await foundation(t), original=await f.service.create_claim(f.claim(),f.owner), input=correction(f,original);
+  let written=0;
+  const publisher=new Publisher(f.config,f.store,where=>{
+    if(where.startsWith('after-link:private/claims/')) written++;
+    if(where===stage || (stage==='after-first-record' && written===1) || (stage==='after-second-record' && written===2)) throw Error('crash');
+  });
+  await assert.rejects(publisher.correct(input,f.access(),'agent'),/crash/);
+  for(const [method,arg] of [['records',{}],['record',{id:original.id}],['grep',{query:'option'}],['lookup',{query:original.id}],['connections',{id:f.pages.project.id}],['ontology',{}],['status',{}]]) await assert.rejects(f.service[method](arg,f.owner),/pending|identity|storage/);
+  const recovered=await createKnowledgeService(f.api).correct(input,f.owner);
+  assert.equal(recovered.state,'published');assert.deepEqual(await f.service.correct(input,f.owner),recovered);
+  assert.equal((await f.service.records({kind:'claim'},f.owner)).total,1);
+  assert.equal((await f.service.records({kind:'claim',lifecycle:'all'},f.owner)).total,2);
+  const history=await f.service.history({id:original.id},f.owner);
+  assert.equal(history.entries.length,2);
+});
+
+test('withdrawal durably hides pages and transitive dependents, preserves evidence/history and exact retry',async t=>{
+  const f=await foundation(t), claim=await f.service.create_claim(f.claim(),f.owner), edge=await f.service.create_relationship(f.edge(),f.owner);
+  const original=(await f.service.record({id:f.pages.project.id,view:'raw'},f.owner)).record;
+  const input=withdrawal(original), receipt=await f.service.withdraw(input,f.owner);
+  assert.equal(receipt.operation,'withdraw');assert.equal(receipt.state,'published');assert.equal(receipt.impact.total,2);
+  assert.ok(Check(contract.operations.withdraw.output,receipt));
+  assert.deepEqual(await f.service.withdraw(input,f.owner),receipt);
+  for(const id of [original.id,claim.id,edge.id]) assert.equal((await f.service.lookup({query:id},f.owner)).total,0);
+  assert.equal((await f.service.connections({id:f.pages.meeting.id},f.owner)).total,0);
+  assert.equal((await f.service.records({},f.owner)).total,2);
+  await writeFile(path.join(f.root,'private',original.path),original.raw);
+  f.store.withDatabase(db=>{for(const row of db.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'keyword_fts_v1_%' AND sql LIKE 'CREATE VIRTUAL%' ").all())db.exec(`DROP TABLE ${row.name}`);});
+  const restored=createKnowledgeService(f.api);
+  assert.equal((await restored.records({},f.owner)).total,2);
+  assert.equal((await restored.grep({query:'project',lifecycle:'all'},f.owner)).total,0);
+  const inspection=await restored.record({id:original.id,includeMetadata:true},f.owner);
+  assert.equal(inspection.record.lifecycle,'withdrawn');assert.equal(inspection.record.metadata.lifecycle_change.reason,input.reason);
+  const evidence=await restored.attachment({id:claim.id,path:f.evidence.path,sha256:f.evidence.sha256},f.owner);assert.ok(evidence.data);
+});
+
+test('one relationship correction/withdrawal never affects another edge sharing endpoints',async t=>{
+  const f=await foundation(t), one=await f.service.create_relationship(f.edge(),f.owner), two=await f.service.create_relationship(f.edge(),f.owner);
+  const {requestId,expectedOntologyFingerprint,...replacement}=f.edge({body:'Corrected explicit edge'});
+  const correctionInput={requestId,expectedOntologyFingerprint,...target(one),reason:'Fix edge attribution',replacement:{kind:'relationship',...replacement}};
+  const corrected=await f.service.correct(correctionInput,f.owner);
+  assert.equal((await f.service.connections({id:f.pages.meeting.id},f.owner)).total,2);
+  await f.service.withdraw(withdrawal(corrected),f.owner);
+  assert.equal((await f.service.connections({id:f.pages.meeting.id},f.owner)).total,1);
+  assert.equal((await f.service.lookup({query:two.id},f.owner)).total,1);
+  assert.equal((await f.service.record({id:one.id,includeMetadata:true},f.owner)).record.metadata.superseded_by,corrected.id);
+});
+
+test('invalid, stale, hidden and wrong-kind corrections fail before receipt; no browser lifecycle writes',async t=>{
+  const f=await foundation(t), original=await f.service.create_claim(f.claim(),f.owner), input=correction(f,original);
+  const dependent=await f.service.save_page({...draft(),dependencies:[original.id]},f.owner);
+  for(const change of [
+    {expectedHash:'0'.repeat(64)},{expectedRevision:2},{reason:' '},{id:randomUUID()},
+    {replacement:{...input.replacement,evidence:[]}}, {replacement:{...input.replacement,dependencies:[original.id]}},
+    {replacement:{...input.replacement,dependencies:[dependent.id]}},
+    {expectedOntologyFingerprint:'0'.repeat(64)},{...target(f.pages.project)},
+    {replacement:{...input.replacement,lifecycle:'withdrawn'}},
+  ]) {
+    const bad={...input,...change,requestId:randomUUID()};await assert.rejects(f.service.correct(bad,f.owner));
+    assert.equal((await f.service.mutation({requestId:bad.requestId},f.owner)).receipt,null);
+  }
+  await assert.rejects(f.service.correct(input,f.operator),/chat/);
+  await assert.rejects(f.service.withdraw(withdrawal(original),f.operator),/chat/);
+  f.setEntry({sessionId:f.owner.tool.sessionId,chatType:'group'});
+  await assert.rejects(f.service.correct(input,f.owner),/unavailable/);
+  await assert.rejects(f.service.withdraw(withdrawal(original),f.owner),/unavailable/);
+  assert.equal((await f.service.mutation({requestId:input.requestId},f.owner)).receipt,null);
+});
+
+test('changed payload replay and concurrent edits preserve conflicts and proposed material',async t=>{
+  const f=await foundation(t), original=await f.service.create_claim(f.claim(),f.owner), input=correction(f,original);
+  const file=path.join(f.root,'private',original.path), before=await readFile(file,'utf8');
+  const publisher=new Publisher(f.config,f.store,where=>{if(where==='after-accept') throw Error('crash');});
+  await assert.rejects(publisher.correct(input,f.access(),'agent'),/crash/);
+  await assert.rejects(f.service.correct({...input,reason:'changed'},f.owner),/different payload/);
+  await writeFile(file,before+'External author edit.');
+  const result=await f.service.correct(input,f.owner);
+  assert.equal(result.state,'conflict');assert.equal(await readFile(file,'utf8'),before+'External author edit.');
+  assert.equal((await f.service.mutation({requestId:input.requestId},f.owner)).files.length,2);
+  await assert.rejects(f.service.records({},f.owner),/pending|conflicted/);
+});
+
+for(const stage of ['after-accept','after-link:vault.json','before-receipt']) test(`withdrawal resumes safely after ${stage}`,async t=>{
+  const f=await foundation(t), original=await f.service.create_claim(f.claim(),f.owner), input=withdrawal(original);
+  const publisher=new Publisher(f.config,f.store,where=>{if(where===stage)throw Error('crash');});
+  await assert.rejects(publisher.withdraw(input,f.access(),'agent'),/crash/);
+  const result=await createKnowledgeService(f.api).withdraw(input,f.owner);
+  assert.equal(result.state,'published');assert.deepEqual(await f.service.withdraw(input,f.owner),result);
+  assert.equal((await f.service.lookup({query:original.id,lifecycle:'all'},f.owner)).total,0);
+});
+
+test('withheld derived pages can be repaired explicitly, without silently redirecting evidence',async t=>{
+  const f=await foundation(t), original=await f.service.create_claim(f.claim(),f.owner);
+  const dependent=await f.service.save_page({...draft(),dependencies:[original.id]},f.owner);
+  const corrected=await f.service.correct(correction(f,original),f.owner);
+  assert.equal((await f.service.lookup({query:dependent.id},f.owner)).total,0);
+  const record=(await f.service.record({id:dependent.id},f.owner)).record;
+  const repaired=await f.service.save_page(edit(record,{body:'Repaired with inspected correction.',dependencies:[corrected.id]}),f.owner);
+  assert.equal(repaired.state,'published');assert.equal((await f.service.lookup({query:dependent.id},f.owner)).total,1);
+});
+
+test('pre-upgrade withdrawal guards apply to records and counts even if only stale active files remain',async t=>{
+  const f=await foundation(t), original=await f.service.create_claim(f.claim(),f.owner);
+  f.store.withDatabase(db=>db.prepare('INSERT INTO keyword_withdrawals_v1 VALUES (?,?)').run(`${f.config.vaultId}:private`,original.id));
+  assert.equal((await f.service.records({kind:'claim'},f.owner)).total,0);
+  assert.equal((await f.service.record({id:original.id},f.owner)).record.lifecycle,'withdrawn');
+  await assert.rejects(f.service.correct(correction(f,original),f.owner),/unavailable/);
+});
+
+test('lifecycle writes recheck current authority before publishing accepted intent',async t=>{
+  const f=await foundation(t), original=await f.service.create_claim(f.claim(),f.owner), input=correction(f,original);
+  const publisher=new Publisher(f.config,f.store,where=>{if(where==='after-accept')f.setEntry({sessionId:f.owner.tool.sessionId,chatType:'group'});});
+  await assert.rejects(publisher.correct(input,f.access(),'agent'),/authority/);
+  assert.equal((await f.service.mutation({requestId:input.requestId},f.owner)).receipt,null);
+  f.setEntry({sessionId:f.owner.tool.sessionId,chatType:'direct'});
+  assert.equal((await f.service.correct(input,f.owner)).state,'published');
+});
+
+test('withdrawing a superseded original dominates its correction guard without withdrawing replacement',async t=>{
+  const f=await foundation(t), original=await f.service.create_claim(f.claim(),f.owner), corrected=await f.service.correct(correction(f,original),f.owner);
+  const old=(await f.service.record({id:original.id,includeMetadata:true},f.owner)).record;
+  const withdrawalInput=withdrawal(old);
+  const receipt=await f.service.withdraw(withdrawalInput,f.owner);
+  assert.equal(receipt.state,'published');assert.equal((await f.service.record({id:old.id},f.owner)).record.lifecycle,'withdrawn');
+  assert.equal((await f.service.lookup({query:corrected.id},f.owner)).total,1);
+  assert.equal((await f.service.lookup({query:old.id,lifecycle:'all'},f.owner)).total,0);
+});
+
+test('withdrawal remains possible when original evidence goes missing',async t=>{
+  const f=await foundation(t), original=await f.service.create_claim(f.claim(),f.owner);
+  await rm(path.join(f.root,'private',f.evidence.path));
+  const record=(await f.service.record({id:original.id,includeMetadata:true},f.owner)).record;
+  assert.equal(record.valid,false);
+  const receipt=await f.service.withdraw(withdrawal(record),f.owner);
+  assert.equal(receipt.state,'published');
+  const after=(await f.service.record({id:record.id,includeMetadata:true},f.owner)).record;
+  assert.equal(after.lifecycle,'withdrawn');assert.deepEqual(after.metadata.evidence,record.metadata.evidence);
+});
+
+test('lifecycle mutations preserve authored YAML comments, unknown metadata and original text',async t=>{
+  const f=await foundation(t), original=await f.service.create_claim(f.claim(),f.owner);
+  const file=path.join(f.root,'private',original.path), before=await readFile(file,'utf8');
+  await writeFile(file,before.replace('lifecycle: active','lifecycle: active # authored lifecycle note\ncustom_context: "Keep Ω"'));
+  const current=(await f.service.record({id:original.id},f.owner)).record;
+  await f.service.correct(correction(f,current),f.owner);
+  const after=await readFile(file,'utf8');
+  assert.ok(after.includes('# authored lifecycle note'));assert.ok(after.includes('custom_context: "Keep Ω"'));
+  assert.equal((await f.service.record({id:original.id},f.owner)).record.body,current.body);
+});

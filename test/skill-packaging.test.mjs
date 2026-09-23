@@ -8,7 +8,7 @@ import { parse } from 'yaml';
 import { contract } from '../dist/contract.js';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-const names = ['knowledge-capture', 'knowledge-entities', 'knowledge-ingest', 'knowledge-meeting-ingest', 'knowledge-recall'];
+const names = ['knowledge-capture', 'knowledge-correct', 'knowledge-entities', 'knowledge-ingest', 'knowledge-meeting-ingest', 'knowledge-recall'];
 
 test('packaged skills have discoverable metadata and self-contained readable references', async () => {
   execFileSync(process.execPath, ['scripts/sync-skill-references.mjs', '--check'], { cwd: root });

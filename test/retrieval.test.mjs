@@ -78,7 +78,8 @@ test('all saved records are discoverable regardless of legacy approval metadata;
   assert.deepEqual(ids(await f.service.grep({ query: 'orbit', lifecycle: 'superseded' }, f.owner)), ['historical_one']);
   assert.equal((await f.service.grep({ query: 'orbit', lifecycle: 'all' }, f.owner)).total, 3);
   assert.equal((await f.service.lookup({ query: 'candidate_one' }, f.owner)).outcome, 'found');
-  assert.equal((await f.service.records({}, f.owner)).total, 3);
+  assert.equal((await f.service.records({}, f.owner)).total, 2);
+  assert.equal((await f.service.records({ lifecycle: 'all' }, f.owner)).total, 3);
 });
 
 test('scope isolates results, counts, exact identity, snippets, corpus statistics and cached projections', async t => {

@@ -24,7 +24,7 @@ retained as the acceptance plan; its “existing foundation” describes the bas
   than gbrain's separate Markdown-plus-timeline-store operation.
 - Unlike gbrain's fact dedup/supersession and optional untyped links, new request
   IDs remain distinct assertions, explicit edges require ontology labels and
-  retained evidence, and corrections are a separate upcoming milestone. Gbrain's
+  retained evidence, and corrections use the separate explicit [lifecycle operations](CORRECTIONS.md). Gbrain's
   local `remember`, `add_link`, and `add_timeline_entry` implementations were
   inspected before making these choices. No dependency or background model added.
 - Connection queries return separately labeled incoming/outgoing edges, reverse
@@ -35,8 +35,8 @@ retained as the acceptance plan; its “existing foundation” describes the bas
   submitted payloads across reload, and inspect assertion fields/evidence. Browser
   fixtures use an isolated vault, never synthetic writes in the user's vault.
 
-Correction/withdrawal, ingestion checkpoints, full workflow upgrades, extraction
-quality trials and background extraction remain deferred.
+Correction/withdrawal now ships separately; ingestion checkpoints, full workflow
+upgrades, extraction quality trials and background extraction remain deferred.
 
 ## Goal and sequence
 

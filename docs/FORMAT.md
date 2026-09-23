@@ -18,7 +18,7 @@ A page has a declared domain `type` and ontology-defined `fields`. If the type i
 
 A claim has `claim_kind` (fact/preference/decision/commitment/event/belief), `assertion_origin` (source/user_belief/agent_inference), `attribution`, evidence, and claim text in the Markdown body. Optional `entities` references page IDs. A relationship has `from`, `to`, a declared `label`, attribution, and evidence. Endpoints must be pages of permitted types.
 
-Unknown frontmatter survives inspection. It is not discarded, normalized, or written back. Full original text and an observed SHA-256 are returned. Identity comes from the explicit ID, never from filename/title/alias; duplicate IDs remain listed but exact lookup returns no record. Invalid envelope/YAML files remain on disk and appear in diagnostics, not the typed catalog. Typed records whose ontology or references are invalid remain inspectable and marked invalid. Listing includes all lifecycle states: this is exhaustive inspection, not active-knowledge retrieval.
+Unknown frontmatter survives inspection. It is not discarded, normalized, or written back. Full original text and an observed SHA-256 are returned. Identity comes from the explicit ID, never from filename/title/alias; duplicate IDs remain listed but exact lookup returns no record. Invalid envelope/YAML files remain on disk and appear in diagnostics, not the typed catalog. Typed records whose ontology or references are invalid remain inspectable and marked invalid. Default listing is exhaustive current eligible knowledge; `lifecycle: all` explicitly requests historical/invalid inventory. Exact record/history inspection remains available.
 
 ## Evidence
 
@@ -75,7 +75,7 @@ assertions and unavailable dependencies transitively. Occurrence and due dates d
 not affect retrieval eligibility. `lifecycle: all` on lookup/search and
 `historical: true` on connections explicitly include inactive historical material,
 but never withdrawn records or their dependents. Exact record inspection and the
-exhaustive Records list retain authorized historical/invalid material.
+explicit historical Records list (`lifecycle: all`) retain authorized historical/invalid material.
 
 Page writes accept `aliases`, `tags`, `dependencies` (max 100 entries each) and
 `fields`: supplied collections replace, empty clears, omitted preserves on edit.
@@ -84,3 +84,13 @@ no arbitrary metadata or caller-controlled lifecycle, storage timestamps, path,
 scope or ID. Bounds remain 48,000 body characters and 64 KiB per complete record;
 evidence has no count cap beyond the complete-record limit. Temporal keys above
 are now reserved and validated; other unknown authored keys remain preserved.
+
+## Explicit correction/withdrawal metadata
+
+`supersedes` and `superseded_by` are optional stable record IDs, separate from
+`dependencies`: a replacement does not depend on the obsolete assertion.
+`lifecycle_change` is `{reason, at, actor, request_id}` and records the latest
+explicit lifecycle change. These fields are written by `knowledge_correct` and
+`knowledge_withdraw`, not supplied as arbitrary metadata on create/page save.
+Reasons and originals remain inspectable; durable operational guards prevent stale
+active Markdown from clearing supersession/withdrawal. See [CORRECTIONS.md](CORRECTIONS.md).

@@ -1,3 +1,4 @@
+import { observeLifecycleGuards } from "./lifecycle.js";
 import { activeNow } from "./temporal.js";
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
@@ -13,6 +14,7 @@ const normalize = (value: string) => value.normalize("NFKC").trim().replace(/\s+
 
 /** Operational safeguards, NOT a rebuildable projection. Observing withdrawal is irreversible here. */
 export function observeWithdrawals(db: DatabaseSync, records: LoadedRecord[], binding: string) {
+  observeLifecycleGuards(db, records, binding);
   db.exec("CREATE TABLE IF NOT EXISTS keyword_withdrawals_v1 (binding TEXT NOT NULL, id TEXT NOT NULL, PRIMARY KEY(binding,id)) STRICT");
   const insert = db.prepare("INSERT OR IGNORE INTO keyword_withdrawals_v1 VALUES (?,?)");
   // A duplicate/invalid record cannot safely clear an existing withdrawal either.

@@ -4,6 +4,14 @@
 **Updated:** 2026-09-22
 **Status:** V1 scope baseline; not implemented. Follow-ups are candidates, not release commitments.
 
+## Product direction update — 2026-09-23
+
+Knowledge UI is a read-only inspector. User-requested knowledge changes go
+through chat and agent tools; prior direct editing/form requirements below are
+superseded by [UI_REDESIGN_SUPPORT.md](UI_REDESIGN_SUPPORT.md). Correction and
+withdrawal ship as agent operations, without browser forms or dialogs. See
+[CORRECTIONS.md](CORRECTIONS.md) for the implemented lifecycle contract.
+
 ## 1. Product promise
 
 > Capture knowledge with evidence, organize it into an editable Markdown vault, find it reliably, and correct it without losing history.
@@ -155,7 +163,7 @@ ingestion, meeting ingestion, and entity handling. See [WORKFLOWS.md](WORKFLOWS.
 for the supported operation map and deliberate departures. Shared conventions,
 source retention and individual-publication recovery are exercised in isolated
 contract trials. Structured claim/relationship writes and entity metadata edits
-are now implemented as a backend/UI milestone. Dedicated media/correction/curation
+are now implemented as a backend/UI milestone. A correction skill and correction/withdrawal mechanics are now implemented. Dedicated media/curation
 skills and multi-record ingestion checkpoints remain missing.
 
 After the implemented [structured-write foundation](STRUCTURED_WRITES.md), the

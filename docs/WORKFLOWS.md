@@ -1,6 +1,6 @@
 # Bundled workflows
 
-Knowledge ships five automatically discoverable, repository-owned skills through
+Knowledge ships six automatically discoverable, repository-owned skills through
 `openclaw.plugin.json` (`skills: ["./skills"]`) and the package file allow-list.
 They are semantic ports, not a gbrain runtime dependency or a Workshop install.
 
@@ -11,6 +11,7 @@ They are semantic ports, not a gbrain runtime dependency or a Workshop install.
 | `knowledge-ingest` | Documents/articles, source retention and relevant entity updates |
 | `knowledge-meeting-ingest` | Transcripts/notes, speaker uncertainty, decisions, chronology |
 | `knowledge-entities` | Resolve identities; scoped, sourced profile creation/updates |
+| `knowledge-correct` | Exact-target correction/withdrawal, retained evidence and impact inspection |
 
 Read the selected SKILL.md, then its linked references. Shared guidance is authored
 once in `skills/shared/`; `npm run skills:sync` embeds copies inside each skill.
@@ -42,7 +43,7 @@ slice; no new runtime, connector, extraction dependency or paid service is added
 | sync / embed | No sync command: saves publish; keyword search reconciles its own index |
 | bulk job checkpoints | Itemized agent work log + individual upload/publication receipts; no atomic/resumable multi-record job |
 | aliases/tags/dependencies | Supported collection replacement through `knowledge_save_page`; omitted fields preserve existing values |
-| claim correction/withdrawal | Not shipped as a skill: backend lifecycle/claim mutation still missing. Supported page edits can explicitly correct prose without deleting evidence |
+| claim correction/withdrawal | `knowledge_correct` atomically replaces and supersedes a claim/edge; `knowledge_withdraw` retracts an exact record; page prose uses revision-fenced `knowledge_save_page` |
 | media extraction/OCR/transcription | Host capability if available; otherwise source retention and explicit partial result. Dedicated media skill deferred |
 | curation/dreaming / automatic inbound enrichment | Deferred; no ambient capture, broad profile research or scheduling |
 | push-before-link | Returned local path/ID or verified host link; no private-vault GitHub push to manufacture a URL |
@@ -68,5 +69,17 @@ written into the user's vault.
 Package tests check skill metadata, local reference closure, tool references,
 generated reference freshness and npm payload inclusion. Host discovery is checked
 separately with the installed plugin catalog. Structured writes are now available;
-full workflow upgrades and real-content agent trials follow correction/withdrawal
-and durable ingestion checkpoints. Bundling skills alone does not complete v1.
+full workflow upgrades and real-content agent trials follow durable ingestion
+checkpoints. Bundling skills alone does not complete v1.
+
+## Correction workflow port
+
+The correction-pipeline skill at the same pinned gbrain commit was read in full.
+Knowledge keeps target identification, evidence attribution, owning-record repair,
+propagation inspection and a concrete outcome report. Deliberate departures:
+Knowledge's existing file/SQLite journal replaces separate forget/remember calls
+with one two-record correction; page prose remains revision-based. No automatic
+MEMORY/SOUL/USER edits, fabricated guard facts, semantic search, or promise to
+repair every prose copy is imported. Structured chat references are accepted as
+primary targets when the host supplies them; this does not implement host draft
+composition. See [CORRECTIONS.md](CORRECTIONS.md).

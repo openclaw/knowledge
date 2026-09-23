@@ -1,3 +1,4 @@
+import { eligible } from "./retrieval.js";
 import type { SampleVault } from "./vault.js";
 import type { RecordInput, RecordOutput, OntologyInput, OntologyOutput } from "./inspection-contract.js";
 import type { LoadedRecord } from "./model.js";
@@ -62,7 +63,7 @@ export async function inspectOntology(vault: SampleVault, input: OntologyInput):
   } else {
     result.definitions = page((o?.definitions ?? []).filter(d => (!input.name || d.definition.name === input.name) && (!input.kind || d.definition.kind === input.kind))).map(d => {
       const def = d.definition;
-      const records = data.records.filter(r => r.kind === def.kind && r.type === def.name);
+      const records = eligible(data, undefined, false).filter(r => r.kind === def.kind && r.type === def.name);
       return {
         name: def.name, label: def.label, kind: def.kind, primitive: def.primitive ?? "", description: def.description,
         aliases: def.aliases ?? [], recordCount: records.length,

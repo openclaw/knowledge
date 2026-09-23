@@ -26,6 +26,11 @@ export const Envelope = Type.Object({
   scope: Scope,
   recorded_at: timestamp, updated_at: timestamp,
   lifecycle: Type.Union([Type.Literal("active"), Type.Literal("superseded"), Type.Literal("withdrawn")]),
+  supersedes: Type.Optional(id), superseded_by: Type.Optional(id),
+  lifecycle_change: Type.Optional(Type.Object({
+    reason: Type.String({ minLength: 1, maxLength: 2000 }), at: timestamp,
+    actor: text(100), request_id: Type.String({ pattern: "^[a-f0-9-]{36}$" }),
+  }, { additionalProperties: false })),
   aliases: Type.Optional(strings), tags: Type.Optional(strings),
   type: Type.Optional(name), fields: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
   claim_kind: Type.Optional(Type.Union([Type.Literal("fact"), Type.Literal("preference"), Type.Literal("decision"), Type.Literal("commitment"), Type.Literal("event"), Type.Literal("belief")])),

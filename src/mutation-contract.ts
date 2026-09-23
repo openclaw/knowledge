@@ -38,6 +38,27 @@ export const RelationshipInput = Type.Object({
   fields: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
 }, { additionalProperties: false });
 export type RelationshipInput = Static<typeof RelationshipInput>;
+/** Lifecycle changes are explicit, revision-fenced operations, not editable fields. */
+const target = {
+  requestId, id, expectedRevision: Type.Integer({ minimum: 1 }),
+  expectedHash: Type.String({ pattern: "^[a-f0-9]{64}$" }),
+  expectedVaultId: Type.Optional(requestId), reason: Type.String({ minLength: 1, maxLength: 2000 }),
+};
+export const WithdrawInput = Type.Object(target, { additionalProperties: false });
+export type WithdrawInput = Static<typeof WithdrawInput>;
+export const CorrectInput = Type.Object({
+  ...target, expectedOntologyFingerprint: common.expectedOntologyFingerprint,
+  replacement: Type.Union([
+    Type.Object({ kind: Type.Literal("claim"), ...Type.Omit(ClaimInput, ["requestId", "expectedVaultId", "expectedOntologyFingerprint"]).properties }, { additionalProperties: false }),
+    Type.Object({ kind: Type.Literal("relationship"), ...Type.Omit(RelationshipInput, ["requestId", "expectedVaultId", "expectedOntologyFingerprint"]).properties }, { additionalProperties: false }),
+  ]),
+}, { additionalProperties: false });
+export type CorrectInput = Static<typeof CorrectInput>;
+export const LifecycleImpact = Type.Object({
+  items: Type.Array(Type.Object({ id, title: text(200), kind: text(40), direct: Type.Boolean() }, { additionalProperties: false }), { maxItems: 500 }),
+  total: Type.Integer({ minimum: 0 }),
+  message: text(1000),
+}, { additionalProperties: false });
 export type WriteInput = SavePage | ClaimInput | RelationshipInput;
 export type WriteKind = "page" | "claim" | "relationship";
 export const GitCheckpoint = Type.Object({
@@ -51,7 +72,10 @@ export const GitStatus = Type.Object({
 export const Receipt = Type.Object({
   requestId, state: Type.Union([Type.Literal("accepted"), Type.Literal("published"), Type.Literal("conflict")]),
   id: text(96), path: text(500), revision: Type.Integer(), hash: text(64),
-  at: text(40), message: text(1000), indexed: Type.Literal(false), git: Type.Optional(GitCheckpoint),
+  at: text(40), message: text(1000),
+  operation: Type.Optional(Type.Union([Type.Literal("correct"), Type.Literal("withdraw")])),
+  targetId: Type.Optional(id), replacementId: Type.Optional(id), reason: Type.Optional(text(2000)),
+  impact: Type.Optional(LifecycleImpact), indexed: Type.Literal(false), git: Type.Optional(GitCheckpoint),
 }, { additionalProperties: false });
 export type Receipt = Static<typeof Receipt>;
 export const HistoryEntry = Type.Object({

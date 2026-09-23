@@ -1,3 +1,4 @@
+import { eligible } from "./retrieval.js";
 import { temporalProblems } from "./temporal.js";
 import * as fs from "node:fs";
 import path from "node:path";
@@ -130,11 +131,11 @@ export class SampleVault {
     records.sort((a,b) => a.path.localeCompare(b.path));
     return { records, ontology, sources, issues, checkedAt: new Date().toISOString() };
   }
-  async list(input: { offset?: number; limit?: number; kind?: string; type?: string; query?: string }) {
+  async list(input: { offset?: number; limit?: number; kind?: string; type?: string; query?: string; lifecycle?: "active" | "all" }) {
     const data = await this.scan();
     const query = input.query?.toLowerCase().trim();
     const types = input.type ? expandTypes(data.ontology, input.type) : null;
-    const matched = data.records.filter(r => (!input.kind || r.kind === input.kind) && (!types || (r.kind === "page" ? types.has(r.type) : r.type === input.type)) && (!query || [r.id, r.title, ...(r.metadata.aliases ?? [])].some(v => v.toLowerCase().includes(query))));
+    const matched = (input.lifecycle === "all" ? data.records : eligible(data, undefined, false)).filter(r => (!input.kind || r.kind === input.kind) && (!types || (r.kind === "page" ? types.has(r.type) : r.type === input.type)) && (!query || [r.id, r.title, ...(r.metadata.aliases ?? [])].some(v => v.toLowerCase().includes(query))));
     const offset = input.offset ?? 0, limit = input.limit ?? 50;
     return { records: matched.slice(offset, offset + limit).map(summary), total: matched.length, offset, nextOffset: offset + limit < matched.length ? offset + limit : null, checkedAt: data.checkedAt };
   }
@@ -147,7 +148,7 @@ export class SampleVault {
         description: d.definition.description, fields: d.definition.fields, fromTypes: d.definition.from_types ?? [], toTypes: d.definition.to_types ?? [],
         directory: d.definition.directory, aliases: d.definition.aliases ?? [], source: d.source, ontology: d.ontology, version: d.version,
         effective: JSON.stringify(d.definition, null, 2),
-        affectedRecords: data.records.filter(r => r.kind === d.definition.kind && r.type === d.definition.name).map(summary),
+        affectedRecords: eligible(data, undefined, false).filter(r => r.kind === d.definition.kind && r.type === d.definition.name).map(summary),
       })),
       sources: data.sources.map(s => ({ path: s.path, raw: s.raw, valid: s.valid, name: s.manifest?.name ?? "", version: s.manifest?.version ?? "" })),
       affectedRecords: data.records.filter(r => data.issues.some(i => i.path === r.path && ["ontology-unavailable", "required-field", "field-type", "endpoint-type", "filing"].includes(i.code))).map(summary),
@@ -158,7 +159,7 @@ export class SampleVault {
     const data = await this.scan(), matches = data.records.filter(r => r.id === id);
     if (matches.length !== 1) return { record: null, issues: [], references: [], evidence: [] };
     const r = matches[0], refs = new Set([...(r.metadata.entities ?? []), ...(r.metadata.dependencies ?? []), ...[r.metadata.from, r.metadata.to, r.metadata.owner].filter((x): x is string => Boolean(x))]);
-    const references = data.records.filter(other => refs.has(other.id) || other.metadata.from === id || other.metadata.to === id || other.metadata.entities?.includes(id) || other.metadata.dependencies?.includes(id) || other.metadata.owner === id).map(summary);
+    const references = eligible(data, undefined, false).filter(other => refs.has(other.id) || other.metadata.from === id || other.metadata.to === id || other.metadata.entities?.includes(id) || other.metadata.dependencies?.includes(id) || other.metadata.owner === id).map(summary);
     const evidence = [];
     for (const e of (r.metadata.evidence ?? []).slice(evidenceOffset, evidenceOffset + evidenceLimit)) {
       let excerpt = "", verified = false, excerptTruncated = false;

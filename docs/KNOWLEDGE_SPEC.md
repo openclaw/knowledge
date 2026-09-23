@@ -636,3 +636,12 @@ Paths below are relative to OpenClaw's `extensions/memory-wiki/`. They identify 
 | `README.md` and plugin registration/adapters | Review authority-model differences and per-agent lifecycle integration patterns |
 
 Carry over applicable regression coverage for malformed YAML, Unicode filenames, code-fence links, nested/detached asynchronous mutations, agent isolation, and restored-vault races. Adapt expectations to the authoritative editable-vault contract rather than preserving incompatible compiler behavior.
+
+## Implemented correction/withdrawal contract — 2026-09-23
+
+See [CORRECTIONS.md](CORRECTIONS.md) for the exact shipped `knowledge_correct`
+and `knowledge_withdraw` contracts, journal recovery, lifecycle guards and
+dependency impact. These replace the earlier proposed forget/unlink tool names.
+The current UI direction is read-only inspection with changes through agent
+chat/tools; prior direct browser-edit requirements are superseded by
+[UI_REDESIGN_SUPPORT.md](UI_REDESIGN_SUPPORT.md).

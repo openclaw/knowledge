@@ -55,9 +55,9 @@
     "onStartup": true
   },
   "controlUi": {
-    "entry": "dist/control-ui/ecd7cce06c8dfeb0ababb4ba68a0a85abdf65f0c8a77836117d66adf03e168aa/index.js",
+    "entry": "dist/control-ui/aa4b4c4ac438935e7dbae016bb49742e03484a2bc3d4cca2addc71ee130832c0/index.js",
     "styles": [
-      "dist/control-ui/ecd7cce06c8dfeb0ababb4ba68a0a85abdf65f0c8a77836117d66adf03e168aa/index.css"
+      "dist/control-ui/aa4b4c4ac438935e7dbae016bb49742e03484a2bc3d4cca2addc71ee130832c0/index.css"
     ]
   },
   "skills": [
@@ -68,6 +68,7 @@
       "knowledge_attach",
       "knowledge_attachment",
       "knowledge_connections",
+      "knowledge_correct",
       "knowledge_create_claim",
       "knowledge_create_relationship",
       "knowledge_diagnostics",
@@ -81,7 +82,8 @@
       "knowledge_resume",
       "knowledge_revision",
       "knowledge_save_page",
-      "knowledge_status"
+      "knowledge_status",
+      "knowledge_withdraw"
     ]
   }
 }

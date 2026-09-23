@@ -203,8 +203,8 @@ replace (empty clears). Existing ID/revision/hash edit preconditions still apply
 All three operations share accepted/published/conflict receipts, request replay,
 resume/history/Git behavior, service-generation fencing and live refresh. Changed
 payload or operation under an existing request ID fails. Creates generate their
-own ID/path. Structured assertions cannot be edited/withdrawn through these APIs;
-that is the next lifecycle milestone.
+own ID/path. These create APIs do not overwrite assertions. Use `knowledge_correct` and
+`knowledge_withdraw` for explicit lifecycle changes; see [CORRECTIONS.md](CORRECTIONS.md).
 
 `knowledge_record({id, includeMetadata:true})` returns all portable assertion
 fields as a typed object. `knowledge_connections({id})` returns paginated incoming
@@ -220,3 +220,18 @@ Native UI offers New claim/New relationship alongside New page. Advanced source
 controls accept file uploads or existing evidence with exact locators. Drafts
 retain operation kind, all form values and exact submitted payload/preconditions;
 failed authoring-option loads can be explicitly retried without losing a draft.
+
+## Corrections and withdrawal
+
+`knowledge_correct` requires the target ID, current revision/hash, nonblank reason,
+current ontology fingerprint, and a complete same-kind `replacement`. One receipt
+identifies the superseded target and new record, with known dependency impact.
+`knowledge_withdraw` retracts one exact page/claim/relationship, without deleting
+history or source files. Both are agent-only operations; browser requests are
+rejected. Repeat identical request IDs/payloads after an uncertain response.
+
+Default records/ontology/status counts now describe current eligible knowledge.
+`knowledge_records({lifecycle:"all"})` explicitly requests historical inventory.
+Use exact record metadata and history for obsolete assertions and withdrawal
+reasons; inactive dependencies are not automatically repaired. The complete
+portable/recovery/access contract is in [CORRECTIONS.md](CORRECTIONS.md).
