@@ -96,3 +96,10 @@
 .knowledge-editor textarea { font-family: var(--font-mono, monospace); line-height: 1.6; resize: vertical; }
 .knowledge-editor textarea:disabled, .knowledge-editor input:disabled { opacity: .85; }
 .knowledge-editor details > label { margin-top: 14px; }
+
+.knowledge-search-form { display: flex; flex-wrap: wrap; gap: .65rem; align-items: end; width: 100%; }
+.knowledge-search-form > input[type="search"] { flex: 1 1 100%; }
+.knowledge-search-form label { display: grid; gap: .25rem; font-size: .85rem; }
+.knowledge-search-hit { padding: 1rem; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+.knowledge-search-hit > button { font-weight: 600; text-align: left; }
+.knowledge-search-hit pre { white-space: pre-wrap; }

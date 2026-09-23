@@ -1,3 +1,31 @@
+# Keyword retrieval verification — 2026-09-23
+
+Isolated branch `openclaw/keyword-retrieval`, based on `aea7253`.
+
+- `npm run check`: passed.
+- `npm test`: **93 passed, 0 failed** (17 focused retrieval tests plus 76 existing tests).
+- `npm run build`: passed; native UI assets and tool manifest regenerated.
+- `npm run validate`: `valid: true`, plugin `knowledge`, no errors.
+- `git diff --check`: passed.
+- Retrieval coverage: title/alias/body FTS5, exact-name ambiguity, typed UI/tool contracts,
+  literal modes/Unicode, filters before BM25, scope-isolated scores/counts/snippets,
+  bounded revision/hash/line citations, invalid/duplicate/dependency exclusion,
+  stale-edit/rename/delete reconciliation, withdrawal reappearance/restart/rebuild,
+  injected index failure without stale fallback, authority and restore fences,
+  unsafe filesystem links, publication-time lag/read-through, empty conversation scope.
+- Dependencies use a local worktree symlink to the parent checkout's compatible
+  `node_modules`; no committed dependency version changes.
+- **No live reload, gateway configuration change, or real-vault mutation.** Native
+  Search UI is compiled and its shared client contract tested; visual/browser
+  interaction in the running host is unverified and left to the integration owner.
+- Parent owns draft persistence, watchers/events/reconnect and live reliability.
+  New search modules are isolated; shared service/storage/control-ui hooks must be
+  merged with that work and the manifest regenerated after integration.
+
+The sections below are earlier milestone reports, not current capability claims.
+
+---
+
 # Automatic local Git history — 2026-09-23
 
 - Implemented automatic local history for writable vaults when Git is available. Added `KnowledgeStorage` as the shared owner of reads, observations, SQLite, publication and Git; feature handlers no longer reach into the database or real-vault adapter directly.

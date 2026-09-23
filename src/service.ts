@@ -1,3 +1,5 @@
+import { DatabaseSync } from "node:sqlite";
+import { keywordSearch, exactLookup } from "./retrieval.js";
 import { randomUUID } from "node:crypto";
 import type { FeatureHandlers, FeatureInvocationContext } from "openclaw/plugin-sdk/feature-plugin";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
@@ -43,6 +45,12 @@ export function createKnowledgeService(api: OpenClawPluginApi): FeatureHandlers<
         definitions: data.ontology?.definitions.length ?? 0, ontologyAvailable: Boolean(data.ontology), ontologyFingerprint: data.ontology?.fingerprint ?? "", issues: data.issues.length,
       } as const;
     }),
+    grep: async (input, context) => {
+      if (storage) return storage.search(input, authority(context));
+      const data = await new SampleVault().scan(), db = new DatabaseSync(":memory:");
+      try { return keywordSearch(db, data, input, "sample", "sample"); } finally { db.close(); }
+    },
+    lookup: async (input, context) => storage ? storage.lookup(input, authority(context)) : exactLookup(await new SampleVault().scan(), input),
     records: (input, context) => run(context, vault => vault.list(input)),
     record: (input, context) => run(context, vault => inspectRecord(vault, input)),
     ontology: (input, context) => run(context, vault => inspectOntology(vault, input)),

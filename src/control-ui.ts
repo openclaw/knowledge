@@ -4,6 +4,7 @@ import { contract } from "./contract.js";
 import "./control-ui.css";
 import { pageEditor } from "./page-editor.js";
 import { loadVocabulary } from "./inspection-client.js";
+import { initialSearchState, searchToolbar, loadSearch, searchResults } from "./retrieval-view.js";
 import { ontologyView } from "./ontology-view.js";
 
 type Summary = FeatureOutput<typeof contract, "records">["records"][number];
@@ -33,14 +34,15 @@ export default defineControlUiPlugin({
         const nav = el("nav", undefined, "knowledge-tabs"); nav.setAttribute("aria-label", "Knowledge views");
         const toolbar = el("div", undefined, "knowledge-toolbar"), content = el("div", undefined, "knowledge-content");
         section.append(header, banner, status, nav, toolbar, content); container.append(section);
-        let tab: "records" | "ontology" | "diagnostics" = "records", offset = 0, query = "", kind = "", type = "", selectedId = "";
+        const searchState = initialSearchState();
+        let tab: "records" | "search" | "ontology" | "diagnostics" = "records", offset = 0, query = "", kind = "", type = "", selectedId = "";
         let writesEnabled = false;
         const editPage = (record?: NonNullable<FeatureOutput<typeof contract, "record">["record"]>) => void pageEditor(section, feature, record, id => { selectedId = id; tab = "records"; renderToolbar(); void refresh(); }, message => context.host.redact(message));
         let generation = 0, detailGeneration = 0, disposed = false, debounce: ReturnType<typeof setTimeout> | undefined;
         const alive = (n: number) => !disposed && !context.signal.aborted && n === generation && context.host.connection.connected;
         const showError = (error: unknown) => { content.replaceChildren(el("p", "Knowledge unavailable: " + context.host.redact(error instanceof Error ? error.message : String(error)), "knowledge-error")); };
         const tabs = new Map<string, HTMLButtonElement>();
-        for (const [key, label] of [["records", "Records"], ["ontology", "Ontology"], ["diagnostics", "Activity & issues"]] as const) {
+        for (const [key, label] of [["records", "Records"], ["search", "Search"], ["ontology", "Ontology"], ["diagnostics", "Activity & issues"]] as const) {
           const control = button(label, () => { tab = key; selectedId = ""; clearTimeout(debounce); renderToolbar(); void load(); }); tabs.set(key, control); nav.append(control);
         }
         function renderToolbar() {
@@ -58,7 +60,8 @@ export default defineControlUiPlugin({
             if (writesEnabled) toolbar.append(button("New page", () => editPage()));
             toolbar.append(button("Refresh", () => void refresh()));
           }
-          toolbar.hidden = tab !== "records";
+          if (tab === "search") toolbar.append(searchToolbar(searchState, () => void load(), () => { ++generation; ++detailGeneration; content.replaceChildren(el("p", "Search changed. Press Search to update results.")); }));
+          toolbar.hidden = tab !== "records" && tab !== "search";
         }
         async function showDetail(id: string, target: HTMLElement, n: number) {
           const detail = ++detailGeneration; selectedId = id; target.replaceChildren(el("p", "Loading record…"));
@@ -135,6 +138,18 @@ export default defineControlUiPlugin({
               if (result.nextOffset !== null) pages.append(button("Next", () => { offset = result.nextOffset!; void load(); }));
               content.append(pages);
               if (selectedId) void showDetail(selectedId, detail, n);
+            } else if (tab === "search") {
+              if (!searchState.query.trim()) { content.replaceChildren(el("p", "Search accepted, active knowledge by keywords, or resolve an exact identity. Use Records for exhaustive browsing, including records needing attention.")); return; }
+              const result = await loadSearch(feature, { ...searchState });
+              if (!alive(n)) return;
+              if ("index" in result && result.index.state === "ready") {
+                if (searchState.offset && searchState.snapshot && searchState.snapshot !== result.index.snapshot) {
+                  searchState.offset = 0; searchState.snapshot = undefined;
+                  content.replaceChildren(el("p", "Knowledge changed between result pages. Run Search again to restart from the current snapshot.")); return;
+                }
+                searchState.snapshot = result.index.snapshot;
+              }
+              content.replaceChildren(searchResults(result, searchState, (id, target) => void showDetail(id, target, n), () => void load()));
             } else if (tab === "ontology") {
               const result = await loadVocabulary(feature, true); if (!alive(n)) return;
               content.replaceChildren(ontologyView(result, id => {

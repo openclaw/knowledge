@@ -83,21 +83,26 @@ request just to make a misleading error true.
 
 `knowledge_history` adds a scoped `git: {state, pending, message}` summary. States also include `idle` (no content observed yet) and `read-only`. Neither counts nor retries include other scopes. Normal scoped scans also retry queued history. No GitHub or remote operations are exposed. See [local-history details](LOCAL_HISTORY.md).
 
-## Keyword retrieval: proposed next step, not implemented
+## Keyword retrieval and exact identity lookup
 
-SQLite FTS5 is the existing-solution choice: OpenClaw memory-core already uses
-FTS5/BM25, and lossless-claw provides FTS-backed recall. Reuse the engine and proven
-patterns, not either plugin's private database or internal modules.
+`knowledge_grep({query})` ranks titles, aliases and authored bodies with local
+SQLite FTS5. Modes: `all` (default, every word), `any`, `phrase`; not regex/raw FTS.
+`knowledge_lookup({query})` resolves exact IDs, full names and aliases, returning
+`found`, `ambiguous` or `missing`. Never infer identity from the first ambiguous hit.
 
-A `knowledge_grep` could search title, aliases and body, accept explicit query mode
-and kind/type/lifecycle filters, and return bounded ranked snippets with stable ID,
-path, revision/hash and match locations. Default to active valid unambiguous records;
-keep candidate/accepted status visible. Keep `knowledge_records` as exhaustive
-listing rather than conflating ranked results with a complete catalog.
+Both default to **accepted, active** valid records. New pages are candidates; use
+`acceptance:"candidate"` or `"all"` explicitly. `lifecycle:"superseded"` or `"all"`
+includes historical records, never withdrawals. Both accept `kind`, `type` (ontology
+aliases supported), exact `tag`, `limit` (1–50, default 20), and `offset`.
 
-The index belongs in Knowledge's SQLite state as a rebuildable projection of
-Markdown. Scope must constrain corpus/counts/ranking **before** search, not filter
-private hits after ranking. Index updates must reconcile edits, renames, deletes
-and publication/restore generations. Report unavailable or stale indexing explicitly,
-not as an empty match set. Test those invariants before adding the tool. Embeddings,
-a new service and a general regex engine are not prerequisites for body search.
+Hits contain bounded snippets, matched fields, revision/hash citations and up to
+three verified evidence locators. Inspect with `knowledge_record` for more.
+Keyword `index.state:"unavailable"` / `total:null` is a failed retrieval, not zero
+matches; retry or inspect the database. `coverage.complete:false` signals source
+validation issues. Compare `index.snapshot` across pages and restart if changed.
+Exact lookup does not depend on FTS. `knowledge_records` remains exhaustive
+listing, including records needing inspection; search is not an inventory.
+
+Publication receipts describe publication-time state: `indexed:false` now means
+pending until the next search reconciles. Search reports its own current snapshot.
+See [retrieval semantics, security and rebuild boundaries](RETRIEVAL.md).

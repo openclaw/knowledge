@@ -1,3 +1,4 @@
+import { SearchInput, SearchOutput, LookupInput, LookupOutput } from "./retrieval-contract.js";
 import { Type } from "typebox";
 import { defineFeatureContract } from "openclaw/plugin-sdk/feature-contract";
 import { text } from "./model.js";
@@ -49,6 +50,14 @@ export const contract = defineFeatureContract({
         records: Type.Integer(), validRecords: Type.Integer(), definitions: Type.Integer(), ontologyAvailable: Type.Boolean(), ontologyFingerprint: text(64), issues: Type.Integer(),
       }, { additionalProperties: false }),
       tool: { name: "knowledge_status", label: "Knowledge status" },
+    },
+    grep: {
+      kind: "query", description: "Rank authorized valid knowledge by title/alias/body keywords with SQLite FTS5. Default: all word tokens, accepted and active. mode=any ORs literal words; mode=phrase matches their order. No raw FTS/regex operators. Explicit acceptance=candidate/all includes drafts; lifecycle=superseded/all includes history, never withdrawn records. Filters apply before ranking. Snippets have revision/hash citations and body line locators. index.state=unavailable and total=null mean failed retrieval, not no matches. Compare index.snapshot across pages; restart on changes. Not exhaustive inventory: use knowledge_records. No embeddings.",
+      input: SearchInput, output: SearchOutput, tool: { name: "knowledge_grep", label: "Search knowledge" },
+    },
+    lookup: {
+      kind: "query", description: "Resolve an exact stable ID, full title or declared alias in the trusted scope; returns found, ambiguous or missing without choosing an ambiguous identity. Names/aliases normalize Unicode, case and whitespace; IDs are case-sensitive. Accepted active records by default; candidate/historical filters are explicit. Invalid, withdrawn and unavailable dependencies are excluded. Independent of keyword indexing. Use knowledge_record for full inspection and knowledge_records for exhaustive listing.",
+      input: LookupInput, output: LookupOutput, tool: { name: "knowledge_lookup", label: "Resolve knowledge identity" },
     },
     records: {
       kind: "query", description: "List authorized records exhaustively using pagination, with optional kind, ontology type/alias, or ID/title/alias filtering.",
