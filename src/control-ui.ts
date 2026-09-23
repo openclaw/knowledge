@@ -251,8 +251,7 @@ export default defineControlUiPlugin({
         const previous = button("Previous", () => { offset = Math.max(0, offset - 50); void load(); }); previous.disabled = !offset;
         const next = button("Next", () => { offset = result.nextOffset!; void load(); }); next.disabled = result.nextOffset === null || capped; pages.append(previous, next); panel.append(pages);
         if (capped) panel.append(el("p", "This server cannot page beyond 550 records. Narrow the type filter to see more.", "knowledge-notice"));
-        const browseNote = rawBlock("About this list", "Listed in server order. Last-saved sorting and stable paging are not available yet."); browseNote.className = "knowledge-list-info";
-        const results = el("div", undefined, "knowledge-browse-results"); results.append(panel, browseNote); layout.append(facets, results); content.replaceChildren(layout);
+        const results = el("div", undefined, "knowledge-browse-results"); results.append(panel); layout.append(facets, results); content.replaceChildren(layout);
       }
       async function recent(n: number) {
         const history = await feature.invoke("history", { offset: historyOffset, limit: 20 }); if (!live(n)) return;
@@ -270,7 +269,7 @@ export default defineControlUiPlugin({
           }
           group!.append(row); }
         if (!history.entries.length) feed.append(empty("No recorded activity yet", "Knowledge saved by your agent will appear here. Existing vault records are available in Browse."));
-        const pages = el("div", undefined, "knowledge-pagination"); if (historyOffset) pages.append(button("Newer activity", () => { historyOffset = Math.max(0, historyOffset - 20); void load(); })); if (history.nextOffset !== null) pages.append(button("Older activity", () => { historyOffset = history.nextOffset!; void load(); })); feed.append(pages); const note = rawBlock("About this activity", "Conversation grouping and attention counts are not available for these saves yet. Rows show recorded revisions and open the current record."); note.className = "knowledge-list-info"; feed.append(note); content.replaceChildren(feed);
+        const pages = el("div", undefined, "knowledge-pagination"); if (historyOffset) pages.append(button("Newer activity", () => { historyOffset = Math.max(0, historyOffset - 20); void load(); })); if (history.nextOffset !== null) pages.append(button("Older activity", () => { historyOffset = history.nextOffset!; void load(); })); feed.append(pages); content.replaceChildren(feed);
       }
       async function load() {
         const n = ++generation; if (vaultChanged) return;

@@ -102,7 +102,7 @@ The follow-up pass uses the supplied `KnowledgeV2Screen.jsx` design directly:
   search. Enter explicitly runs ranked search; typing does not pretend to filter
   the complete paginated inventory.
 - Unavailable backend information is still omitted, not populated from the mock.
-  Explanatory implementation limitations are under “About this list/activity.”
+  Implementation limitations are documented here, not shown in the product UI.
 
 For production-style visual verification, set `KNOWLEDGE_HOST_UI_ROOT` to the
 running host's `dist/control-ui` directory as well as `KNOWLEDGE_DESIGN_ROOT`.

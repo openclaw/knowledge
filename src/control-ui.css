@@ -90,8 +90,6 @@
 .knowledge-pagination:empty { display: none; }
 .knowledge-pagination > span { flex: 1; }
 .knowledge-pagination button { padding: 5px 10px; font-size: 12px; border-radius: var(--radius-sm, 6px); }
-.knowledge-page .knowledge-list-info { margin-top: 12px; color: var(--muted); font-size: 12px; }
-.knowledge-list-info pre { margin: 8px 0 0; font: inherit; }
 .knowledge-empty { padding: 28px; }
 .knowledge-empty h2 { font-size: 18px; font-weight: 600; color: var(--text-strong, var(--text)); margin-bottom: 8px; }
 .knowledge-breadcrumb { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
