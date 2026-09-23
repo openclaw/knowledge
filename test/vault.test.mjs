@@ -4,6 +4,7 @@ import { cp, mkdtemp, mkdir, readdir, readFile, writeFile, rename, symlink, rm }
 import os from 'node:os';
 import path from 'node:path';
 import { SampleVault, SAMPLE_ROOT, digest } from '../dist/vault.js';
+import { inspectRecord, inspectOntology } from "../dist/inspection.js";
 import { contract } from '../dist/contract.js';
 import { Check } from 'typebox/value';
 async function fixture(t) {
@@ -23,13 +24,13 @@ test('representative vault: records, ontology, diagnostics, citations, and zero 
   assert.equal(data.records.length, 7);
   assert.equal(data.records.filter(r => r.valid).length, 7);
   assert.equal(data.ontology.definitions.length, 38);
-  assert.equal(Check(contract.operations.ontology.output, await vault.inspectOntology()), true);
+  assert.equal(Check(contract.operations.ontology.output, await inspectOntology(vault, {})), true);
   assert.deepEqual(data.issues, []);
   const result = await vault.detail('sample_claim_pilot');
   assert.equal(result.evidence[0].verified, true);
   assert.match(result.evidence[0].excerpt, /small pilot garden/);
   assert.ok(result.references.some(r => r.id === 'sample_person_alex'));
-  assert.equal(Check(contract.operations.record.output, result), true);
+  assert.equal(Check(contract.operations.record.output, await inspectRecord(vault, {id: "sample_claim_pilot"})), true);
   assert.deepEqual(await hashes(SAMPLE_ROOT), before);
 });
 test('bounded listing supports exhaustive pagination, aliases and kind filters', async () => {

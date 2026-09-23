@@ -7,6 +7,7 @@ import {stringify} from 'yaml';
 import {Check} from 'typebox/value';
 import {SampleVault,SAMPLE_ROOT,digest} from '../dist/vault.js';
 import {parseOntology,resolveOntology,expandTypes,inferType} from '../dist/ontology.js';
+import { inspectRecord, inspectOntology } from "../dist/inspection.js";
 import {contract} from '../dist/contract.js';
 const manifest=(name,definitions=[],extra={})=>({format:'knowledge-ontology-v1',name,version:'1.0.0',description:'Test ontology',definitions,...extra});
 const page=(name,extra={})=>({name,label:name,description:'Test page type',kind:'page',primitive:'entity',directory:`${name}/`,fields:[],...extra});
@@ -43,7 +44,7 @@ test('custom local extension participates in inspection, aliases, filing, fields
   await writeFile(path.join(root,'relationships/advises.md'),edge);
   const before=await hashes(root), data=await vault.scan(), report=await vault.inspectOntology();
   assert.deepEqual(data.issues,[]);
-  assert.equal(report.available,true);assert.equal(Check(contract.operations.ontology.output,report),true);
+  assert.equal(report.available,true);assert.equal(Check(contract.operations.ontology.output,await inspectOntology(vault, {})),true);
   const custom=report.definitions.find(d=>d.name==='researcher');
   assert.equal(custom.source,'ontology.yaml');assert.equal(custom.affectedRecords.length,1);
   assert.equal(custom.description,researcher.description);assert.deepEqual(custom.fields,researcher.fields);
@@ -125,7 +126,7 @@ test('invalid active ontology is inspectable, blocks dependent validation, and n
     assert.equal(data.ontology,null);assert.equal(report.available,false);assert.equal(report.definitions.length,0);
     assert.equal(report.affectedRecords.length,6);assert.ok(report.issues.some(i=>i.code==='ontology-unavailable'));
     assert.equal(report.sources.find(s=>s.path==='ontology.yaml').raw,raw);
-    assert.equal(Check(contract.operations.ontology.output,report),true);assert.deepEqual(await hashes(root),before);
+    assert.equal(Check(contract.operations.ontology.output,await inspectOntology(vault, {})),true);assert.deepEqual(await hashes(root),before);
     assert.ok((await vault.detail('sample_person_alex')).record);
   }
 });
@@ -186,5 +187,5 @@ test('valid compact manifests remain inspectable after effective-definition form
   assert.ok(Buffer.byteLength(raw)<65536);
   await writeFile(path.join(root,'ontology.yaml'),raw);
   const report=await vault.inspectOntology();assert.equal(report.available,true);
-  assert.equal(Check(contract.operations.ontology.output,report),true);
+  assert.equal(Check(contract.operations.ontology.output,await inspectOntology(vault, {})),true);
 });

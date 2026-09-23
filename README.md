@@ -2,9 +2,30 @@
 
 Evidence-backed knowledge vault and native explorer for OpenClaw.
 
-**Current milestone:** real-vault identity and authorized read access, with writes disabled. Configure one agent vault to browse private records through Control UI and trusted owner-direct agent turns; shared turns are restricted to their own conversation partition. With no vault configuration, the fictional sample remains available. Records, Ontology, and Activity & issues use the same typed service.
+**Current milestone:** authorized real-vault browsing and journaled page creation/editing, shared by Control UI and agent tools. Writes require `vault.writesEnabled: true`; sample mode remains read-only. Owner-direct turns can access the configured agent’s private records; shared turns are restricted to their own conversation partition.
 
-See [real-vault setup, authority, and limitations](docs/REAL_VAULT.md), [the ontology contract](docs/ONTOLOGY.md), and [the fixture format](docs/FORMAT.md).
+| Capability | Status |
+|---|---|
+| Scoped record listing, evidence inspection and ontology validation | Implemented |
+| Model-facing inspection | Concise defaults, targeted views, opt-in metadata/raw sources and pagination; see [API guide](docs/MODEL_API.md) |
+| Create/edit pages and retain supplied text evidence | Implemented, configuration/authority gated; new pages are candidates |
+| Revision/hash preconditions, identical retries, receipts/history | Implemented |
+| Local Git history | Automatic in writable vaults when Git is installed; one commit per publication or observed external-change batch; visible retryable gaps |
+| Accepted-write interruption recovery and conflict retention | Implemented and exercised in isolated fault-injection/process tests; not a complete backup/restore protocol |
+| Browser drafts | Retained within the current mount, including close/reopen; durable reload/remount recovery is not implemented |
+| Body keyword search / FTS, embeddings | Not implemented; listing filters ID/title/alias only |
+| Document/meeting ingestion, claim correction/withdrawal workflows | Not implemented |
+| Automatic filesystem watching and full backup/restore | Not implemented |
+
+See [setup and authority](docs/REAL_VAULT.md), [model-facing API](docs/MODEL_API.md), [ontology](docs/ONTOLOGY.md), and [record format](docs/FORMAT.md). Verification reports distinguish local checks from live activation; a build alone does not update the running backend.
+
+## Local file history
+
+With writes enabled, Knowledge uses Git automatically when the executable is available. It initializes a repository **inside the vault** if needed and commits each published change together with its retained evidence. Existing scoped Markdown and ontology files get a baseline on first scan; later external edits, renames and deletions get one checkpoint per observed batch. No Git opt-in, GitHub account, remote, or additional service is required.
+
+Reads and writes go through one stateful storage service that owns the SQLite journal, file publication and Git checkpoint queue. Git is downstream of publication: a failed checkpoint does not undo a saved page. Receipts and Activity & issues show `committed`, `pending`, or `unavailable`; normal scans retry queued work, and **Retry Git history** / `knowledge_resume` retries a publication explicitly. If Git is installed later, queued versions are committed in order.
+
+Git commits use exact retained bytes, preserve unrelated changes and staged content, and do not run hooks or filters. SQLite, recovery staging and `vault.json` are not automatically tracked. Sample/read-only mode does not create or modify repositories. GitHub, remotes and synchronization remain out of scope. [Details and boundaries](docs/LOCAL_HISTORY.md).
 
 ## Design
 
@@ -41,7 +62,7 @@ Use the CLI belonging to the actual running gateway. Inspect existing configurat
 openclaw plugins install --link --force --accept-capabilities /path/to/knowledge
 ```
 
-These flags acknowledge the local source and the reviewed plugin's capabilities. The checkout stays linked, so rebuilds update the installation. Open **Knowledge** in the sidebar. The shared queries are available to agents as `knowledge_status`, `knowledge_records`, `knowledge_record`, `knowledge_ontology`, and `knowledge_diagnostics` after their tool catalog refreshes. These expose only the caller’s authorized scope, or labeled sample data when no real vault is configured.
+These flags acknowledge the local source and the reviewed plugin's capabilities. The checkout stays linked, so rebuilds update the installation. Open **Knowledge** in the sidebar. The shared tools are available after a tool-catalog refresh: `knowledge_status`, `knowledge_records`, `knowledge_record`, `knowledge_ontology`, `knowledge_diagnostics`, `knowledge_save_page`, `knowledge_history`, `knowledge_revision`, `knowledge_mutation`, and `knowledge_resume`. These expose only the caller’s authorized scope, or labeled sample data when no real vault is configured.
 
 ## Live reload
 
@@ -68,8 +89,10 @@ openclaw gateway call plugins.sessionAction --params '{"pluginId":"knowledge","a
 openclaw gateway call plugins.controlUi.status --params '{"pluginId":"knowledge"}' --json
 ```
 
-The page identifies sample versus private-vault mode and remains read-only. Browser activation receipts alone do not prove that the status operation works—exercise the service too.
+The page identifies sample versus real-vault mode and exposes the editor when writes are enabled for the caller. Browser activation receipts alone do not prove that the status operation works—exercise the service too.
 
 ## Boundary
 
-Real-vault reads enforce the [documented authority and identity contract](docs/REAL_VAULT.md). Writes, durable revisions/conflicts, publication recovery, and ingestion remain disabled/unimplemented. Page disposal cancels pending UI updates and releases subscriptions; reconnect requests fresh state. This foundation does not claim writable-vault recovery or a complete backup/restore protocol.
+Real-vault operations enforce the [authority and identity contract](docs/REAL_VAULT.md). A published receipt means files were published, not keyword-indexed (`indexed: false`). Exact reads and history support read-after-write. Precondition rejection does not save a server draft; accepted publication conflicts retain recovery material and block unsafe publication. No automatic conflict merge is provided.
+
+Page disposal cancels pending UI updates and releases subscriptions; reconnect requests fresh state. Mounted editor retention is not durable browser draft recovery. Ingestion, ranked retrieval, full backup/restore and the remaining v1 workflows are not claimed complete. Preserve the operational database and evidence alongside the vault; a Markdown-only copy is not a complete application backup.

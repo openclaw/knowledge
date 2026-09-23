@@ -1,7 +1,7 @@
 import type { FeatureOutput } from "openclaw/plugin-sdk/feature-contract";
 import type { contract } from "./contract.js";
 
-type Ontology = FeatureOutput<typeof contract, "ontology">;
+type Ontology = FeatureOutput<typeof contract, "ontology"> & { definitions: NonNullable<FeatureOutput<typeof contract, "ontology">["definitions"]> };
 type Definition = Ontology["definitions"][number];
 const categories = [
   { id: "entity", label: "People & things", subtitle: "The people and organizations that make up your world.", icon: "◎" },
@@ -60,9 +60,9 @@ export function ontologyView(data: Ontology, openRecord: (id: string) => void, b
     if (d.kind === "relationship") {
       const label = (names: string[]) => names.length ? names.map(name => data.definitions.find(x => x.name === name)?.label ?? name).join(" or ") : "Any page";
       const endpoints = el("div", undefined, "knowledge-endpoints");
-      endpoints.append(el("span", label(d.fromTypes)), el("span", "→"), el("span", label(d.toTypes))); details.append(endpoints);
+      endpoints.append(el("span", label(d.fromTypes ?? [])), el("span", "→"), el("span", label(d.toTypes ?? []))); details.append(endpoints);
     }
-    if (d.fields.length) {
+    if (d.fields?.length) {
       details.append(el("h5", "Details you can add"));
       const fields = el("ul", undefined, "knowledge-type-fields");
       for (const field of d.fields) {
@@ -79,12 +79,13 @@ export function ontologyView(data: Ontology, openRecord: (id: string) => void, b
       details.append(tags);
     }
     details.append(el("h5", "In your vault"));
-    if (d.affectedRecords.length) {
+    if (d.recordCount) {
       const records = el("div", undefined, "knowledge-type-records");
-      for (const record of d.affectedRecords) records.append(button(record.title, () => openRecord(record.id)));
+      for (const record of (d.records ?? [])) records.append(button(record.title, () => openRecord(record.id)));
+      if (d.recordsTruncated) records.append(el("p", "Showing the first 20 records. Filter Records by this type to browse all."));
       details.append(records);
     } else details.append(el("p", "No records of this type yet."));
-    const count = d.affectedRecords.length;
+    const count = d.recordCount;
     const footer = el("div", undefined, "knowledge-type-footer"); footer.append(el("span", `${count} ${count === 1 ? "record" : "records"}`, count ? "knowledge-count-used" : ""));
     article.append(footer, details); return article;
   }

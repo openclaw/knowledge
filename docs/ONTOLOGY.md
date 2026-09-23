@@ -104,9 +104,11 @@ Defer upstream subtype matching, frontmatter-to-link extraction, inferred links,
 
 ## Identity, inspection, and failure behavior
 
-The SHA-256 fingerprint covers canonicalized effective definitions plus active name/version. Parent or donor edits affecting those definitions change the fingerprint even if the leaf manifest is unchanged. YAML formatting, comments, key order, source paths, and unused declarations do not. Array order remains significant. Provenance (source path, defining ontology/version) is returned separately. Future schema-dependent writes must bind to this fingerprint; no writable service exists yet.
+The SHA-256 fingerprint covers canonicalized effective definitions plus active name/version. Parent or donor edits affecting those definitions change the fingerprint even if the leaf manifest is unchanged. YAML formatting, comments, key order, source paths, and unused declarations do not. Array order remains significant. Provenance (source path, defining ontology/version) is returned separately. Page writes validate against the current resolved ontology and fence the validated filesystem snapshot before journal acceptance.
 
-`knowledge_ontology` and the native **Ontology** view use the same `SampleVault.inspectOntology()` result. The agent operation retains effective definitions, provenance, aliases, filing, raw manifests, activation state, fingerprint, diagnostics, and associated records. The browsing UI deliberately presents only the human-facing vocabulary: category groups, descriptions, optional/required fields, relationship endpoints, search terms, and associated records. Fingerprints, effective JSON, source manifests, inheritance chains, and development status are not rendered. Page types and relationships have separate views; search and category filters work on local snapshots, including custom types. Invalid active ontologies leave records inspectable but mark ontology-dependent validation unavailable. The fixed claim envelope and evidence checks still run. Diagnostics are not a mutation history, and all reads preserve source bytes.
+`knowledge_ontology` and the native **Ontology** view use the same authorized typed inspection service. Agent reads default to a concise paginated catalog. Targeted `definitions` returns structured authoring constraints/provenance; `sources` lists manifests or reads one bounded YAML source; `diagnostics` pages validation findings. No serialized effective-definition duplicate is returned. Raw manifests and associated-record samples are opt-in. See [the model API](MODEL_API.md).
+
+The browsing UI explicitly loads all definition pages and displays the human-facing vocabulary: categories, descriptions, fields, relationship endpoints, search terms, counts and up to 20 associated-record examples/type. Fingerprints, raw manifests and inheritance chains are not rendered. Invalid active ontologies leave records inspectable but mark ontology-dependent validation unavailable. The fixed claim envelope and evidence checks still run. Reads preserve source bytes.
 
 `knowledge_records` and the Records view use the same alias-aware `type` filter. Relationship labels are exact-match filters, not page aliases. The `knowledge_schemas` prototype operation is replaced by `knowledge_ontology`; there is no external stable API compatibility promise for this unreleased sample milestone.
 
@@ -114,7 +116,7 @@ The SHA-256 fingerprint covers canonicalized effective definitions plus active n
 
 `test/ontology.test.mjs` exercises a researcher extension end to end, including valid/invalid fields, relationship endpoint constraints, source inspection, symmetric filtering, filing diagnostics, inheritance ordering, borrowing, changed-parent fingerprints, explicit type precedence, malformed manifests, unavailable dependencies, cycle/depth rejection, and byte-preserving failure.
 
-The next milestone remains a host-authorized real-vault create/edit path shared by UI and agents: access enforcement, revision checks, conflict preservation, and recoverable publication **before** document/meeting ingestion. Distribution, discovery, automatic migrations, and autonomous processing remain deferred.
+The host-authorized page create/edit path now exists with revision checks and journaled publication. Document/meeting ingestion and full v1 recovery remain subsequent work. Distribution, discovery, automatic migrations, and autonomous processing remain deferred.
 
 ## Vocabulary atlas refresh — 2026-09-22
 

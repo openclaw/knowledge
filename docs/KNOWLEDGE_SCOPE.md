@@ -90,7 +90,7 @@ Structured claims and relationships need a documented representation that can be
 - Support primary reading, navigation, and basic page editing through Control UI, with optional independent reading/editing through Obsidian or an ordinary text editor.
 - Detect external edits, renames, and deletions; do not silently overwrite conflicting changes. Preserve edits throughout authoritative documents, including user-authored metadata—not only designated human-note blocks.
 - Use one OpenClaw publishing instance. Simultaneous autonomous publishing from multiple machines is not a v1 guarantee.
-- Leave Git commits, pushes, pulls, and cloud-file transport to the user or existing tools. Do not build a synchronization service.
+- Use local Git history by default whenever Git is available: initialize a vault repository and commit each publication/change batch. A stateful storage service owns file, SQLite and Git coordination. Missing Git does not block knowledge use. Leave GitHub, remote pushes/pulls and cloud-file transport out of scope; do not build a synchronization service.
 - Do not synchronize the live SQLite database through a file-sync client.
 - Define recoverable publication across files and SQLite; they cannot share one atomic transaction. Accepted, published, and indexed states must not be confused.
 - Keep withdrawals effective when stale files reappear through synchronization.
@@ -187,7 +187,7 @@ Build a working Knowledge explorer alongside the data foundation, not a complete
 | Slice | Deliverable | Completion check |
 |---|---|---|
 | 1 — Read a real vault | Feature-plugin scaffold and sidebar page; portable record envelope; initial declarative taxonomy; schema validation; record list/detail and diagnostics over a fixture vault | Inspect a project, person, sourced claim, and explicit relationship. Malformed records and schemas remain intact and visibly diagnosed. No writes are enabled. |
-| 2 — One trustworthy write path | UI page creation/editing and an agent operation over the same service; revision/hash checks; durable journaled publication, receipts, history, and retained text evidence | A UI save is readable by the agent, an agent save is visible in the UI, and concurrent external edits preserve a conflict. Interrupted writes are recoverable before real knowledge is saved. |
+| 2 — One trustworthy write path | UI page creation/editing and an agent operation over the same service; revision/hash checks; durable journaled publication, receipts, automatic local Git history when available, and retained text evidence | A UI save is readable by the agent, an agent save is visible in the UI, and concurrent external edits preserve a conflict. Interrupted writes are recoverable before real knowledge is saved. |
 | 3 — Live behavior and recovery | Event-driven refresh; reconnect snapshots; external-change reconciliation; recovery exercises; browser/backend reload lifecycle cleanup | Observe real changes, inspect a failure, reconnect/reload, and continue with consistent state and preserved unsaved work. No duplicate watchers or stale database handles. |
 
 Do not defer journaling until after writes exist. Keyword indexing can follow the minimal record catalog; graph visualization, rich-text editing, semantic retrieval, and background intelligence are not foundation blockers. See the specification's foundation implementation sequence for concrete contracts and acceptance gates.

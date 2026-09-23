@@ -1,3 +1,40 @@
+# Automatic local Git history — 2026-09-23
+
+- Implemented automatic local history for writable vaults when Git is available. Added `KnowledgeStorage` as the shared owner of reads, observations, SQLite, publication and Git; feature handlers no longer reach into the database or real-vault adapter directly.
+- SQLite schema v3 adds an ordered scoped Git outbox and observed-file fingerprints. Exact publication/observation snapshots survive missing Git or repository failures. Published receipts and history expose Git state independently of save state; Activity & issues includes checkpoint status and retry controls.
+- `npm run check`, `npm test` (**76 tests passed**), `npm run build`, `npm run validate`, and `git diff --check` passed. Package dry-run includes the storage/Git modules and local-history documentation.
+- Thirteen Git-specific tests exercise default initialization, exact grouped content, clean index, actor provenance, idempotent retries, missing executable and ordered catch-up, staged/unstaged preservation including same-path staging, injected failures before/after ref publication, real process death after Git succeeds but before SQLite acknowledgment, observed edits/rename/deletion batches, scope isolation, read-only mode, parent-repository isolation, locks/detached HEAD, post-publication external races, hook suppression, unsafe repository links, and safe malformed/hidden Markdown/ontology inspection.
+- Native Git's atomic ref transaction records the commit and checkpoint marker together. A restarted service recovered a process-killed checkpoint with one commit and synchronized the working index. Existing file/SQLite interruption and cross-process publisher tests also pass.
+- README, v1 scope, design contracts, setup and model API now state default-on local Git and deferred GitHub/remotes. No new runtime dependency or remote operation was added.
+- Built locally as `local-git-history-1`. No gateway reload, configuration change, or real-vault content mutation was performed. New UI status/retry controls were type-checked and bundled; rendered/live UI interaction was not verified in this change. Existing uncommitted work was preserved; no source-repository commit/push was made.
+
+---
+
+# Model-facing inspection — 2026-09-23
+
+- Added catalog/definitions/sources/diagnostics ontology views, exact name/kind filters and pagination. Removed serialized effective definitions from the public response. Source YAML is an explicit selected-source read, never an arbitrary path.
+- Record reads return one bounded content representation, optional structured metadata, explicit evidence-excerpt truncation and opt-in paginated references. The browser requests full bodies/metadata for editing and loads original Markdown only on demand.
+- `npm run check`, `npm test` (**63 tests passed**), `npm run build`, `npm run validate` and `git diff --check` passed. New cases cover continuation/reassembly, source restrictions, invalid ontology inspection, output contracts, authority isolation for all opt-in views and UI vocabulary pagination. Existing mutation tests now request raw content explicitly and verify a stale request has no saved draft/receipt.
+- Reused the isolated Chromium page-editor harness with the new API, explicit complete-content/metadata reads, and an additional custom-domain-field preservation assertion. Passed draft close/reopen, validation, lost-response identical retry, single creation, evidence verification, browser edit, stale rejection/local draft retention, mobile overflow and browser-error checks. Driver: `/tmp/knowledge-inspection-editor-verify.mjs`; artifacts: `/private/tmp/knowledge-editor-verification-v3Gc4v/`. This is not a live Control UI frame or visual/layout review of the full explorer.
+- Serialized sample measurements: ontology legacy inspection **42,454 bytes**, new default catalog **7,710 bytes**, targeted project definition **826 bytes**; project record legacy **2,517 bytes**, new default **584 bytes**. These are bytes, not token estimates, and are specific to the bundled sample.
+- README/setup/ontology docs now describe implemented journaled writes and distinguish mount-local editor drafts, accepted-publication recovery and pre-acceptance rejection. Full browser-remount draft recovery and full backup/restore are not claimed implemented.
+- No FTS tool was implemented in this change. The proposed SQLite FTS5 retrieval boundary and OpenClaw/lossless-claw precedent are documented in [MODEL_API.md](MODEL_API.md).
+- No gateway reload, configuration change or real-vault content mutation was performed. The built backend revision is `model-inspection-1`; running-service activation remains separate. Existing uncommitted publication work was preserved; no commit/push was made.
+
+---
+
+# Journaled-page foundation post-refresh verification — 2026-09-22
+
+- Verified the already-refreshed runtime without another plugin reload, gateway restart, configuration change, or real-vault test write. The live backend reports `journaled-pages-1`, the configured private vault, **0 records, 38 definitions, zero findings**, and `writesEnabled: false`. The existing configuration still omits the opt-in write flag; this verification did not enable it.
+- Eight authenticated gateway operations (`status`, `records`, missing `record`, `ontology`, `diagnostics`, `history`, missing `mutation`, and missing `revision`) passed the current shared output contracts. Vault file hashes were identical before and after these checks. Local results: `/tmp/knowledge-publication-live-results.json`; verification driver: `/tmp/knowledge-publication-verify.mjs`.
+- All **17 publication tests** passed against isolated fixtures: create/edit and retained evidence, durable idempotency, stale revisions/hashes, external edits/renames/deletions, interruption recovery, actual process death, cross-process competing writers, conflict preservation, authority expiry, scope isolation, retained history, and identity fencing.
+- Headless Chromium exercised the actual `pageEditor` module and stylesheet against the actual shared service using an isolated temporary vault and an operator-context double. Passed: draft close/reopen; fields and attribution validation; lost-response retry with an identical request and only one creation; verified source retention; edit/revision advancement; stale-edit rejection preserving both the newer saved version and the draft; 390px layout without horizontal overflow; no browser errors. Desktop/mobile screenshots were visually reviewed. Driver: `/tmp/knowledge-editor-verify.mjs`; screenshots and isolated state: `/private/tmp/knowledge-editor-verification-B3SYCD/`.
+- The first browser-harness attempt correctly failed because its SQLite parent used macOS's `/tmp` symlink alias; canonicalizing the temporary fixture path fixed the harness. A second harness assertion incorrectly expected a trailing newline; the implementation correctly preserved the exact supplied body. No implementation changes were needed for these checks.
+- This is **not** verification of writes through the running gateway or interaction inside the live Control UI frame. The refreshed tool inventory did not expose `knowledge_*` tools, so live agent-tool invocation also remains unverified. Shared operator/agent service behavior is covered by tests, not a live agent call. No commit or push was performed during this verification continuation.
+- The historical reports below describe earlier milestones; their statements about unimplemented publication/history do not describe the current working-tree implementation. Ingestion, ranked retrieval, automatic watching, and full restore remain outside this verification.
+
+---
+
 # Real-vault read foundation verification — 2026-09-22
 
 - Pre-commit recheck: TypeScript check, all **38 tests**, build, plugin validation, and whitespace checks passed again. The scope milestone notes now distinguish completed real-vault access from the upcoming writable foundation. No live reload or new browser/agent-tool verification was performed for this commit.

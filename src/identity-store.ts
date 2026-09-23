@@ -10,7 +10,7 @@ const unavailable = () => Error("Knowledge identity checkpoint unavailable; pres
 /** Short-lived connections: no native handles survive a query or plugin reload. */
 export class SqliteIdentityStore implements IdentityStore {
   constructor(private readonly filename: string) {}
-  private withDatabase<T>(run: (db: DatabaseSync) => T): T {
+  withDatabase<T>(run: (db: DatabaseSync) => T): T {
     let created = false;
     try {
       // Operational state is outside the editable vault. Reject link aliases;
@@ -34,10 +34,34 @@ export class SqliteIdentityStore implements IdentityStore {
         const parent = openSync(path.dirname(this.filename), constants.O_RDONLY);
         try { fsyncSync(parent); } finally { closeSync(parent); }
       }
-      if (db.prepare("PRAGMA application_id").get()?.application_id !== APPLICATION_ID || db.prepare("PRAGMA user_version").get()?.user_version !== 1) throw unavailable();
+      if (db.prepare("PRAGMA application_id").get()?.application_id !== APPLICATION_ID || ![1, 2, 3].includes(Number(db.prepare("PRAGMA user_version").get()?.user_version))) throw unavailable();
+      if (db.prepare("PRAGMA user_version").get()?.user_version === 1) db.exec(`BEGIN IMMEDIATE;
+        CREATE TABLE IF NOT EXISTS mutations (
+          scope TEXT NOT NULL, request TEXT NOT NULL, intent TEXT NOT NULL,
+          state TEXT NOT NULL, plan TEXT NOT NULL, receipt TEXT NOT NULL,
+          PRIMARY KEY(scope, request)
+        ) STRICT;
+        CREATE TABLE IF NOT EXISTS observations (
+          scope TEXT NOT NULL, id TEXT NOT NULL, path TEXT NOT NULL, hash TEXT NOT NULL,
+          revision INTEGER NOT NULL, raw TEXT NOT NULL, PRIMARY KEY(scope,id)
+        ) STRICT;
+        CREATE TABLE IF NOT EXISTS history (
+          sequence INTEGER PRIMARY KEY, scope TEXT NOT NULL, id TEXT NOT NULL,
+          provenance TEXT NOT NULL, at TEXT NOT NULL, path TEXT NOT NULL,
+          revision INTEGER NOT NULL, hash TEXT NOT NULL, raw TEXT NOT NULL
+        ) STRICT;
+        PRAGMA user_version=2;
+        COMMIT;`);
+      if (db.prepare("PRAGMA user_version").get()?.user_version === 2) db.exec(`BEGIN IMMEDIATE;
+        CREATE TABLE git_jobs (
+          sequence INTEGER PRIMARY KEY, scope TEXT NOT NULL, token TEXT NOT NULL UNIQUE,
+          batch TEXT NOT NULL, state TEXT NOT NULL, commit_id TEXT, message TEXT NOT NULL
+        ) STRICT;
+        CREATE TABLE git_files (scope TEXT NOT NULL, path TEXT NOT NULL, hash TEXT NOT NULL, PRIMARY KEY(scope,path)) STRICT;
+        PRAGMA user_version=3;
+        COMMIT;`);
       return run(db);
-    } catch { throw unavailable(); }
-    finally { db.close(); }
+    } finally { db.close(); }
   }
   async lookup(key: string): Promise<Manifest | undefined> {
     return this.withDatabase(db => {

@@ -87,3 +87,12 @@
 @media (min-width: 1200px) { .knowledge-type-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 950px) { .knowledge-ontology-layout { grid-template-columns: 1fr; } .knowledge-category-nav { position: static; display: flex; flex-wrap: wrap; } .knowledge-category-nav button { padding: 8px 10px; } .knowledge-category-count { margin-left: 4px; } }
 @media (max-width: 650px) { .knowledge-ontology-controls { align-items: stretch; flex-direction: column; gap: 12px; } .knowledge-ontology-switch button { flex: 1; } .knowledge-type-grid { grid-template-columns: 1fr; } .knowledge-type-card .knowledge-type-description { min-height: 0; } .knowledge-ontology-notice { align-items: start; flex-direction: column; } }
+
+.knowledge-editor { width: min(820px, 94vw); max-height: 90vh; overflow: auto; border: 1px solid var(--border); border-radius: 14px; padding: 28px; background: var(--bg); color: var(--text); }
+.knowledge-editor::backdrop { background: #0008; }
+.knowledge-editor form { display: grid; gap: 16px; }
+.knowledge-editor label { display: grid; gap: 8px; font-size: 13px; }
+.knowledge-editor input, .knowledge-editor select, .knowledge-editor textarea { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 10px; font: inherit; }
+.knowledge-editor textarea { font-family: var(--font-mono, monospace); line-height: 1.6; resize: vertical; }
+.knowledge-editor textarea:disabled, .knowledge-editor input:disabled { opacity: .85; }
+.knowledge-editor details > label { margin-top: 14px; }

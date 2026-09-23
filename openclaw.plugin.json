@@ -41,6 +41,9 @@
           },
           "operatorRead": {
             "type": "boolean"
+          },
+          "writesEnabled": {
+            "type": "boolean"
           }
         },
         "additionalProperties": false
@@ -52,17 +55,22 @@
     "onStartup": true
   },
   "controlUi": {
-    "entry": "dist/control-ui/843d3f3a16d91a299b5710c5a48c7d2508d5631f3bd3ebfa18da9e2d2d279e2a/index.js",
+    "entry": "dist/control-ui/5ae9746ddaa348afd268b70957a4de5d594d9580cd63755fda80d7ffd4ea9cd9/index.js",
     "styles": [
-      "dist/control-ui/843d3f3a16d91a299b5710c5a48c7d2508d5631f3bd3ebfa18da9e2d2d279e2a/index.css"
+      "dist/control-ui/5ae9746ddaa348afd268b70957a4de5d594d9580cd63755fda80d7ffd4ea9cd9/index.css"
     ]
   },
   "contracts": {
     "tools": [
       "knowledge_diagnostics",
+      "knowledge_history",
+      "knowledge_mutation",
       "knowledge_ontology",
       "knowledge_record",
       "knowledge_records",
+      "knowledge_resume",
+      "knowledge_revision",
+      "knowledge_save_page",
       "knowledge_status"
     ]
   }

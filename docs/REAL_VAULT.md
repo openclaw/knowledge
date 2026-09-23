@@ -1,7 +1,7 @@
-# Real-vault read foundation
+# Real-vault access and publication
 
-Implemented 2026-09-22. This is the access/identity prerequisite for Slice 2, not
-recoverable publication or a completed writable vault.
+Read foundation implemented 2026-09-22; extended with journaled page writes.
+This is not a completed v1 ingestion, search or full-backup/restore system.
 
 ## Storage and configuration
 
@@ -13,6 +13,7 @@ Invalid real-vault configuration never falls back to samples.
 ```text
 <vault-root>/
   vault.json
+  .git/                       # initialized automatically in writable mode when Git is available
   private/
     ontology.yaml             # optional extension of the shipped ontology
     ontologies/               # optional local manifests
@@ -52,7 +53,8 @@ by relabeling it. Configure `plugins.entries.knowledge.config.vault` with:
   "agentId": "main",
   "vaultId": "11111111-1111-4111-8111-111111111111",
   "publicationId": "22222222-2222-4222-8222-222222222222",
-  "operatorRead": true
+  "operatorRead": true,
+  "writesEnabled": false
 }
 ```
 
@@ -63,17 +65,22 @@ application ID and version; an unrelated, corrupt, or linked file is rejected.
 This is operational metadata, not a knowledge record write. A conflicting
 checkpoint is never replaced automatically, even if configuration is changed.
 Manifest identity, checkpoint, scope directory identity, and authority are checked
-before and after a query. No projections are persisted or served in this slice.
+before and after a query. Scoped observations and history are persisted; no keyword index is implemented.
 Moving the same vault is allowed after updating its configured root; a different
 vault at the same path is not. Missing or mismatched identities require explicit
 recovery/configuration review, not automatic adoption.
 
-Generation zero is the only supported publication state. Later generations,
-publication ancestry, journals, and restore resolution must be introduced together
-with the recoverable writer. This read foundation does **not** prove full-backup
-recovery. A future full backup must include the plugin-owned operational SQLite database, not just
-Markdown and the manifest. Restoring changed prose under an unchanged generation
-is observed by rereading files; no older index is trusted.
+Fresh database adoption requires generation zero. Once bound, successful publication advances the manifest generation/publication ID and SQLite checkpoint together through the recoverable journal. Identity mismatches and older-vault/newer-database combinations fail closed. This does **not** establish a full-backup restore procedure; retain the operational database, vault and artifacts together.
+
+Set `writesEnabled: true` only for the configured writable vault. Trusted agent writes use the same scope mapping as reads. Operator writes additionally require `operator.write`/admin authority; operator read access alone cannot save. Sample mode never writes. The shared save API supports pages and retained supplied text evidence, not a completed multi-record ingestion or claim/relationship editor.
+
+Published receipts, retained revision snapshots, scoped mutation material, external-change observations and interrupted-publication resume are available. Exact reads re-read files and record external changes on the next query; no filesystem watcher is installed. Pending/conflicted accepted publication blocks ordinary reads rather than serving a partial catalog. Pre-acceptance rejections do not journal drafts. See [model API and draft boundaries](MODEL_API.md).
+
+## Shared storage service and local Git
+
+`KnowledgeStorage` is the per-configured-vault stateful boundary. UI/tool adapters authorize the caller and delegate; they do not open SQLite, invoke Git, or bypass publication for reads. The service owns guarded reads/observations, the database adapter, publication/recovery, and local Git checkpoints. SQLite connections remain short-lived across operations/plugin reloads; stateful ownership does not require leaking native handles.
+
+Writable vaults use Git by default, without a separate enable flag. Scoped scans checkpoint existing Markdown/ontology and later observed changes. Publication checkpoints its exact page/artifact batch. A missing executable leaves reads/writes available and reports `unavailable`; repository problems report a retryable `pending` gap. Read-only/sample mode does not initialize or mutate Git. [Full local-history contract](LOCAL_HISTORY.md).
 
 ## Host authority mapping
 
@@ -149,11 +156,7 @@ mismatches, file preservation, identity replacement/restart/move, post-read
 revocation, hardlinks/symlinks, and external edit/rename/delete observations.
 Live activation separately exercises the actual configured identity store.
 
-Observed hashes/revisions are returned from authoritative reads. External changes
-are visible on the next query, but do not yet create revision history. No durable
-record catalog, journal, write service, editor, receipt/history API, watch service,
-index, full restore, or ingestion capability is claimed. Existing memory files
-and conversation archives are not migrated.
+Observed hashes/revisions are returned from authoritative reads. External edits, renames and deletions are recorded on the next scan. Publication tests exercise accepted-work recovery and concurrent edits separately from the access tests. No watch service, keyword index, complete restore procedure, or document/meeting ingestion is claimed. Existing memory files and conversation archives are not migrated.
 
 ## Local activation sequencing
 

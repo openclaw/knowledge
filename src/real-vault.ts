@@ -17,7 +17,7 @@ export const VaultConfig = Type.Object({
   root: Type.String({ minLength: 1, maxLength: 4096 }),
   statePath: Type.String({ minLength: 1, maxLength: 4096 }),
   agentId: Manifest.properties.agentId, vaultId: uuid, publicationId: uuid,
-  operatorRead: Type.Boolean(),
+  operatorRead: Type.Boolean(), writesEnabled: Type.Optional(Type.Boolean()),
 }, { additionalProperties: false });
 export type VaultConfig = Static<typeof VaultConfig>;
 export type IdentityStore = { lookup(key: string): Promise<Manifest | undefined>; registerIfAbsent(key: string, value: Manifest): Promise<boolean> };
@@ -30,17 +30,16 @@ export function parseVaultConfig(config: Record<string, unknown> | undefined): V
   return config.vault;
 }
 
-/** Read-only generation-zero foundation. Later publication must advance the
- * manifest and this retained checkpoint through one recoverable protocol. */
+/** Manifest/checkpoint equality fences publication, replacement, and rollback. */
 export class RealVault {
-  constructor(readonly config: VaultConfig, private readonly identities: IdentityStore) {}
-  private async identity() {
+  constructor(readonly config: VaultConfig, private readonly identities: IdentityStore, private readonly observe?: (records: import("./model.js").LoadedRecord[], access: VaultAccess) => void) {}
+  async identity() {
     try {
       const rootPath = await realpath(this.config.root), stat = await lstat(this.config.root);
       if (!stat.isDirectory() || stat.isSymbolicLink()) throw unavailable();
       const value: unknown = JSON.parse(await readText(rootPath, "vault.json"));
       if (!Check(Manifest, value) || value.vaultId !== this.config.vaultId || value.agentId !== this.config.agentId ||
-          value.publicationId !== this.config.publicationId || value.generation !== 0) throw unavailable();
+          (value.generation === 0 && value.publicationId !== this.config.publicationId)) throw unavailable();
       return { manifest: { format: value.format, vaultId: value.vaultId, agentId: value.agentId, generation: value.generation, publicationId: value.publicationId }, rootPath, dev: stat.dev, ino: stat.ino };
     } catch { throw unavailable(); }
   }
@@ -50,6 +49,7 @@ export class RealVault {
     const before = await this.identity(), key = `agent:${this.config.agentId}`;
     const existing = await this.identities.lookup(key);
     if (!existing) {
+      if (before.manifest.generation !== 0) throw unavailable();
       access.assertCurrent();
       await this.identities.registerIfAbsent(key, before.manifest);
     }
@@ -73,7 +73,7 @@ export class RealVault {
       if ((e as NodeJS.ErrnoException).code === "ENOENT" && access.scope.visibility === "conversation") missing = true;
       else throw unavailable();
     }
-    const result = await operation(new SampleVault(scopedPath, access.scope, missing));
+    const result = await operation(new SampleVault(scopedPath, access.scope, missing, this.observe ? records => this.observe!(records, access) : undefined));
     access.assertCurrent();
     const after = await this.identity();
     if (JSON.stringify(after) !== JSON.stringify(before) || (!missing && await inspectScope() !== scopeStamp) ||

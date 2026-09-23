@@ -5,11 +5,12 @@ const denied = () => new Error("Knowledge access unavailable: trusted agent/sess
 export type VaultAccess = { scope: Exclude<Scope, { visibility: "sample" }>; assertCurrent: () => void };
 
 /** No payload field participates in authorization. Re-evaluate before releasing results. */
-export function authorizeVault(context: FeatureInvocationContext, agentId: string, operatorRead: boolean): VaultAccess {
+export function authorizeVault(context: FeatureInvocationContext, agentId: string, operatorRead: boolean, write = false): VaultAccess {
   const resolve = (): Exclude<Scope, { visibility: "sample" }> => {
     if (context.source === "session-action") {
       const { client, agentId: selectedAgent, sessionKey } = context.action;
       if (!operatorRead || !client?.connId || !client.scopes.some(s => ["operator.read", "operator.write", "operator.admin"].includes(s))) throw denied();
+      if (write && !client.scopes.some(s => ["operator.write", "operator.admin"].includes(s))) throw denied();
       // This first browser surface is the configured agent's private vault, not a
       // conversation impersonation surface. A supplied target cannot expand it.
       if (sessionKey || (selectedAgent && selectedAgent !== agentId)) throw denied();

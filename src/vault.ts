@@ -19,16 +19,16 @@ const summary = ({ metadata, body, raw, hash, ...rest }: LoadedRecord) => rest;
 
 // Scope is selected by the service from trusted authority, never from operation inputs.
 export class SampleVault {
-  constructor(private readonly root = SAMPLE_ROOT, private readonly scope: Scope = { visibility: "sample" }, private readonly empty = false) {}
+  constructor(private readonly root = SAMPLE_ROOT, private readonly scope: Scope = { visibility: "sample" }, private readonly empty = false, private readonly observe?: (records: LoadedRecord[], scope: Scope) => void) {}
   private read(relative: string) { return readText(this.root, relative); }
-  async scan() {
+  async scan(overlay?: { record: LoadedRecord; artifacts: Record<string, string> }) {
     const issues: Issue[] = [];
     const directory = this.empty ? null : await safeRoot(this.root);
     const records: LoadedRecord[] = [];
     const sources: OntologySource[] = [await bundledOntology(issues)];
     let visited = 0, bytes = 0;
     const add = (file: string, code: string, message: string) => issues.push({ path: file, code, message: message.slice(0, 1000) });
-    const read = async (file: string) => { const raw = await this.read(file); bytes += Buffer.byteLength(raw); if (bytes > 8 * 1024 * 1024) throw Error("Vault exceeds 8 MiB scan budget"); return raw; };
+    const read = async (file: string) => { const raw = overlay?.artifacts[file] ?? await this.read(file); bytes += Buffer.byteLength(raw); if (bytes > 8 * 1024 * 1024) throw Error("Vault exceeds 8 MiB scan budget"); return raw; };
     const walk = async (dir = "", depth = 0): Promise<void> => {
       if (depth > 8) throw Error("Vault directory depth exceeds 8");
       for await (const entry of directory!.entries(dir || ".", { maxEntries: MAX_FILES + 1, order: "sorted", symlinks: "reject" })) {
@@ -36,7 +36,7 @@ export class SampleVault {
         const file = dir + entry.name;
         if (entry.isSymbolicLink) { add(file, "unsafe-path", "Symbolic links are not read."); if (file === "ontology.yaml") sources.push({ path: file, raw: "", valid: false, manifest: null }); continue; }
         if (file === "ontology.yaml" && !entry.isFile) { sources.push({ path: file, raw: "", valid: false, manifest: null }); add(file, "invalid-ontology", "Active ontology must be a regular file."); continue; }
-        if (entry.isDirectory) { if (file !== "artifacts") await walk(file + "/", depth + 1); continue; }
+        if (entry.isDirectory) { if (file !== "artifacts" && file !== ".knowledge-history") await walk(file + "/", depth + 1); continue; }
         if (!entry.isFile) { add(file, "unsafe-path", "Only regular files are read."); continue; }
         if (file === "ontology.yaml" || (file.startsWith("ontologies/") && /\.ya?ml$/.test(file))) {
           let raw = "";
@@ -63,6 +63,7 @@ export class SampleVault {
       }
     };
     try { if (!this.empty) await walk(); } catch { throw Error("Vault unavailable or scan limit exceeded; no partial catalog returned."); }
+    if (overlay) { const old = records.findIndex(r => r.path === overlay.record.path); if (old >= 0) records.splice(old, 1); records.push(overlay.record); }
     const ontology = resolveOntology(sources, issues);
     const active = new Map(ontology?.definitions.map(d => [d.definition.name, d.definition]) ?? []);
     // Infer only absent page types; never rewrite authored metadata or override an explicit type.
@@ -116,6 +117,7 @@ export class SampleVault {
       }
     }
     if (bytes > 8 * 1024 * 1024) throw Error("Vault exceeds scan budget; no partial catalog returned.");
+    if (!overlay) this.observe?.(records, this.scope);
     records.sort((a,b) => a.path.localeCompare(b.path));
     return { records, ontology, sources, issues, checkedAt: new Date().toISOString() };
   }
@@ -150,13 +152,13 @@ export class SampleVault {
     const references = data.records.filter(other => refs.has(other.id) || other.metadata.from === id || other.metadata.to === id || other.metadata.entities?.includes(id)).map(summary);
     const evidence = [];
     for (const e of r.metadata.evidence ?? []) {
-      let excerpt = "", verified = false;
+      let excerpt = "", verified = false, excerptTruncated = false;
       try {
         if (!e.path.startsWith("artifacts/")) throw Error("Unsafe evidence");
         const raw = await this.read(e.path), lines = raw.split(/\r?\n/);
-        if (digest(raw) === e.sha256 && e.start_line <= e.end_line && e.end_line <= lines.length) { excerpt = lines.slice(e.start_line - 1, e.end_line).join("\n").slice(0, 4000); verified = !e.quote || lines.slice(e.start_line - 1, e.end_line).join("\n").includes(e.quote); }
+        if (digest(raw) === e.sha256 && e.start_line <= e.end_line && e.end_line <= lines.length) { const full = lines.slice(e.start_line - 1, e.end_line).join("\n"); excerpt = full.slice(0, 20000); excerptTruncated = full.length > excerpt.length; verified = !e.quote || lines.slice(e.start_line - 1, e.end_line).join("\n").includes(e.quote); }
       } catch { /* The diagnostic is attached to the record; no raw filesystem error escapes. */ }
-      evidence.push({ ...e, excerpt: verified ? excerpt : "", verified });
+      evidence.push({ ...e, excerpt: verified ? excerpt : "", verified, excerptTruncated });
     }
     return { record: { ...summary(r), body: r.body, raw: r.raw, hash: r.hash, metadata: JSON.stringify(r.metadata, null, 2) }, issues: data.issues.filter(i => i.path === r.path), references, evidence };
   }

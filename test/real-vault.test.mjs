@@ -38,7 +38,7 @@ async function fixture(t) {
   const operator = { source: 'session-action', api, action: { client: { connId: 'authenticated-connection', scopes: ['operator.read'] } } };
   return { root, base, config, manifest, sessionId, api, store, owner, operator, partition, setEntry: v => { entry = v; }, service: createKnowledgeService(api) };
 }
-const invokeAll = async (service, ctx) => Object.fromEntries(await Promise.all(Object.entries(service).map(async ([name, op]) => [name, await op(name === 'record' ? { id: 'sample_person_alex' } : {}, ctx)])));
+const invokeAll = async (service, ctx) => Object.fromEntries(await Promise.all(Object.entries(service).filter(([name]) => ["status", "records", "record", "ontology", "diagnostics"].includes(name)).map(async ([name, op]) => [name, await op(name === 'record' ? { id: 'sample_person_alex' } : {}, ctx)])));
 
 test('UI and owner-direct tool read identical private records through the same service', async t => {
   const f = await fixture(t);
@@ -168,7 +168,7 @@ test('external edits, renames, and deletion appear on next read without changing
   const raw = (await readFile(file, 'utf8')).replace('PRIVATE SENTINEL', 'Edited name');
   await writeFile(file, raw); await rename(file, file + '-renamed.md');
   const after = await f.service.record({ id: 'sample_person_alex' }, f.owner);
-  assert.equal(after.record.id, before.record.id); assert.notEqual(after.record.hash, before.record.hash); assert.equal(after.record.raw, raw);
+  assert.equal(after.record.id, before.record.id); assert.notEqual(after.record.hash, before.record.hash); assert.equal((await f.service.record({id:'sample_person_alex',view:'raw'},f.owner)).record.raw, raw);
   await rm(file + '-renamed.md'); assert.equal((await f.service.record({ id: 'sample_person_alex' }, f.owner)).record, null);
 });
 
@@ -200,5 +200,21 @@ test('build metadata retains the real-vault configuration contract', async () =>
   const { getToolPluginMetadata } = await import('openclaw/plugin-sdk/tool-plugin');
   assert.ok(entry.configSchema.jsonSchema.properties.vault.properties.statePath);
   assert.deepEqual(getToolPluginMetadata(entry).configSchema, entry.configSchema.jsonSchema);
-  assert.equal(getToolPluginMetadata(entry).tools.length, 5);
+  assert.equal(getToolPluginMetadata(entry).tools.length, 10);
+});
+
+
+test('all opt-in inspection views retain conversation scope and authority', async t => {
+  const f = await fixture(t); f.setEntry({ sessionId: f.sessionId, chatType: 'group' });
+  for (const input of [{id:'sample_person_alex',view:'raw'}, {id:'sample_person_alex',includeMetadata:true,includeReferences:true}]) {
+    const result = await f.service.record(input, f.owner);
+    assert.ok(Check(contract.operations.record.output, result));
+    assert.match(JSON.stringify(result), /SHARED SENTINEL/); assert.doesNotMatch(JSON.stringify(result), /PRIVATE SENTINEL/);
+  }
+  await writeFile(path.join(f.root,'private','ontology.yaml'),'PRIVATE BROKEN ONTOLOGY');
+  for (const input of [{view:'definitions',includeRecords:true}, {view:'sources'}, {view:'diagnostics'}]) {
+    const result = await f.service.ontology(input, f.owner);
+    assert.ok(Check(contract.operations.ontology.output,result)); assert.doesNotMatch(JSON.stringify(result), /PRIVATE/);
+  }
+  await assert.rejects(f.service.ontology({view:'sources',sourcePath:'../private/ontology.yaml'},f.owner), /unavailable/);
 });

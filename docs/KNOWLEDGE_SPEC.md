@@ -300,7 +300,9 @@ On startup, restore, or detected replacement, validate the vault, journal, artif
 
 Document and exercise a full backup procedure covering the vault, schema, artifacts, and a consistent SQLite operational snapshot. Coordinate/quiesce publication and account for external edits so the backup manifest identifies a coherent set of hashes/generations; restore validates that set before serving reads. Projection indexes may be rebuilt. Git history or a vault-only copy is not a full backup: disclose missing history/checkpoints/safeguards and require recovery resolution rather than claiming complete restoration.
 
-Use one publishing instance per agent in v1. Git/cloud transport is user-managed; never sync the live SQLite database through a file-sync client. Automatic transport, distributed publishing, and sophisticated merge automation remain out of scope.
+Use one publishing instance per agent in v1. Local Git content history is automatic when Git is installed, not an operator opt-in. A stateful per-vault storage service owns authorized reads, observations, publication, SQLite operational state and the durable Git checkpoint queue. Commit each publication/change batch only after successful file publication; persist exact snapshots before Git so failures and restarts can retry without losing versions or duplicating commits. Missing Git leaves knowledge reads/writes usable; other Git failures remain visible rather than silently disabling history. Keep the live index and unrelated edits intact, and do not execute hooks, filters or remote operations. See [implemented local history](LOCAL_HISTORY.md).
+
+GitHub and Git/cloud transport remain deferred/user-managed; never sync the live SQLite database through a file-sync client. Automatic transport, distributed publishing, and sophisticated merge automation remain out of scope.
 
 ### 7.5 Diagnostics
 

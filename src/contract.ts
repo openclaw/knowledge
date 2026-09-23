@@ -1,24 +1,51 @@
 import { Type } from "typebox";
 import { defineFeatureContract } from "openclaw/plugin-sdk/feature-contract";
-import { text, Evidence, Field } from "./model.js";
+import { text } from "./model.js";
+import { RecordInput, RecordOutput, OntologyInput, OntologyOutput, Summary } from "./inspection-contract.js";
+
+import { SavePage, Receipt, HistoryEntry, GitStatus, requestId } from "./mutation-contract.js";
 
 const empty = Type.Object({}, { additionalProperties: false });
 const issue = Type.Object({ path: text(500), code: text(80), message: text(1000) });
-const record = Type.Object({
-  id: text(96), title: text(200), kind: text(30), type: text(64), path: text(500),
-  acceptance: text(20), lifecycle: text(20), revision: Type.Integer(), valid: Type.Boolean(),
-});
+const record = Summary;
 const issues = Type.Array(issue, { maxItems: 1000 });
 export const contract = defineFeatureContract({
   pluginId: "knowledge",
   operations: {
+    save_page: {
+      kind: "action", description: "Create or edit a page in the authorized scope. Reuse requestId and identical payload for retries. Edits require observed revision and hash. Supplied source text is retained with its attribution; new pages remain candidates. A published receipt is a completed save; accepted publication conflicts retain recovery material and block publication. Requests rejected before acceptance are not saved.",
+      input: SavePage, output: Receipt, tool: { name: "knowledge_save_page", label: "Save knowledge page" },
+    },
+    resume: {
+      kind: "action", description: "Resume an accepted publication or retry its local Git checkpoint in the authorized scope after interruption. Does not overwrite conflicts. Use the original requestId.",
+      input: Type.Object({ requestId }, { additionalProperties: false }), output: Receipt,
+      tool: { name: "knowledge_resume", label: "Resume knowledge publication" },
+    },
+    revision: {
+      kind: "query", description: "Read a retained revision snapshot from authorized history by sequence. The snapshot is historical, not current knowledge.",
+      input: Type.Object({ sequence: Type.Integer({ minimum: 1 }) }, { additionalProperties: false }),
+      output: Type.Object({ raw: Type.Union([text(65536), Type.Null()]) }),
+      tool: { name: "knowledge_revision", label: "Inspect knowledge revision" },
+    },
+    mutation: {
+      kind: "query", description: "Inspect a scoped receipt and retained before/proposed/displaced text for publication recovery. Does not resolve or overwrite a conflict.",
+      input: Type.Object({ requestId }, { additionalProperties: false }),
+      output: Type.Object({ receipt: Type.Union([Receipt, Type.Null()]), files: Type.Array(Type.Object({ path: text(500), before: Type.Union([text(65536), Type.Null()]), proposed: text(65536), displaced: Type.Union([text(65536), Type.Null()]) }), { maxItems: 2 }) }),
+      tool: { name: "knowledge_mutation", label: "Inspect knowledge publication" },
+    },
+    history: {
+      kind: "query", description: "Inspect authorized mutation receipts and observed revision history, including pending/conflict states. Not keyword search.",
+      input: Type.Object({ id: Type.Optional(text(96)), offset: Type.Optional(Type.Integer({ minimum: 0 })), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50 })) }, { additionalProperties: false }),
+      output: Type.Object({ git: GitStatus, entries: Type.Array(HistoryEntry, { maxItems: 50 }), mutations: Type.Array(Receipt, { maxItems: 50 }), nextOffset: Type.Union([Type.Integer(), Type.Null()]) }),
+      tool: { name: "knowledge_history", label: "Knowledge history" },
+    },
     status: {
-      kind: "query", description: "Read availability and counts for the authorized vault scope. Writes are disabled.",
+      kind: "query", description: "Read availability and counts for the authorized vault scope. Sample mode is read-only.",
       input: empty,
       output: Type.Object({
-        service: Type.Literal("knowledge"), phase: Type.Literal("read-only-explorer"),
+        service: Type.Literal("knowledge"), phase: Type.Union([Type.Literal("read-only-explorer"), Type.Literal("page-editor")]),
         backendRevision: text(80), instanceId: text(80), startedAt: text(40), checkedAt: text(40),
-        vault: text(80), agent: text(80), scope: text(80), sample: Type.Boolean(), writesEnabled: Type.Literal(false),
+        vault: text(80), agent: text(80), scope: text(80), sample: Type.Boolean(), writesEnabled: Type.Boolean(),
         records: Type.Integer(), validRecords: Type.Integer(), definitions: Type.Integer(), ontologyAvailable: Type.Boolean(), ontologyFingerprint: text(64), issues: Type.Integer(),
       }, { additionalProperties: false }),
       tool: { name: "knowledge_status", label: "Knowledge status" },
@@ -34,28 +61,13 @@ export const contract = defineFeatureContract({
       tool: { name: "knowledge_records", label: "Browse knowledge" },
     },
     record: {
-      kind: "query", description: "Inspect a authorized record by stable ID, with structured metadata, original Markdown, evidence locators, and direct record references. Missing or duplicate IDs return no record.",
-      input: Type.Object({ id: text(96) }, { additionalProperties: false }),
-      output: Type.Object({
-        record: Type.Union([Type.Intersect([record, Type.Object({ body: text(65536), raw: text(65536), hash: text(64), metadata: text(262144) })]), Type.Null()]),
-        issues, references: Type.Array(record, { maxItems: 500 }),
-        evidence: Type.Array(Type.Object({ ...Evidence.properties, excerpt: text(4000), verified: Type.Boolean() }, { additionalProperties: false }), { maxItems: 20 }),
-      }),
+      kind: "query", description: "Read a scoped record by stable ID. Default content view returns body once (12,000 characters), revision/hash, attribution, issues and verified evidence (4,000 excerpt characters total). Follow content.nextOffset with offset to read more; compare hashes across chunks. view=summary omits text; view=raw returns original Markdown instead. Full metadata is opt-in as a structured object; references are opt-in and paginated. Missing/duplicate IDs return null. Never edit from a truncated body.",
+      input: RecordInput, output: RecordOutput,
       tool: { name: "knowledge_record", label: "Inspect knowledge" },
     },
     ontology: {
-      kind: "query", description: "Inspect the effective authorized-scope ontology: composed definitions, provenance, fingerprint, invalid sources, and affected records. Behavior flags do not enable unimplemented workflows.",
-      input: empty,
-      output: Type.Object({
-        available: Type.Boolean(), name: text(64), version: text(40), fingerprint: text(64), chain: Type.Array(text(110), { maxItems: 8 }),
-        definitions: Type.Array(Type.Object({
-          name: text(64), label: text(200), kind: text(30), primitive: text(20), directory: text(100), aliases: Type.Array(text(64), { maxItems: 100 }),
-          description: text(2000), fields: Type.Array(Field, { maxItems: 50 }), fromTypes: Type.Array(text(200), { maxItems: 100 }), toTypes: Type.Array(text(200), { maxItems: 100 }),
-          source: text(500), ontology: text(64), version: text(40), effective: text(262144), affectedRecords: Type.Array(record, { maxItems: 500 }),
-        }), { maxItems: 500 }),
-        sources: Type.Array(Type.Object({ path: text(500), raw: text(65536), valid: Type.Boolean(), name: text(64), version: text(40) }), { maxItems: 501 }),
-        affectedRecords: Type.Array(record, { maxItems: 500 }), issues, totalIssues: Type.Integer(), truncated: Type.Boolean(),
-      }),
+      kind: "query", description: "Inspect authorized ontology with progressive detail. Default catalog lists concise types, descriptions, aliases and counts (50/page). Use view=definitions with name for structured authoring fields, endpoint constraints and provenance (10/page); no serialized duplicate. includeRecords adds up to 20 examples/type; use knowledge_records for exhaustive records. view=sources lists source paths; add sourcePath for YAML only when debugging/editing a source, bounded by maxChars (12,000 default). view=diagnostics pages issues. Follow nextOffset using the same view/filters; source offsets are characters, other offsets are items. Behavior flags describe definitions, not implemented workflows.",
+      input: OntologyInput, output: OntologyOutput,
       tool: { name: "knowledge_ontology", label: "Inspect ontology" },
     },
     diagnostics: {

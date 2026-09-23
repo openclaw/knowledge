@@ -2,6 +2,8 @@ import { defineControlUiPlugin } from "openclaw/plugin-sdk/control-ui";
 import { createFeatureClient, type FeatureOutput } from "openclaw/plugin-sdk/feature-contract";
 import { contract } from "./contract.js";
 import "./control-ui.css";
+import { pageEditor } from "./page-editor.js";
+import { loadVocabulary } from "./inspection-client.js";
 import { ontologyView } from "./ontology-view.js";
 
 type Summary = FeatureOutput<typeof contract, "records">["records"][number];
@@ -32,6 +34,8 @@ export default defineControlUiPlugin({
         const toolbar = el("div", undefined, "knowledge-toolbar"), content = el("div", undefined, "knowledge-content");
         section.append(header, banner, status, nav, toolbar, content); container.append(section);
         let tab: "records" | "ontology" | "diagnostics" = "records", offset = 0, query = "", kind = "", type = "", selectedId = "";
+        let writesEnabled = false;
+        const editPage = (record?: NonNullable<FeatureOutput<typeof contract, "record">["record"]>) => void pageEditor(section, feature, record, id => { selectedId = id; tab = "records"; renderToolbar(); void refresh(); }, message => context.host.redact(message));
         let generation = 0, detailGeneration = 0, disposed = false, debounce: ReturnType<typeof setTimeout> | undefined;
         const alive = (n: number) => !disposed && !context.signal.aborted && n === generation && context.host.connection.connected;
         const showError = (error: unknown) => { content.replaceChildren(el("p", "Knowledge unavailable: " + context.host.redact(error instanceof Error ? error.message : String(error)), "knowledge-error")); };
@@ -51,35 +55,61 @@ export default defineControlUiPlugin({
             const typeFilter = el("input"); typeFilter.placeholder = "Type or ontology alias"; typeFilter.value = type; typeFilter.setAttribute("aria-label", "Filter by type or ontology alias");
             typeFilter.oninput = () => { type = typeFilter.value.trim(); offset = 0; selectedId = ""; clearTimeout(debounce); debounce = setTimeout(() => void load(), 200); };
             toolbar.append(search, select, typeFilter);
+            if (writesEnabled) toolbar.append(button("New page", () => editPage()));
+            toolbar.append(button("Refresh", () => void refresh()));
           }
           toolbar.hidden = tab !== "records";
         }
         async function showDetail(id: string, target: HTMLElement, n: number) {
           const detail = ++detailGeneration; selectedId = id; target.replaceChildren(el("p", "Loading record…"));
           try {
-            const result = await feature.invoke("record", { id });
+            const result = await feature.invoke("record", { id, maxChars: 65536, includeMetadata: true, includeReferences: true, referenceLimit: 100 });
             if (!alive(n) || detail !== detailGeneration) return;
             target.replaceChildren();
             if (!result.record) { target.append(el("h2", "Record unavailable"), el("p", "This ID is missing or duplicated. Inspect Activity & issues; no file was selected arbitrarily.")); return; }
             const r = result.record;
             target.append(el("p", `${r.kind} / ${r.type}`, "knowledge-eyebrow"), el("h2", r.title), el("p", `${r.acceptance} · ${r.lifecycle} · Revision ${r.revision}`, "knowledge-muted"), el("code", r.path));
             if (!r.valid) target.append(el("p", "Validation issues — this record is not fully valid.", "knowledge-error"));
+            if (writesEnabled && r.kind === "page" && r.valid) target.append(button("Edit page", () => editPage(r)));
             target.append(el("h3", "Authored Markdown"), el("pre", r.body, "knowledge-body"));
-            if (result.evidence.length) {
+            if (result.evidence?.length) {
               target.append(el("h3", "Evidence"));
               for (const e of result.evidence) {
                 const evidence = el("article", undefined, "knowledge-evidence");
                 evidence.append(el("strong", e.verified ? "Verified source" : "Source could not be verified"), el("p", `${e.path} · Lines ${e.start_line}–${e.end_line}`), el("blockquote", e.excerpt || "No verified excerpt available."), rawBlock("Content hash", e.sha256)); target.append(evidence);
               }
             }
-            if (result.references.length) {
+            if (result.references?.length) {
               target.append(el("h3", "Connected records"));
               const links = el("div", undefined, "knowledge-references");
               for (const ref of result.references) links.append(button(`${ref.title} · ${ref.kind}`, () => void showDetail(ref.id, target, n)));
               target.append(links);
             }
+            if (result.nextReferenceOffset !== undefined && result.nextReferenceOffset !== null) {
+              const links = el("div", undefined, "knowledge-references");
+              let nextOffset = result.nextReferenceOffset;
+              const more = button("More connected records", () => {
+                more.disabled = true;
+                void feature.invoke("record", { id, view: "summary", includeReferences: true, referenceOffset: nextOffset, referenceLimit: 100 }).then(page => {
+                  if (!alive(n) || detail !== detailGeneration) return;
+                  if (page.record?.hash !== r.hash) throw Error("Record changed; reopen it to refresh connections.");
+                  for (const ref of page.references ?? []) links.append(button(`${ref.title} · ${ref.kind}`, () => void showDetail(ref.id, target, n)));
+                  if (page.nextReferenceOffset == null) more.remove(); else { nextOffset = page.nextReferenceOffset; more.disabled = false; }
+                }).catch(error => { if (alive(n) && detail === detailGeneration) { more.disabled = false; links.append(el("p", context.host.redact(String(error)), "knowledge-error")); } });
+              });
+              target.append(links, more);
+            }
+            const raw = button("Read original file", () => {
+              raw.disabled = true;
+              void feature.invoke("record", { id, view: "raw", maxChars: 65536 }).then(page => {
+                if (!alive(n) || detail !== detailGeneration) return;
+                if (page.record?.hash !== r.hash) throw Error("Record changed; reopen it to read the current file.");
+                raw.replaceWith(rawBlock("Original file (read only)", page.record.raw ?? "", true));
+              }).catch(error => { if (alive(n) && detail === detailGeneration) { raw.disabled = false; target.append(el("p", context.host.redact(String(error)), "knowledge-error")); } });
+            });
+            target.append(raw);
             if (result.issues.length) target.append(issueList(result.issues));
-            target.append(rawBlock("Structured fields & metadata", r.metadata), rawBlock("Original file (read only)", r.raw), rawBlock("Identity & observed content hash", `${r.id}\nSHA-256: ${r.hash}`));
+            target.append(rawBlock("Structured fields & metadata", JSON.stringify(r.metadata, null, 2)), rawBlock("Identity & observed content hash", `${r.id}\nSHA-256: ${r.hash}`));
           } catch (error) { if (alive(n) && detail === detailGeneration) target.replaceChildren(el("p", context.host.redact(error instanceof Error ? error.message : String(error)), "knowledge-error")); }
         }
         function recordButton(record: Summary, detail: HTMLElement, n: number) {
@@ -106,15 +136,42 @@ export default defineControlUiPlugin({
               content.append(pages);
               if (selectedId) void showDetail(selectedId, detail, n);
             } else if (tab === "ontology") {
-              const result = await feature.invoke("ontology", {}); if (!alive(n)) return;
+              const result = await loadVocabulary(feature, true); if (!alive(n)) return;
               content.replaceChildren(ontologyView(result, id => {
                 tab = "records"; selectedId = id; offset = 0; query = ""; kind = ""; type = ""; renderToolbar(); void load();
               }, () => { tab = "diagnostics"; renderToolbar(); void load(); }));
 
             } else {
-              const result = await feature.invoke("diagnostics", {}); if (!alive(n)) return;
-              content.replaceChildren(el("h2", "Activity & issues"), el("p", "Current validation findings for this scope, not a mutation history. No repairs or writes have occurred."), el("p", `${result.total} findings · Checked ${new Date(result.checkedAt).toLocaleTimeString()}${result.truncated ? " · First 1,000 shown" : ""}`));
-              content.append(result.issues.length ? issueList(result.issues) : el("p", "No validation issues found."));
+              const [history, diagnostics] = await Promise.allSettled([feature.invoke("history", {}), feature.invoke("diagnostics", {})]);
+              if (!alive(n)) return;
+              content.replaceChildren(el("h2", "Activity & issues"));
+              if (history.status === "fulfilled") {
+                const git = history.value.git;
+                content.append(el("p", `Local Git history: ${git.state}${git.pending ? ` · ${git.pending} checkpoints waiting` : ""}. ${git.message}`));
+                for (const receipt of history.value.mutations) {
+                  const item = el("article", undefined, "knowledge-evidence");
+                  item.append(el("strong", `${receipt.state} · Revision ${receipt.revision}`), el("p", receipt.path), el("p", receipt.message));
+                  if (receipt.git) item.append(el("p", `Git: ${receipt.git.state}${receipt.git.commit ? ` · ${receipt.git.commit.slice(0, 12)}` : ""}. ${receipt.git.message}`));
+                  if (receipt.state === "published" && receipt.git && receipt.git.state !== "committed" && writesEnabled) item.append(button("Retry Git history", () => { void feature.invoke("resume", { requestId: receipt.requestId }).then(() => refresh()).catch(showError); }));
+                  if (receipt.state === "accepted" && writesEnabled) item.append(button("Resume save", () => { void feature.invoke("resume", { requestId: receipt.requestId }).then(() => refresh()).catch(showError); }));
+                  item.append(button("Inspect saved versions", () => {
+                    void feature.invoke("mutation", { requestId: receipt.requestId }).then(result => {
+                      if (!alive(n)) return;
+                      for (const file of result.files) item.append(rawBlock(`${file.path} · Before`, file.before ?? "New file"), rawBlock(`${file.path} · Proposed`, file.proposed), rawBlock(`${file.path} · Displaced file`, file.displaced ?? "None"));
+                    }).catch(showError);
+                  }));
+                  content.append(item);
+                }
+                for (const entry of history.value.entries) {
+                  const row = el("article"); row.append(el("p", `${entry.provenance} · ${entry.path} · Revision ${entry.revision} · ${new Date(entry.at).toLocaleString()}`));
+                  row.append(button("Read revision", () => { void feature.invoke("revision", { sequence: entry.sequence }).then(result => { if (alive(n)) row.append(rawBlock("Historical snapshot", result.raw ?? "Unavailable", true)); }).catch(showError); }));
+                  content.append(row);
+                }
+                if (!history.value.mutations.length && !history.value.entries.length) content.append(el("p", "No recorded mutations in this scope."));
+                if (history.value.nextOffset !== null) content.append(el("p", "Showing the latest 50 history entries. Older history is available through the history operation."));
+              } else content.append(el("p", context.host.redact(String(history.reason)), "knowledge-error"));
+              if (diagnostics.status === "fulfilled") content.append(diagnostics.value.issues.length ? issueList(diagnostics.value.issues) : el("p", "No validation issues found."));
+              else content.append(el("p", context.host.redact(String(diagnostics.reason)), "knowledge-error"));
             }
           } catch (error) { if (alive(n)) showError(error); }
         }
@@ -127,7 +184,9 @@ export default defineControlUiPlugin({
           try {
             const report = await feature.invoke("status", {});
             if (disposed || context.signal.aborted || n !== statusGeneration || !context.host.connection.connected) return;
-            banner.replaceChildren(el("strong", report.sample ? "Sample vault · Read only" : `${report.agent} · Private vault · Read only`), el("p", report.sample ? "Fictional people and projects for exploring the data model. No private agent vault is connected." : "Your agent’s knowledge. Record writes are not enabled yet."));
+            writesEnabled = report.writesEnabled; renderToolbar();
+            banner.replaceChildren(el("strong", report.sample ? "Sample vault · Read only" : `${report.agent} · Private vault${writesEnabled ? "" : " · Read only"}`), el("p", report.sample ? "Fictional people and projects for exploring the data model. No private agent vault is connected." : (writesEnabled ? "Create pages, retain source text, and edit with revision checks." : "Your agent’s knowledge. Writing is not enabled for this connection.")));
+            if (writesEnabled && selectedId) void load();
             status.textContent = `${report.records} ${report.sample ? "sample " : ""}records${report.issues ? ` · ${report.issues} issues to review` : ""}`;
           } catch (error) { if (!disposed && n === statusGeneration) status.textContent = "Knowledge unavailable: " + context.host.redact(error instanceof Error ? error.message : String(error)); }
         }
