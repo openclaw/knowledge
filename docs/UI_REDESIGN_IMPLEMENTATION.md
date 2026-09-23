@@ -110,3 +110,13 @@ The browser suite loads the host's built stylesheet before the plugin stylesheet
 uses the prototype's equivalent 1,182px content viewport (1,440px minus its
 258px sidebar), checks key layout measurements and icons, and captures desktop,
 760px, and 390px views. Assertions continue to prohibit browser knowledge writes.
+
+The detail refinement uses the same statement/evidence component for standalone
+claims and entity claim groups. Expanded evidence is quote-first, followed by a
+compact attribution/filename/line-range/retention row and icon actions beneath.
+The filename reveals hashes and technical metadata. Source downloads retain the
+existing byte-exact, hash-fenced path. No conversation-open action is fabricated
+when provenance is absent. File details groups revision/history, Markdown, and
+technical metadata in one sidebar surface. Visual checks include expanded entity
+evidence, standalone claims, and File details in both the reference dark palette
+and the host's actual Phosphor light stylesheet, plus mobile overflow checks.

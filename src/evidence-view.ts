@@ -1,20 +1,42 @@
 import type { FeatureClient, FeatureOutput } from "openclaw/plugin-sdk/feature-contract";
 import type { contract } from "./contract.js";
+import { icon } from "./ui-icons.js";
 
 type Detail = FeatureOutput<typeof contract, "record">;
 type FileEvidence = NonNullable<Detail["evidence"]>[number];
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, text?: string) => { const n = document.createElement(tag); if (text) n.textContent = text; return n; };
 
-export function evidenceView(feature: FeatureClient<typeof contract>, result: Detail, alive: () => boolean, redact: (s: string) => string, expansion = { count: 20 }) {
+export function evidenceView(feature: FeatureClient<typeof contract>, result: Detail, alive: () => boolean, redact: (s: string) => string, expansion = { count: 20 }, correction?: HTMLButtonElement) {
   const root = el("section"), id = result.record!.id, hash = result.record!.hash;
-  root.append(el("h3", `Source files (${result.evidenceTotal ?? result.evidence?.length ?? 0})`));
+  root.className = "knowledge-evidence-list";
+  root.setAttribute("aria-label", "Source evidence");
   const append = (e: FileEvidence) => {
-    const article = el("article"); article.className = "knowledge-evidence";
-    article.append(el("strong", e.filename ?? e.path), el("p", e.verified ? "Verified original" : "Source could not be verified"));
-    if (e.attribution) article.append(el("p", e.attribution));
-    article.append(el("p", [e.mediaType, e.size !== undefined ? `${e.size.toLocaleString()} bytes` : "", e.start_line !== undefined ? `Lines ${e.start_line}–${e.end_line}` : ""].filter(Boolean).join(" · ")));
-    if (e.excerpt) article.append(el("blockquote", e.excerpt), ...(e.excerptTruncated ? [el("small", "Preview only; the original file is preserved in full.")] : []));
-    const download = el("button", "Download original"), status = el("p"); download.type = "button"; download.disabled = !e.verified; status.setAttribute("role", "status");
+    const article = el("article"), quote = el("figure"), metadata = el("figcaption"), actions = el("div");
+    article.className = "knowledge-evidence-item"; quote.className = "knowledge-evidence";
+    metadata.className = "knowledge-evidence-meta"; actions.className = "knowledge-evidence-actions";
+    if (e.excerpt) quote.append(el("blockquote", `“${e.excerpt}”`));
+    else quote.append(el("p", "No text preview available. Open the original file to inspect this source."));
+    if (e.excerptTruncated) quote.append(el("small", "Excerpt · Original retained in full."));
+    const attribution = e.attribution;
+    if (attribution) metadata.append(el("span", `— ${attribution}`));
+    // The filename is the disclosure: hashes and other file mechanics stay out
+    // of the quote-first reading path without losing inspection access.
+    const details = el("details"), sourceName = el("summary", e.filename ?? e.path.split("/").at(-1)!);
+    details.className = "knowledge-source-reference";
+    if (e.start_line !== undefined) sourceName.append(document.createTextNode(` · ${e.start_line === e.end_line ? `line ${e.start_line}` : `lines ${e.start_line}–${e.end_line ?? e.start_line}`}`));
+    sourceName.title = "Source file details";
+    const technical = el("div"); technical.className = "knowledge-source-technical";
+    technical.append(el("code", `${e.path}\nSHA-256: ${e.sha256}`));
+    if (e.mediaType || e.size !== undefined) technical.append(el("p", [e.mediaType, e.size !== undefined ? `${e.size.toLocaleString()} bytes` : ""].filter(Boolean).join(" · ")));
+    if (result.record?.attribution && result.record.attribution !== attribution) technical.append(el("p", `Assertion attribution: ${result.record.attribution}`));
+    details.append(sourceName, technical); metadata.append(details);
+    const retained = el("span", e.verified ? "Original retained" : "Source not verified");
+    retained.className = e.verified ? "knowledge-retained" : "knowledge-unverified";
+    retained.prepend(icon(e.verified ? "badgeCheck" : "info", 12)); metadata.append(retained);
+    quote.append(metadata);
+    const download = el("button", "Original file"), status = el("p");
+    download.type = "button"; download.prepend(icon("download", 16)); download.disabled = !e.verified;
+    status.className = "knowledge-download-status"; status.setAttribute("role", "status");
     download.onclick = async () => {
       download.disabled = true;
       let writer: { write(bytes: Uint8Array): Promise<void>; close(): Promise<void>; abort(): Promise<void> } | undefined;
@@ -41,10 +63,11 @@ export function evidenceView(feature: FeatureClient<typeof contract>, result: De
         }
         status.textContent = "Original file downloaded.";
       } catch (error) { await writer?.abort().catch(() => {}); status.textContent = redact(String(error)); }
-      finally { download.disabled = false; }
+      finally { download.disabled = !e.verified; }
     };
-    const details = el("details"); details.append(el("summary", "File reference"), el("code", `${e.path}\nSHA-256: ${e.sha256}`));
-    article.append(download, status, details); root.append(article);
+    actions.append(download);
+    if (correction && !correction.parentElement) actions.append(correction);
+    article.append(quote, actions, status); root.append(article);
   };
   result.evidence?.forEach(append);
   let offset = result.nextEvidenceOffset;

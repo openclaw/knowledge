@@ -10,7 +10,7 @@ import "./control-ui.css";
 type Summary = FeatureOutput<typeof contract, "records">["records"][number];
 type Detail = FeatureOutput<typeof contract, "record">;
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, text?: string, className?: string) => { const n = document.createElement(tag); if (text !== undefined) n.textContent = text; if (className) n.className = className; return n; };
-const button = (text: string, run: () => void, className = "btn") => { const n = el("button", text, className); n.type = "button"; n.onclick = run; return n; };
+const button = (text: string, run: () => void, className = "knowledge-button") => { const n = el("button", text, className); n.type = "button"; n.onclick = run; return n; };
 const chip = (text: string) => el("span", text, "chip knowledge-chip");
 const human = (text: string) => text.replaceAll("_", " ").replaceAll("-", " ");
 const label = (text: string) => human(text).replace(/^./, c => c.toUpperCase());
@@ -63,7 +63,7 @@ export default defineControlUiPlugin({
           chat.disabled = true;
           void (async () => { const key = await context.host.sessions.create({ agentId: agentId || undefined }); if (key) context.host.sessions.open({ sessionKey: key, agentId: agentId || undefined }); else feedback.textContent = "Chat was not opened. Your request is still here."; })().catch(error => { feedback.textContent = errorText(error); }).finally(() => { chat.disabled = false; });
         });
-        panel.append(prompt, copy, chat, button("Dismiss", () => panel.remove(), "btn knowledge-quiet"), feedback); toolbar.after(panel); prompt.focus();
+        panel.append(prompt, copy, chat, button("Dismiss", () => panel.remove(), "knowledge-quiet"), feedback); toolbar.after(panel); prompt.focus();
       }
       function renderToolbar() {
         recentTab.setAttribute("aria-pressed", String(!selectedId && tab === "recent")); browseTab.setAttribute("aria-pressed", String(!selectedId && tab === "browse"));
@@ -98,25 +98,31 @@ export default defineControlUiPlugin({
       async function claimCard(r: Summary, n: number, aboutId?: string) {
         const result = await feature.invoke("record", { id: r.id, maxChars: 4000, includeMetadata: true });
         if (!live(n) || !result.record) return undefined;
-        const record = result.record, card = el("article", undefined, "knowledge-claim"); card.dataset.kind = aboutId && !record.metadata?.entities?.includes(aboutId) && record.metadata?.owner === aboutId ? "Owned commitments" : record.claimKind ?? "other";
+        return renderClaim(result, n, aboutId);
+      }
+      function renderClaim(result: Detail, n: number, aboutId?: string, standalone = false) {
+        const record = result.record!, card = el("article", undefined, `knowledge-claim${standalone ? " knowledge-claim-standalone" : ""}`); card.dataset.kind = aboutId && !record.metadata?.entities?.includes(aboutId) && record.metadata?.owner === aboutId ? "Owned commitments" : record.claimKind ?? record.kind;
         const row = el("div", undefined, "knowledge-claim-row"), copy = el("div", undefined, "knowledge-claim-copy");
-        copy.append(button(record.body || record.title, () => open(record.id), "knowledge-claim-text"));
+        copy.append(standalone ? el("p", record.body || record.title, "knowledge-claim-text") : button(record.body || record.title, () => open(record.id), "knowledge-claim-text"));
         const metadata = el("div", undefined, "knowledge-claim-meta");
         const assertionOrigin = el("span", origin(record.assertionOrigin), `knowledge-origin knowledge-origin-${record.assertionOrigin ?? "unknown"}`);
-        assertionOrigin.prepend(icon(record.assertionOrigin === "source" ? "paperclip" : record.assertionOrigin === "user_belief" ? "circleUser" : "brain", 12));
-        metadata.append(el("span", label(record.claimKind ?? "claim")), assertionOrigin);
+        assertionOrigin.prepend(icon(record.assertionOrigin === "source" ? "paperclip" : record.assertionOrigin === "user_belief" ? "circleUser" : record.assertionOrigin === "agent_inference" ? "brain" : "info", 12));
+        metadata.append(el("span", label(record.kind === "relationship" ? record.type : record.claimKind ?? "claim")), assertionOrigin);
         if (record.metadata?.due_at) metadata.append(el("span", `Due ${record.metadata.due_at}`));
         if (record.metadata?.occurred_at) metadata.append(el("span", `Occurred ${record.metadata.occurred_at}`));
         copy.append(metadata);
         if (result.content.nextOffset !== null) copy.append(el("small", "Excerpt — open claim for the complete text."));
-        row.append(tile(record.claimKind ?? "claim", 28, "claim"), copy); card.append(row);
+        row.append(tile(record.kind === "relationship" ? record.type : record.claimKind ?? "claim", 28, record.kind), copy); card.append(row);
         const evidence = el("details", undefined, "knowledge-claim-evidence"), disclosure = el("summary");
         disclosure.append(el("span", `Evidence · ${result.evidenceTotal ?? 0} source files`, "knowledge-sr-only"), icon("chevronDown", 14));
-        disclosure.title = "Show evidence and correction options"; evidence.append(disclosure);
+        disclosure.title = "Show evidence and correction options"; evidence.open = standalone; evidence.append(disclosure);
         if (record.assertionOrigin === "agent_inference") evidence.append(el("p", "This is the agent’s inference, not a quoted source statement. Supporting material, if any, is shown below.", "knowledge-notice"));
-        if (record.attribution) evidence.append(el("p", record.attribution, "knowledge-attribution"));
-        if (result.evidence?.length) evidence.append(evidenceView(feature, result, () => live(n), errorText)); else evidence.append(el("p", "No source evidence recorded."));
-        const correct = button("Correct in chat", () => ask(record, true), "btn knowledge-quiet"); correct.prepend(icon("pencil", 14)); evidence.append(correct);
+        const correct = button("Correct in chat", () => ask(record, true), "knowledge-quiet knowledge-correct"); correct.prepend(icon("pencil", 16));
+        if (result.evidence?.length) evidence.append(evidenceView(feature, result, () => live(n), errorText, undefined, correct));
+        else {
+          if (record.attribution) evidence.append(el("p", record.attribution, "knowledge-attribution"));
+          evidence.append(el("p", "No source evidence recorded."), correct);
+        }
         card.append(evidence); return card;
       }
 
@@ -133,7 +139,7 @@ export default defineControlUiPlugin({
         for (const [name, value] of Object.entries(meta?.fields ?? {})) { const node = el("span", `${human(name)}: ${typeof value === "object" ? JSON.stringify(value) : value}`); fieldNodes.set(name, node); facts.append(node); }
         if (fieldNodes.size) void feature.invoke("ontology", { view: "definitions", name: r.type, limit: 1 }).then(schema => { if (!live(n)) return; for (const field of schema.definitions?.[0]?.fields ?? []) { const node = fieldNodes.get(field.name), value = meta?.fields?.[field.name]; if (node) node.textContent = `${field.label}: ${typeof value === "object" ? JSON.stringify(value) : value}`; } }).catch(() => {});
         const askButton = button("Ask your agent", () => ask(r)); askButton.prepend(icon("messageSquare", 14));
-        heading.append(facts); head.append(tile(r.type, 48, r.kind), heading, askButton);
+        heading.append(facts); const entityTile = tile(r.type, 48, r.kind); entityTile.classList.remove("knowledge-tile-plain"); head.append(entityTile, heading, askButton);
         const back = button("← Knowledge", () => { selectedId = ""; renderToolbar(); void load(); }, "knowledge-back"); back.setAttribute("aria-label", "← Knowledge"); back.replaceChildren(icon("arrowLeft", 14), el("span", "Knowledge"));
         const breadcrumb = el("nav", undefined, "knowledge-breadcrumb"); breadcrumb.setAttribute("aria-label", "Breadcrumb"); breadcrumb.append(back, icon("chevronRight", 12), el("span", label(r.type)));
         const grid = el("div", undefined, "knowledge-entity-grid"), main = el("div", undefined, "knowledge-entity-main"), aside = el("aside", undefined, "knowledge-entity-aside");
@@ -142,28 +148,49 @@ export default defineControlUiPlugin({
         const lifecycle = meta as Record<string, unknown> | undefined;
         const change = lifecycle?.lifecycle_change;
         if (change && typeof change === "object" && "reason" in change && typeof change.reason === "string") main.append(el("p", change.reason, "knowledge-notice"));
-        if (typeof lifecycle?.superseded_by === "string") main.append(button("View replacement →", () => open(lifecycle.superseded_by as string), "btn knowledge-quiet"));
-        if (typeof lifecycle?.supersedes === "string") main.append(button("View original assertion", () => open(lifecycle.supersedes as string), "btn knowledge-quiet"));
+        if (typeof lifecycle?.superseded_by === "string") main.append(button("View replacement →", () => open(lifecycle.superseded_by as string), "knowledge-quiet"));
+        if (typeof lifecycle?.supersedes === "string") main.append(button("View original assertion", () => open(lifecycle.supersedes as string), "knowledge-quiet"));
         const body = el("div", undefined, "knowledge-summary");
         // textContent keeps portable Markdown safe; raw Markdown remains in File details.
         for (const paragraph of (r.body ?? "").split(/\n\s*\n/)) body.append(el("p", paragraph));
         body.append(el("span", `Revision ${r.revision}${meta?.updated_at ? ` · updated ${date(meta.updated_at)}` : ""}`, "knowledge-summary-meta"));
-        main.append(body);
-        if (result.content.nextOffset !== null) main.append(el("p", "Summary preview is truncated. Open the original Markdown below for paged content."));
-        if (r.kind !== "page") { main.append(el("p", origin(r.assertionOrigin), "knowledge-origin")); if (r.attribution) main.append(el("p", r.attribution)); main.append(button("Correct in chat", () => ask(r, true), "btn knowledge-quiet")); }
+        if (r.kind === "page") main.append(body);
+        else {
+          const statement = el("section", undefined, "knowledge-statement"), surface = el("div", undefined, "knowledge-surface knowledge-claim-groups");
+          statement.append(el("h3", r.kind === "claim" ? "Statement & evidence" : "Relationship & evidence"));
+          surface.append(renderClaim(result, n, undefined, true));
+          statement.append(surface, el("p", `Revision ${r.revision}${meta?.updated_at ? ` · updated ${date(meta.updated_at)}` : ""}`, "knowledge-summary-meta")); main.append(statement);
+        }
+        if (result.content.nextOffset !== null) main.append(el("p", "Preview is truncated. Open the original Markdown in File details for paged content."));
         const claims = el("section"), connections = el("section"), learned = el("section");
         if (r.kind === "page") { claims.append(el("h3", "What your agent knows")); main.append(claims); }
-        connections.append(el("h3", "Connections")); learned.append(el("h3", "Learned in"), el("p", "Conversation provenance is not recorded for these saves yet.", "knowledge-muted")); aside.append(connections, learned);
+        connections.append(el("h3", "Connections")); learned.append(el("h3", "Learned in"), el("p", "Conversation not recorded.", "knowledge-muted")); aside.append(connections, learned);
         const files = el("details", undefined, "knowledge-file-details"); const fileSummary = el("summary", "File details"); fileSummary.append(icon("chevronDown", 12)); files.append(fileSummary);
-        const dl = el("dl"); for (const [label, value] of [["File", r.path], ["ID", r.id], ["Revision", String(r.revision)], ["Lifecycle", r.lifecycle], ["SHA-256", r.hash]]) dl.append(el("dt", label), el("dd", value));
-        files.append(dl, rawBlock("Structured metadata", JSON.stringify(meta, null, 2)));
+        const filePanel = el("div", undefined, "knowledge-surface knowledge-file-panel"), fileActions = el("div", undefined, "knowledge-file-actions");
+        const dl = el("dl"); for (const [label, value] of [["File", r.path], ["ID", r.id], ["Revision", String(r.revision)]]) dl.append(el("dt", label), el("dd", value));
+        const checkpointValue = el("dd", "Checking…"); dl.append(el("dt", "History"), checkpointValue); filePanel.append(dl);
+        const technical = el("details", undefined, "knowledge-technical-details"); technical.append(el("summary", "Technical metadata"), el("p", `Lifecycle: ${r.lifecycle}`), el("code", `SHA-256: ${r.hash}`), rawBlock("Structured metadata", JSON.stringify(meta, null, 2)));
         const raw = button("View Markdown", () => {
           raw.disabled = true; let next = 0; const text = el("pre"); const more = button("Read more Markdown", () => { void read(); });
-          async function read() { more.disabled = true; try { const page = await feature.invoke("record", { id, view: "raw", offset: next, maxChars: 65536 }); if (!live(n)) return; if (page.record?.hash !== r.hash) throw Error("Record changed; reopen it to read the current Markdown."); text.textContent += page.record.raw ?? ""; if (page.content.nextOffset === null) more.remove(); else { next = page.content.nextOffset; more.disabled = false; } } catch (error) { files.append(failure(error)); more.disabled = false; } }
-          files.append(text, more); void read();
-        }); files.append(raw); aside.append(files);
-        if (result.evidence?.length) { const sources = el("details"); sources.append(el("summary", `Sources · ${result.evidenceTotal ?? 0}`), evidenceView(feature, result, () => live(n), errorText)); main.append(sources); }
+          async function read() { more.disabled = true; try { const page = await feature.invoke("record", { id, view: "raw", offset: next, maxChars: 65536 }); if (!live(n)) return; if (page.record?.hash !== r.hash) throw Error("Record changed; reopen it to read the current Markdown."); text.textContent += page.record.raw ?? ""; if (page.content.nextOffset === null) more.remove(); else { next = page.content.nextOffset; more.disabled = false; } } catch (error) { filePanel.append(failure(error)); more.disabled = false; } }
+          filePanel.append(text, more); void read();
+        }); raw.prepend(icon("fileText", 14));
+        const historyList = el("div", undefined, "knowledge-history-list"); historyList.hidden = true;
+        const historyButton = button("History", () => { historyList.hidden = !historyList.hidden; historyButton.setAttribute("aria-expanded", String(!historyList.hidden)); }, "knowledge-quiet"); historyButton.prepend(icon("clock", 14)); historyButton.setAttribute("aria-expanded", "false");
+        fileActions.append(raw, historyButton); filePanel.append(fileActions, historyList, technical); files.append(filePanel); aside.append(files);
+        if (r.kind === "page" && result.evidence?.length) { const sources = el("details"); sources.append(el("summary", `Sources · ${result.evidenceTotal ?? 0}`), evidenceView(feature, result, () => live(n), errorText)); main.append(sources); }
         grid.append(main, aside); content.replaceChildren(breadcrumb, head, grid);
+        if (r.kind === "claim" && meta?.entities?.length) {
+          const about = el("section", undefined, "knowledge-about"), targets = el("div", undefined, "knowledge-surface knowledge-connections");
+          about.append(el("h3", "About"), targets); aside.prepend(about);
+          const ids = [...new Set(meta.entities)].slice(0, 20);
+          void Promise.all(ids.map(async entityId => result.references?.find(ref => ref.id === entityId) ?? (await feature.invoke("record", { id: entityId, view: "summary" })).record)).then(records => {
+            if (!live(n)) return;
+            for (const record of records) if (record) { const row = el("div", undefined, "knowledge-connection"); row.append(summaryLink(record)); targets.append(row); }
+            if (!targets.children.length) targets.append(el("p", "Linked records are unavailable.", "knowledge-aside-empty"));
+            if (meta.entities!.length > ids.length) about.append(el("p", "Showing the first 20 linked entities.", "knowledge-muted"));
+          }).catch(error => { if (live(n)) targets.append(failure(error)); });
+        }
         const refs = el("div", undefined, "knowledge-surface knowledge-connections"); connections.append(refs);
         const claimSurface = el("div", undefined, "knowledge-surface knowledge-claim-groups"); claims.append(claimSurface);
         let linkOffset = 0, snapshot: string | undefined; const claimGroups = new Map<string, HTMLElement>();
@@ -185,13 +212,23 @@ export default defineControlUiPlugin({
               destination.append(tile(target.type, 24, target.kind), copy); row.append(destination);
               if (endpoints[i]) { const detail = button("", () => open(link.record.id), "knowledge-connection-evidence"); detail.setAttribute("aria-label", "Relationship evidence"); detail.title = "Relationship evidence"; detail.append(icon("paperclip", 13)); row.append(detail); } refs.append(row); }
           }
+          if (r.kind === "page") { const count = claims.querySelectorAll(".knowledge-claim").length; const heading = claims.querySelector("h3")!; heading.replaceChildren(document.createTextNode("What your agent knows "), el("span", `${count} ${count === 1 ? "claim" : "claims"}${page.nextOffset !== null ? " shown" : ""}`, "knowledge-section-count")); }
           loadMore.remove(); if (page.nextOffset !== null) { linkOffset = page.nextOffset; connections.append(loadMore); }
-          else { if (!refs.children.length) refs.append(el("p", "No active typed connections.", "knowledge-aside-empty")); if (r.kind === "page" && !claimGroups.size) { claimSurface.remove(); claims.append(el("p", "No active linked claims. Tell your agent in chat to add knowledge.")); } }
+          else { if (!refs.children.length) { refs.remove(); connections.append(el("p", "No connections recorded.", "knowledge-muted")); } if (r.kind === "page" && !claimGroups.size) { claimSurface.remove(); claims.append(el("p", "No active linked claims. Tell your agent in chat to add knowledge.")); } }
         }
         const loadMore = button("More claims and connections", () => { loadMore.disabled = true; void moreConnections().catch(error => { connections.append(failure(error)); }).finally(() => { loadMore.disabled = false; }); });
         void moreConnections().catch(error => { if (live(n)) connections.append(failure(error)); });
-        if (result.references?.length) { const references = el("details"); references.append(el("summary", "Record references · not asserted relationships")); for (const ref of result.references) references.append(summaryLink(ref)); if (result.nextReferenceOffset != null) references.append(el("p", "Showing the first 20 references.")); aside.append(references); }
-        void feature.invoke("history", { id, limit: 10 }).then(history => { if (!live(n)) return; const checkpoint = history.mutations.find(m => m.hash === r.hash)?.git; files.append(el("p", checkpoint ? `Git: ${checkpoint.state}. ${checkpoint.message}` : "Git checkpoint not recorded for this revision.")); const list = el("details"); list.append(el("summary", "Saved history")); for (const entry of history.entries) list.append(el("p", `Revision ${entry.revision} · ${date(entry.at)} · ${human(entry.provenance)}`)); if (history.nextOffset !== null) list.append(el("p", "Showing the latest 10 revisions.")); files.append(list); }).catch(error => { if (live(n)) files.append(failure(error)); });
+        if (result.references?.length) { const references = el("details"); references.append(el("summary", "Record references · not asserted relationships")); for (const ref of result.references) references.append(summaryLink(ref)); if (result.nextReferenceOffset != null) references.append(el("p", "Showing the first 20 references.")); technical.append(references); }
+        void feature.invoke("history", { id, limit: 10 }).then(history => {
+          if (!live(n)) return;
+          const checkpoint = history.mutations.find(m => m.hash === r.hash)?.git;
+          checkpointValue.textContent = checkpoint ? label(checkpoint.state) : "Not recorded";
+          checkpointValue.title = checkpoint?.message ?? "No Git checkpoint recorded for this revision.";
+          for (const entry of history.entries) historyList.append(el("p", `Revision ${entry.revision} · ${date(entry.at)} · ${human(entry.provenance)}`));
+          if (!history.entries.length) historyList.append(el("p", "No saved history recorded."));
+          if (history.nextOffset !== null) historyList.append(el("p", "Showing the latest 10 revisions."));
+        }).catch(error => { if (live(n)) { checkpointValue.textContent = "Unavailable"; historyList.append(failure(error)); } });
+
       }
       async function browse(n: number) {
         const result = await feature.invoke("records", { kind, offset, limit: 50, ...(type ? { type } : {}) });
@@ -203,7 +240,7 @@ export default defineControlUiPlugin({
         const panel = el("div", undefined, "knowledge-surface knowledge-table-wrap"), controls = el("div", undefined, "knowledge-table-toolbar");
         controls.append(browseSearch ??= searchForm(true));
         const kinds = el("div", undefined, "knowledge-kind-switch"); kinds.setAttribute("role", "group"); kinds.setAttribute("aria-label", "Record kind");
-        for (const [value, label] of [["page", "Pages"], ["claim", "Claims"], ["relationship", "Connections"]] as const) { const b = button(label, () => { kind = value; type = ""; offset = 0; void load(); }, "btn knowledge-quiet"); b.setAttribute("aria-pressed", String(kind === value)); kinds.append(b); }
+        for (const [value, label] of [["page", "Pages"], ["claim", "Claims"], ["relationship", "Connections"]] as const) { const b = button(label, () => { kind = value; type = ""; offset = 0; void load(); }, "knowledge-quiet"); b.setAttribute("aria-pressed", String(kind === value)); kinds.append(b); }
         controls.append(kinds); panel.append(controls);
         if (kind === "claim") { const cards = await Promise.all(result.records.map(r => claimCard(r, n))); if (!live(n)) return; for (const card of cards) if (card) panel.append(card); }
         else { const table = el("table", undefined, "data-table knowledge-table"), head = el("thead"), row = el("tr"); for (const label of ["Name", "Type", "Status"]) row.append(el("th", label)); head.append(row); table.append(head); const body = el("tbody"); for (const record of result.records) { const row = el("tr"), name = el("td"); name.append(summaryLink(record)); row.append(name, el("td", label(record.type)), el("td", record.valid ? human(record.lifecycle) : "Needs attention")); body.append(row); } table.append(body); panel.append(table); }
@@ -224,7 +261,7 @@ export default defineControlUiPlugin({
         let currentDay = "", group: HTMLElement | undefined;
         for (const [i, entry] of history.entries.entries()) { const r = details[i].record; if (!r) continue; const day = new Date(entry.at).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" }); if (day !== currentDay) { currentDay = day; feed.append(el("h2", new Date(entry.at).toDateString() === new Date().toDateString() ? "Today" : day, "knowledge-eyebrow")); group = el("section", undefined, "knowledge-surface"); feed.append(group); } const row = el("article", undefined, "knowledge-feed-item"); if (r.lifecycle !== "active") {
             row.classList.add("knowledge-historical-notice");
-            row.append(el("span", `${human(r.kind)} · Current status: ${human(r.lifecycle)}`), el("small", `Recorded revision ${entry.revision} · ${date(entry.at)}`, "knowledge-muted"), button("Inspect historical record", () => open(r.id), "btn knowledge-quiet"));
+            row.append(el("span", `${human(r.kind)} · Current status: ${human(r.lifecycle)}`), el("small", `Recorded revision ${entry.revision} · ${date(entry.at)}`, "knowledge-muted"), button("Inspect historical record", () => open(r.id), "knowledge-quiet"));
           } else {
             const item = button("", () => open(r.id), "knowledge-feed-link"), copy = el("span", undefined, "knowledge-feed-copy");
             copy.append(el("span", r.title, "knowledge-feed-title"), el("span", `${label(r.type)} · Revision ${entry.revision} · ${new Date(entry.at).toLocaleTimeString(undefined, {hour:"numeric", minute:"2-digit"})}`, "knowledge-feed-meta"));
@@ -243,7 +280,7 @@ export default defineControlUiPlugin({
           if (selectedId) return await showDetail(selectedId, n);
           if (tab === "recent") return await recent(n);
           if (tab === "browse") return await browse(n);
-          if (tab === "ontology") { const result = await loadVocabulary(feature, true); if (live(n)) content.replaceChildren(button("← Knowledge", () => navigate("recent"), "btn knowledge-quiet"), button("Vault status", () => navigate("diagnostics"), "btn knowledge-quiet"), ontologyView(result, open, () => navigate("diagnostics"))); return; }
+          if (tab === "ontology") { const result = await loadVocabulary(feature, true); if (live(n)) content.replaceChildren(button("← Knowledge", () => navigate("recent"), "knowledge-quiet"), button("Vault status", () => navigate("diagnostics"), "knowledge-quiet"), ontologyView(result, open, () => navigate("diagnostics"))); return; }
           if (tab === "diagnostics") { const result = await feature.invoke("diagnostics", {}); if (!live(n)) return; const panel = empty("Vault status", `${result.total} validation findings. Knowledge changes happen through your agent in chat.`); for (const issue of result.issues) panel.append(el("p", `${human(issue.code)} · ${issue.path}: ${issue.message}`)); content.replaceChildren(panel); return; }
           if (!query.trim()) { content.replaceChildren(empty("Search knowledge", "Enter a name or a few words to search all saved text.")); return; }
           const result = await feature.invoke("grep", { query: query.trim(), limit: 20, offset }); if (!live(n)) return;

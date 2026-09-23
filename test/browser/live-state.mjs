@@ -79,7 +79,7 @@ try {
   await page.locator('.knowledge-claim[data-kind=commitment]').locator('summary').filter({hasText:'Evidence · 1 source files'}).click();
   await page.evaluate(()=>{window.showSaveFilePicker=undefined});
   const downloaded=page.waitForEvent('download');
-  await page.locator('.knowledge-claim[data-kind=commitment]').getByRole('button',{name:'Download original'}).click();
+  await page.locator('.knowledge-claim[data-kind=commitment]').getByRole('button',{name:'Original file'}).click();
   const download=await downloaded;
   assert.equal((await fs.readFile(await download.path(),'utf8')),'Alex will deliver on Friday.\nLaunch happened yesterday.');
   await page.locator('.knowledge-claim details[open] > summary').evaluateAll(nodes=>nodes.forEach(node=>node.click()));
@@ -194,6 +194,64 @@ try {
     await page.mouse.move(0,0); await page.clock.runFor(200);
     await page.locator('.knowledge-header').screenshot({animations:'disabled',path:base+`/tabs-${mode}.png`});
   }
+  // Detail fidelity must cover standalone claims as well as entity pages, and
+  // must load an actual light palette (not just change data-theme-mode).
+  if (hostRoot) await page.addStyleTag({content:await fs.readFile(hostRoot+'/themes/phosphor.css','utf8')});
+  await page.getByRole('button',{name:'Browse',exact:true}).click();
+  await page.getByRole('button',{name:'Northwind launch',exact:true}).click();
+  await page.getByRole('button',{name:'Alex will deliver on Monday.',exact:true}).waitFor();
+  for(const mode of ['dark','light']) {
+    await page.evaluate(mode=>{document.documentElement.dataset.theme=mode==='light'?'phosphor-light':'dark';document.documentElement.dataset.themeMode=mode;},mode);
+    const expanded=page.locator('.knowledge-claim[data-kind=commitment] .knowledge-claim-evidence');
+    await expanded.locator(':scope > summary').click();
+    const quoteLayout=await expanded.evaluate(n=>{
+      const quote=n.querySelector('blockquote').getBoundingClientRect(), meta=n.querySelector('.knowledge-evidence-meta').getBoundingClientRect(), panel=n.querySelector('.knowledge-evidence').getBoundingClientRect();
+      const buttons=[...n.querySelectorAll('.knowledge-evidence-actions button')].map(b=>b.getBoundingClientRect());
+      return {quoteBottom:quote.bottom,metaTop:meta.top,panelBottom:panel.bottom,actionsTop:buttons[0].top,sameRow:buttons[0].top===buttons[1].top,heading:n.querySelector('h3')?.textContent,height:n.getBoundingClientRect().height};
+    });
+    assert.ok(quoteLayout.quoteBottom<=quoteLayout.metaTop,'Source quote precedes compact attribution');
+    assert.ok(quoteLayout.panelBottom<quoteLayout.actionsTop,'Actions sit below the evidence inset');
+    assert.equal(quoteLayout.sameRow,true,'Original and correction actions share a row');
+    assert.equal(quoteLayout.heading,undefined,'No file-inspector heading in the reading path');
+    assert.ok(quoteLayout.height<240,'Expanded evidence keeps reference density');
+    await expanded.locator('.knowledge-retained svg').waitFor({state:'visible'});
+    await page.mouse.move(0,0); await page.evaluate(()=>window.scrollTo(0,0));
+    await page.screenshot({animations:'disabled',path:base+`/entity-evidence-${mode}.png`,fullPage:true});
+    await expanded.locator(':scope > summary').click();
+    await page.locator('.knowledge-file-details > summary').click();
+    await page.locator('.knowledge-file-panel').waitFor();
+    await page.screenshot({animations:'disabled',path:base+`/entity-file-details-${mode}.png`,fullPage:true});
+    await page.locator('.knowledge-file-details > summary').click();
+  }
+  await page.getByRole('button',{name:'Alex will deliver on Monday.',exact:true}).click();
+  await page.locator('.knowledge-claim-standalone').waitFor();
+  await page.locator('.knowledge-about').getByRole('button',{name:'Northwind launch',exact:true}).waitFor();
+  assert.equal(await page.locator('.knowledge-claim-standalone details[open]').count(),1,'Standalone evidence is visible by default');
+  assert.equal(await page.locator('.knowledge-entity-main > button').count(),1,'Only the lifecycle navigation action is outside the statement card');
+  for(const mode of ['dark','light']) {
+    await page.evaluate(mode=>{document.documentElement.dataset.theme=mode==='light'?'phosphor-light':'dark';document.documentElement.dataset.themeMode=mode;},mode);
+    const correct=page.getByRole('button',{name:'Correct in chat',exact:true});
+    const measured=await correct.evaluate(n=>({button:n.getBoundingClientRect().width,card:n.closest('.knowledge-claim').getBoundingClientRect().width,background:getComputedStyle(n).backgroundColor}));
+    assert.ok(measured.button<measured.card/2,'Correction action is content-sized, not full-width');
+    // CSS transitions settle in the screenshot; inspect the final cascade without animation.
+    await page.mouse.move(0,0); await page.evaluate(()=>window.scrollTo(0,0));
+    await page.screenshot({animations:'disabled',path:base+`/claim-detail-${mode}.png`,fullPage:true});
+    assert.equal(await correct.evaluate(n=>getComputedStyle(n).backgroundColor),'rgba(0, 0, 0, 0)','Light mode does not fill ghost actions');
+  }
+  await page.getByRole('button',{name:'Correct in chat',exact:true}).click();
+  assert.match(await page.getByLabel('Chat request').inputValue(),/Observed SHA-256: [a-f0-9]{64}/);
+  await page.getByRole('button',{name:'Dismiss',exact:true}).click();
+  await page.locator('.knowledge-file-details > summary').click();
+  await page.getByRole('button',{name:'History',exact:true}).click();
+  await page.locator('.knowledge-history-list').waitFor();
+  await page.getByRole('button',{name:'View Markdown',exact:true}).click();
+  await page.locator('.knowledge-file-panel > pre').filter({hasText:'Alex will deliver on Monday.'}).waitFor();
+  await page.setViewportSize({width:390,height:844});
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'Expanded claim and file details fit mobile');
+  await page.screenshot({animations:'disabled',path:base+'/claim-detail-light-mobile.png',fullPage:true});
+  await page.setViewportSize({width:1182,height:900});
+  await page.getByRole('button',{name:'Recent',exact:true}).click();
+  await page.locator('.knowledge-historical-notice').first().waitFor();
   await page.locator('.knowledge-historical-notice').filter({hasText:'Current status: withdrawn'}).first().getByRole('button',{name:'Inspect historical record'}).click();
   await page.getByText('The readiness inference was withdrawn in chat.',{exact:true}).waitFor();
   await page.getByText(/withdrawn — historical knowledge/).waitFor();
@@ -203,7 +261,7 @@ try {
   await page.locator('.knowledge-feed').waitFor();
   assert.deepEqual(await page.evaluate(()=>window.subscriptions()),{events:1,connections:1});
   assert.deepEqual(errors,[]);
-  console.log(JSON.stringify({passed:['light/dark text-tab styling under the production host cascade','reference layout measurements and type icons','search keyboard shortcut','read-only browser contract','agent correction live refresh and historical linkage','withdrawal removes active claims and redacts historical feed titles','search offset cap','design-token dark screenshots','recent default and observed history','ontology-derived browse','native commitment/event/inference cards','attribution and retained inference premise evidence','byte-exact evidence download','revision/hash chat request and no autosend','handoff preserved across periodic refresh','exact name suggestions','ranked search','disconnect and reconnect','subscription cleanup','mobile overflow','no page errors'],artifacts:base},null,2));
+  console.log(JSON.stringify({passed:['quote-first evidence, compact attribution and icon action row in dark/light','standalone claim details, scoped correction actions, and about links','grouped file details, history and hash-checked Markdown in light mode','light/dark text-tab styling under the production host cascade','reference layout measurements and type icons','search keyboard shortcut','read-only browser contract','agent correction live refresh and historical linkage','withdrawal removes active claims and redacts historical feed titles','search offset cap','design-token dark screenshots','recent default and observed history','ontology-derived browse','native commitment/event/inference cards','attribution and retained inference premise evidence','byte-exact evidence download','revision/hash chat request and no autosend','handoff preserved across periodic refresh','exact name suggestions','ranked search','disconnect and reconnect','subscription cleanup','mobile overflow','no page errors'],artifacts:base},null,2));
 } catch (error) {
   console.error(JSON.stringify({errors,page:await page?.locator('main').innerText()},null,2));throw error;
 } finally {services.forEach(s=>s.stop());await browser.close();}
