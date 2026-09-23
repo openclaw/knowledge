@@ -172,3 +172,7 @@
 .knowledge-chat-handoff button { margin-right: 8px; }
 @media (max-width: 900px) { .knowledge-page { padding: 20px; } .knowledge-browse { grid-template-columns: 160px minmax(0,1fr); gap: 16px; } .knowledge-entity-grid { grid-template-columns: minmax(0,1fr) 230px; gap: 20px; } }
 @media (max-width: 650px) { .knowledge-page { padding: 16px 12px 32px; } .knowledge-header { align-items: start; flex-direction: column; } .knowledge-actions { justify-content: flex-start; } .knowledge-browse, .knowledge-entity-grid { grid-template-columns: minmax(0,1fr); } .knowledge-facets { position: static; display: flex; flex-wrap: wrap; } .knowledge-facets h3, .knowledge-facets p { width: 100%; } .knowledge-entity-aside { position: static; } .knowledge-entity-header { flex-direction: column; } .knowledge-feed-item { gap: 8px; } .knowledge-feed-item > .knowledge-record-link { flex-basis: 100%; } .knowledge-search { flex-wrap: wrap; } .knowledge-search input { flex-basis: 100%; } .knowledge-table th, .knowledge-table td { padding: 10px 8px; } .knowledge-table-toolbar { flex-wrap: wrap; } }
+
+.knowledge-header h1, .knowledge-entity-header h2 { color: var(--text-strong, var(--text)); }
+.knowledge-historical-notice > span { font-size: 13px; color: var(--muted); }
+.knowledge-historical-notice > button { margin-left: auto; }

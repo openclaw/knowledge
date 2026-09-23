@@ -189,7 +189,11 @@ export default defineControlUiPlugin({
         feed.append(el("p", "Recorded activity · Conversation grouping and attention counts are not available for these saves yet.", "knowledge-muted"));
         const details = await Promise.all(history.entries.map(entry => feature.invoke("record", { id: entry.id, view: "summary" }))); if (!live(n)) return;
         let currentDay = "", group: HTMLElement | undefined;
-        for (const [i, entry] of history.entries.entries()) { const r = details[i].record; if (!r) continue; const day = new Date(entry.at).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" }); if (day !== currentDay) { currentDay = day; feed.append(el("h2", day, "knowledge-eyebrow")); group = el("section", undefined, "knowledge-surface"); feed.append(group); } const row = el("article", undefined, "knowledge-feed-item"); row.append(summaryLink(r), el("span", `Revision ${entry.revision} · ${date(entry.at)}`, "knowledge-muted"), chip(entry.provenance === "external" ? "Edited outside OpenClaw" : entry.revision === 1 ? "Saved" : "Updated")); group!.append(row); }
+        for (const [i, entry] of history.entries.entries()) { const r = details[i].record; if (!r) continue; const day = new Date(entry.at).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" }); if (day !== currentDay) { currentDay = day; feed.append(el("h2", day, "knowledge-eyebrow")); group = el("section", undefined, "knowledge-surface"); feed.append(group); } const row = el("article", undefined, "knowledge-feed-item"); if (r.lifecycle !== "active") {
+            row.classList.add("knowledge-historical-notice");
+            row.append(el("span", `${human(r.kind)} · Current status: ${human(r.lifecycle)}`), el("small", `Recorded revision ${entry.revision} · ${date(entry.at)}`, "knowledge-muted"), button("Inspect historical record", () => open(r.id), "btn knowledge-quiet"));
+          } else row.append(summaryLink(r), el("span", `Revision ${entry.revision} · ${date(entry.at)}`, "knowledge-muted"), chip(entry.provenance === "external" ? "Edited outside OpenClaw" : entry.revision === 1 ? "Saved" : "Updated"));
+          group!.append(row); }
         if (!history.entries.length) feed.append(empty("No recorded activity yet", "Knowledge saved by your agent will appear here. Existing vault records are available in Browse."));
         const pages = el("div", undefined, "knowledge-pagination"); if (historyOffset) pages.append(button("Newer activity", () => { historyOffset = Math.max(0, historyOffset - 20); void load(); })); if (history.nextOffset !== null) pages.append(button("Older activity", () => { historyOffset = history.nextOffset!; void load(); })); feed.append(pages); content.replaceChildren(feed);
       }
@@ -212,7 +216,7 @@ export default defineControlUiPlugin({
           if (!result.coverage.complete) list.append(el("p", result.coverage.message, "knowledge-notice"));
           for (const hit of result.hits) { const row = el("article", undefined, "knowledge-search-hit"); row.append(summaryLink(hit.record), el("p", hit.snippet.text), el("small", `Revision ${hit.citation.revision} · ${hit.citation.path}`)); list.append(row); }
           if (!result.total) list.append(empty("No matches", "Try another name or phrase, or browse by type."));
-          const pages = el("div", undefined, "knowledge-pagination"); if (offset) pages.append(button("Previous", () => { offset = Math.max(0, offset - 20); void load(); })); if (result.nextOffset !== null) pages.append(button("Next", () => { offset = result.nextOffset!; void load(); })); list.append(pages); content.replaceChildren(list);
+          const pages = el("div", undefined, "knowledge-pagination"); if (offset) pages.append(button("Previous", () => { offset = Math.max(0, offset - 20); void load(); })); if (result.nextOffset !== null) { const next = button("Next", () => { offset = result.nextOffset!; void load(); }); next.disabled = result.nextOffset > 500; pages.append(next); if (next.disabled) list.append(el("p", "This server cannot page beyond 520 search results. Refine your query to see more.", "knowledge-notice")); } list.append(pages); content.replaceChildren(list);
         } catch (error) { if (live(n)) content.replaceChildren(failure(error)); }
       }
       async function refresh() {

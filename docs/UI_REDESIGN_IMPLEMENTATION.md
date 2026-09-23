@@ -68,3 +68,17 @@ presentation and chat handoff, and writes desktop/mobile screenshots to its prin
 temporary artifact directory. `test/browser/structured-writes.mjs` is a compatible
 entrypoint for the same read-only browser suite; backend structured write tests
 remain in `test/structured-writes.test.mjs`.
+
+The lifecycle browser case calls `correct` and `withdraw` through a trusted
+agent-tool fixture (not browser/operator actions), verifies live replacement and
+withdrawal, and inspects reason/original/replacement navigation. In Recent,
+inactive records get minimal historical notices with their **current** lifecycle;
+old history timestamps are not relabeled as correction/withdrawal event times.
+Their assertion titles do not appear as current feed cards. Search also stops
+before the server's maximum paging offset.
+
+For reference-fidelity dark screenshots, set `KNOWLEDGE_DESIGN_ROOT` to the
+extracted design archive directory when running the browser suite. It loads that
+archive's exact color/typography/spacing tokens and embeds its local Instrument
+Sans and JetBrains Mono font assets. No network font requests are made. Without
+that directory, the test uses dark host-token values and the system font fallback.

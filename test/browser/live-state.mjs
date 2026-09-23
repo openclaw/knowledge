@@ -12,11 +12,13 @@ const base=await fs.realpath(await fs.mkdtemp('/tmp/knowledge-live-browser-'));
 await fs.mkdir(base+'/vault/private',{recursive:true});
 const manifest={format:'knowledge-vault-v1',vaultId:randomUUID(),agentId:'main',generation:0,publicationId:randomUUID()};
 await fs.writeFile(base+'/vault/vault.json',JSON.stringify(manifest));
-const services=[]; let page;
+const services=[]; let page, cappedSearch=false;
 const requests=[], errors=[];
-const api={pluginConfig:{vault:{root:base+'/vault',statePath:base+'/state.sqlite',agentId:'main',vaultId:manifest.vaultId,publicationId:manifest.publicationId,operatorRead:true,writesEnabled:true}},registerService:s=>services.push(s)};
+const ownerSessionId=randomUUID();
+const api={runtime:{agent:{session:{getSessionEntry:()=>({sessionId:ownerSessionId,chatType:"direct"})}}},pluginConfig:{vault:{root:base+'/vault',statePath:base+'/state.sqlite',agentId:'main',vaultId:manifest.vaultId,publicationId:manifest.publicationId,operatorRead:true,writesEnabled:true}},registerService:s=>services.push(s)};
 const service=createKnowledgeService(api,{emit:(event,payload)=>{void page?.evaluate(({event,payload})=>window.emit?.(event,payload),{event,payload}).catch(()=>{});}});
 const context={source:'session-action',api,action:{client:{connId:'isolated-browser',scopes:['operator.write']}}};
+const agentContext={source:"tool",api,tool:{agentId:"main",sessionId:ownerSessionId,sessionKey:"agent:main:browser-lifecycle-test",senderIsOwner:true,assertInvocationCurrent(){}}};
 const browser=await chromium.launch({headless:true,executablePath:process.env.KNOWLEDGE_BROWSER_PATH??'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'});
 const entry=`import plugin from './src/control-ui.ts';
 const listeners=new Set(), events=new Map(); let mounted, controller;
@@ -42,7 +44,9 @@ try {
   await page.exposeFunction('invokeKnowledge',async(operation,input)=>{
     requests.push(operation);
     assert.ok(!['save_page','create_claim','create_relationship','resume','attach','correct','withdraw'].includes(operation),'The browser must never mutate knowledge');
+    if (operation === 'grep' || operation === 'records') assert.ok((input.offset ?? 0) <= 500, 'UI never sends an invalid paging offset');
     const result=await service[operation](input,context);
+    if (operation === 'grep' && cappedSearch) { result.nextOffset=520; result.total=600; }
     JSON.stringify(result);
     return result;
   });
@@ -52,8 +56,8 @@ try {
   const evidence=(await service.record({id:source.id,includeMetadata:true},context)).record.metadata.evidence;
   const fingerprint=(await service.ontology({},context)).fingerprint;
   const common={expectedOntologyFingerprint:fingerprint,evidence,attribution:'Alex, team standup',entities:[project.id]};
-  await service.create_claim({...common,requestId:randomUUID(),title:'Release commitment',body:'Alex will deliver on Friday.',claim_kind:'commitment',assertion_origin:'source',owner:person.id,due_at:'2026-09-25'},context);
-  await service.create_claim({...common,requestId:randomUUID(),title:'Readiness inference',body:'The launch appears ready.',claim_kind:'belief',assertion_origin:'agent_inference'},context);
+  const commitment=await service.create_claim({...common,requestId:randomUUID(),title:'Release commitment',body:'Alex will deliver on Friday.',claim_kind:'commitment',assertion_origin:'source',owner:person.id,due_at:'2026-09-25'},context);
+  const inference=await service.create_claim({...common,requestId:randomUUID(),title:'Readiness inference',body:'The launch appears ready.',claim_kind:'belief',assertion_origin:'agent_inference'},context);
   await service.create_claim({...common,requestId:randomUUID(),title:'Launch event',body:'Launch happened yesterday.',claim_kind:'event',assertion_origin:'source',occurred_at:'2026-09-22'},context);
   await service.create_relationship({requestId:randomUUID(),expectedOntologyFingerprint:fingerprint,evidence,attribution:'Alex, team standup',title:'Alex leads Northwind',body:'Alex leads the launch project.',from:person.id,to:project.id,label:'leads'},context);
   services[0].start();
@@ -92,25 +96,72 @@ try {
   await page.getByRole('button',{name:'Dismiss',exact:true}).click();
   await page.setViewportSize({width:390,height:844});
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
-  await page.screenshot({path:base+'/entity-mobile.png',fullPage:true});
+  await page.screenshot({path:base+'/entity-mobile.png'});
   await page.getByRole('button',{name:'← Knowledge',exact:true}).click();
   await page.getByLabel('Search knowledge').fill('Alex');
   await page.clock.runFor(250);
   await page.locator('.knowledge-suggestions').getByRole('button',{name:'Alex Rivera'}).waitFor();
+  cappedSearch=true;
   await page.getByLabel('Search knowledge').fill('launch');
   await page.getByRole('button',{name:'Search all text',exact:true}).click();
   await page.getByText(/Ranked text search, not a complete inventory/).waitFor();
+  assert.equal(await page.getByRole('button',{name:'Next',exact:true}).isDisabled(),true);
+  await page.getByText(/cannot page beyond 520 search results/).waitFor();
+  cappedSearch=false;
   await page.evaluate(()=>window.connect(false));
   await page.locator('.knowledge-status').getByText('Disconnected',{exact:true}).waitFor();
   await page.evaluate(()=>window.connect(true));
   await page.getByText(/Ranked text search, not a complete inventory/).waitFor();
+  // Agent/service lifecycle operations refresh the read-only UI without browser writes.
+  await page.getByRole('button',{name:'Browse',exact:true}).click();
+  await page.getByRole('button',{name:'Northwind launch',exact:true}).click();
+  await page.locator('.knowledge-claim[data-kind=commitment]').waitFor();
+  const corrected=await service.correct({requestId:randomUUID(),id:commitment.id,expectedRevision:commitment.revision,expectedHash:commitment.hash,expectedOntologyFingerprint:fingerprint,reason:'The delivery date was corrected in chat.',replacement:{kind:'claim',title:'Updated release commitment',body:'Alex will deliver on Monday.',claim_kind:'commitment',assertion_origin:'user_belief',attribution:'User correction in chat',evidence,entities:[project.id],owner:person.id,due_at:'2026-09-28'}},agentContext);
+  await page.evaluate(()=>window.emit('changed',{}));
+  await page.getByRole('button',{name:'Alex will deliver on Monday.',exact:true}).waitFor();
+  assert.equal(await page.getByRole('button',{name:'Alex will deliver on Friday.',exact:true}).count(),0);
+  await page.getByRole('button',{name:'Alex will deliver on Monday.',exact:true}).click();
+  await page.getByRole('button',{name:'View original assertion',exact:true}).click();
+  await page.getByText('The delivery date was corrected in chat.',{exact:true}).waitFor();
+  await page.getByText(/superseded — historical knowledge/).waitFor();
+  await page.getByRole('button',{name:'View replacement →',exact:true}).click();
+  await page.getByRole('heading',{name:'Updated release commitment',exact:true}).waitFor();
+  await service.withdraw({requestId:randomUUID(),id:inference.id,expectedRevision:inference.revision,expectedHash:inference.hash,reason:'The readiness inference was withdrawn in chat.'},agentContext);
+  // Freeze live notifications while capturing a stable visual state.
+  await page.evaluate(()=>{window.emit=()=>{}});
+  await page.getByRole('button',{name:'Browse',exact:true}).click();
+  await page.getByRole('button',{name:'Northwind launch',exact:true}).click();
+  await page.getByRole('button',{name:'Alex will deliver on Monday.',exact:true}).waitFor();
+  await page.getByRole('button',{name:'Relationship evidence',exact:true}).waitFor();
+  assert.equal(await page.locator('.knowledge-claim').count(),2);
+  assert.equal(await page.locator('.knowledge-claim[data-kind=belief]').count(),0);
+  // Dark screenshots use the supplied design tokens/fonts when KNOWLEDGE_DESIGN_ROOT is set.
+  const designRoot=process.env.KNOWLEDGE_DESIGN_ROOT;
+  let dark=':root{--bg:#0e1015;--card:#161920;--bg-hover:#1f2330;--bg-accent:#13151b;--text:#bcbcc0;--text-strong:#f4f4f5;--muted:#8b8b94;--muted-strong:#898990;--border:#1e2028;--accent:#ff5c5c;--accent-subtle:rgba(255,92,92,.1);--danger:#f87171;--warn:#f59e0b;--font-body:"Instrument Sans",system-ui;color-scheme:dark}body{font-family:var(--font-body)}';
+  if(designRoot){
+    dark+=await fs.readFile(designRoot+'/tokens/colors.css','utf8')+await fs.readFile(designRoot+'/tokens/typography.css','utf8')+await fs.readFile(designRoot+'/tokens/spacing.css','utf8');
+    for(const [family,file] of [['Instrument Sans','instrument-sans-latin.woff2'],['JetBrains Mono','jetbrains-mono-latin.woff2']]) dark+=`@font-face{font-family:'${family}';src:url(data:font/woff2;base64,${(await fs.readFile(designRoot+'/assets/fonts/'+file)).toString('base64')}) format('woff2');font-weight:100 900;font-style:normal;font-display:block}`;
+  }
+  await page.addStyleTag({content:dark}); await page.evaluate(()=>document.fonts.ready); await page.setViewportSize({width:1280,height:1000}); await page.evaluate(()=>window.scrollTo(0,0));
+  await page.getByRole('button',{name:'Alex will deliver on Monday.',exact:true}).waitFor();
+  assert.equal(await page.locator('.knowledge-page').count(),1);
+  await page.screenshot({path:base+'/entity-dark-desktop.png',fullPage:true});
+  await page.setViewportSize({width:390,height:844}); await page.screenshot({path:base+'/entity-dark-mobile.png'});
+  await page.getByRole('button',{name:'Recent',exact:true}).click();
+  await page.locator('.knowledge-historical-notice').filter({hasText:'Current status: withdrawn'}).first().waitFor();
+  assert.equal(await page.locator('.knowledge-feed').getByText('Readiness inference',{exact:true}).count(),0);
+  assert.equal(await page.locator('.knowledge-feed').getByText('Release commitment',{exact:true}).count(),0);
+  await page.setViewportSize({width:1280,height:1000}); await page.screenshot({path:base+'/recent-dark-desktop.png',fullPage:true});
+  await page.locator('.knowledge-historical-notice').filter({hasText:'Current status: withdrawn'}).first().getByRole('button',{name:'Inspect historical record'}).click();
+  await page.getByText('The readiness inference was withdrawn in chat.',{exact:true}).waitFor();
+  await page.getByText(/withdrawn — historical knowledge/).waitFor();
   await page.getByRole('button',{name:'Vocabulary',exact:true}).click();
   await page.locator('.knowledge-ontology-layout').waitFor();
   await page.evaluate(()=>window.remount());
   await page.locator('.knowledge-feed').waitFor();
   assert.deepEqual(await page.evaluate(()=>window.subscriptions()),{events:1,connections:1});
   assert.deepEqual(errors,[]);
-  console.log(JSON.stringify({passed:['read-only browser contract','recent default and observed history','ontology-derived browse','native commitment/event/inference cards','attribution and retained inference premise evidence','byte-exact evidence download','revision/hash chat request and no autosend','handoff preserved across periodic refresh','exact name suggestions','ranked search','disconnect and reconnect','subscription cleanup','mobile overflow','no page errors'],artifacts:base},null,2));
+  console.log(JSON.stringify({passed:['read-only browser contract','agent correction live refresh and historical linkage','withdrawal removes active claims and redacts historical feed titles','search offset cap','design-token dark screenshots','recent default and observed history','ontology-derived browse','native commitment/event/inference cards','attribution and retained inference premise evidence','byte-exact evidence download','revision/hash chat request and no autosend','handoff preserved across periodic refresh','exact name suggestions','ranked search','disconnect and reconnect','subscription cleanup','mobile overflow','no page errors'],artifacts:base},null,2));
 } catch (error) {
   console.error(JSON.stringify({errors,page:await page?.locator('main').innerText()},null,2));throw error;
 } finally {services.forEach(s=>s.stop());await browser.close();}
