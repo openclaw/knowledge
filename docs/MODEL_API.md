@@ -64,9 +64,18 @@ large custom definitions can still be large; normal discovery does not fetch the
 
 ## Drafts and publication are different
 
-An unsaved browser editor draft remains in the mounted dialog across refresh and
-close/reopen. That is not a durable server draft and does not guarantee survival
-across page remount, browser restart or plugin UI reload.
+One unsaved browser draft per authorized agent/vault/scope is retained in tab-local
+sessionStorage on each edit. It survives navigation, page reload and plugin UI
+remount. Original record ID/revision/hash and the exact submitted payload/request
+ID survive uncertain save outcomes. A recovered draft never replaces its edit
+preconditions with a newer snapshot. Opening another editor reopens the existing
+draft; explicit discard is available only before acceptance/uncertain submission.
+
+This is not a server draft or backup. Closing the tab, clearing browser storage,
+or browser failure can lose it. Storage errors remain visible. Drafts open only
+after an authorized status response for the same identity; browser saves include
+`expectedVaultId`, a precondition (not a scope selector), to reject accidental
+publication into a replacement vault. No new scope authority is granted.
 
 An **accepted publication** has durable intent and recovery material. The journal
 exists because Markdown/artifacts and SQLite cannot share one transaction. Use the
@@ -101,3 +110,21 @@ private hits after ranking. Index updates must reconcile edits, renames, deletes
 and publication/restore generations. Report unavailable or stale indexing explicitly,
 not as an empty match set. Test those invariants before adding the tool. Embeddings,
 a new service and a general regex engine are not prerequisites for body search.
+
+
+## Live state
+
+The private-vault explorer subscribes to the supported `changed` feature event.
+Events contain no record data or paths. Node filesystem watches coalesce hints;
+normal authorized scans perform reconciliation and Git checkpointing. They do not
+create a background identity with broader access or scan other conversations.
+Reconnect, manual refresh, and a 30-second visible-page fallback request current
+snapshots, covering missed/coalesced notifications and backend-only reloads.
+`status.live` reports `watching`, `unavailable`, or `stopped`; unavailable watchers
+are retried on the next authorized private status read. Conversation tools still
+reconcile their own partition on demand; they do not run private reconciliation.
+
+Service stop closes watchers/timers and fences old and in-flight access. A retry
+uses the original request ID against the replacement service; accepted publication
+recovery and explicit conflict handling remain unchanged. Full backup/restore is
+not implemented by this lifecycle work.

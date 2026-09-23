@@ -12,10 +12,11 @@ Evidence-backed knowledge vault and native explorer for OpenClaw.
 | Revision/hash preconditions, identical retries, receipts/history | Implemented |
 | Local Git history | Automatic in writable vaults when Git is installed; one commit per publication or observed external-change batch; visible retryable gaps |
 | Accepted-write interruption recovery and conflict retention | Implemented and exercised in isolated fault-injection/process tests; not a complete backup/restore protocol |
-| Browser drafts | Retained within the current mount, including close/reopen; durable reload/remount recovery is not implemented |
+| Browser drafts | One tab-local draft per authorized agent/vault/scope; survives navigation, page reload and plugin UI remount, retaining original edit preconditions and uncertain-save request |
 | Body keyword search / FTS, embeddings | Not implemented; listing filters ID/title/alias only |
 | Document/meeting ingestion, claim correction/withdrawal workflows | Not implemented |
-| Automatic filesystem watching and full backup/restore | Not implemented |
+| Live refresh | Private-vault filesystem invalidations, authorized snapshot refresh, reconnect and 30-second visible-page fallback; retired services are fenced |
+| Full backup/restore | Not implemented |
 
 See [setup and authority](docs/REAL_VAULT.md), [model-facing API](docs/MODEL_API.md), [ontology](docs/ONTOLOGY.md), and [record format](docs/FORMAT.md). Verification reports distinguish local checks from live activation; a build alone does not update the running backend.
 
@@ -95,4 +96,4 @@ The page identifies sample versus real-vault mode and exposes the editor when wr
 
 Real-vault operations enforce the [authority and identity contract](docs/REAL_VAULT.md). A published receipt means files were published, not keyword-indexed (`indexed: false`). Exact reads and history support read-after-write. Precondition rejection does not save a server draft; accepted publication conflicts retain recovery material and block unsafe publication. No automatic conflict merge is provided.
 
-Page disposal cancels pending UI updates and releases subscriptions; reconnect requests fresh state. Mounted editor retention is not durable browser draft recovery. Ingestion, ranked retrieval, full backup/restore and the remaining v1 workflows are not claimed complete. Preserve the operational database and evidence alongside the vault; a Markdown-only copy is not a complete application backup.
+Page disposal cancels pending UI updates and releases subscriptions; reconnect requests fresh state. Draft recovery uses sessionStorage and does not promise recovery after closing the tab, clearing browser data or browser failure. A draft is not published knowledge. Ingestion, ranked retrieval, full backup/restore and the remaining v1 workflows are not claimed complete. Preserve the operational database and evidence alongside the vault; a Markdown-only copy is not a complete application backup.

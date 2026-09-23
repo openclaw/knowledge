@@ -46,6 +46,7 @@ export const contract = defineFeatureContract({
         service: Type.Literal("knowledge"), phase: Type.Union([Type.Literal("read-only-explorer"), Type.Literal("page-editor")]),
         backendRevision: text(80), instanceId: text(80), startedAt: text(40), checkedAt: text(40),
         vault: text(80), agent: text(80), scope: text(80), sample: Type.Boolean(), writesEnabled: Type.Boolean(),
+        live: Type.Union([Type.Literal("stopped"), Type.Literal("watching"), Type.Literal("unavailable")]),
         records: Type.Integer(), validRecords: Type.Integer(), definitions: Type.Integer(), ontologyAvailable: Type.Boolean(), ontologyFingerprint: text(64), issues: Type.Integer(),
       }, { additionalProperties: false }),
       tool: { name: "knowledge_status", label: "Knowledge status" },
@@ -77,5 +78,5 @@ export const contract = defineFeatureContract({
       tool: { name: "knowledge_diagnostics", label: "Vault diagnostics" },
     },
   },
-  events: {},
+  events: { changed: Type.Object({}, { additionalProperties: false }) },
 });

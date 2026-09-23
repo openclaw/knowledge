@@ -1,0 +1,106 @@
+// Isolated rendered integration check. Uses host Playwright, no additional dependency.
+// Run after TypeScript compilation: node test/browser/live-state.mjs
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import { createRequire } from 'node:module';
+import { randomUUID } from 'node:crypto';
+import { build } from 'esbuild';
+import { createKnowledgeService } from '../../dist/service.js';
+const require=createRequire(import.meta.url);
+const {chromium}=require(await fs.realpath('node_modules/openclaw')+'/node_modules/playwright');
+const base=await fs.realpath(await fs.mkdtemp('/tmp/knowledge-live-browser-'));
+await fs.mkdir(base+'/vault/private',{recursive:true});
+const manifest={format:'knowledge-vault-v1',vaultId:randomUUID(),agentId:'main',generation:0,publicationId:randomUUID()};
+await fs.writeFile(base+'/vault/vault.json',JSON.stringify(manifest));
+const services=[]; let page, loseResponse=false, blockMutation=false;
+const requests=[], errors=[];
+const api={pluginConfig:{vault:{root:base+'/vault',statePath:base+'/state.sqlite',agentId:'main',vaultId:manifest.vaultId,publicationId:manifest.publicationId,operatorRead:true,writesEnabled:true}},registerService:s=>services.push(s)};
+const service=createKnowledgeService(api,{emit:(event,payload)=>{void page?.evaluate(({event,payload})=>window.emit?.(event,payload),{event,payload}).catch(()=>{});}});
+const context={source:'session-action',api,action:{client:{connId:'isolated-browser',scopes:['operator.write']}}};
+const browser=await chromium.launch({headless:true,executablePath:process.env.KNOWLEDGE_BROWSER_PATH??'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'});
+const entry=`import plugin from './src/control-ui.ts';
+const listeners=new Set(), events=new Map(); let mounted, controller;
+const host={pluginId:'knowledge',signal:new AbortController().signal,connection:{connected:true},redact:String,
+ request:async(method,p)=>({ok:true,result:await window.invokeKnowledge(p.actionId,p.payload)}),
+ onEvent:(name,fn)=>{events.set(name,fn);return()=>events.delete(name)},subscribe:fn=>{listeners.add(fn);return()=>listeners.delete(fn)},
+ ui:{registerNavigation:()=>()=>{},registerPage:view=>{window.mount=()=>{controller=new AbortController();mounted=view.mount(document.querySelector('main'),{host,signal:controller.signal});};return()=>{}}}};
+window.unmount=()=>{controller.abort();mounted.dispose()};
+window.remount=()=>{window.unmount();window.mount()};
+window.connect=connected=>{host.connection.connected=connected;for(const fn of listeners)fn()};
+window.emit=(event,payload)=>{if(host.connection.connected)events.get('plugin.knowledge.'+event)?.(payload)};
+window.subscriptions=()=>({events:events.size,connections:listeners.size});
+plugin.activate(host);window.mount();`;
+const bundle=await build({stdin:{contents:entry,resolveDir:process.cwd()},bundle:true,write:false,format:'iife',loader:{'.css':'empty'}});
+const html='<html><head><style>:root{--bg:#fff;--text:#18221b;--muted:#66736b;--border:#c7d2cc;--card:#f5f8f6;--accent:#247044;--danger:#a32d26;--font-body:system-ui;--accent-subtle:#e3f1e8}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui}'+await fs.readFile('src/control-ui.css','utf8')+'</style></head><body><main></main><script>'+bundle.outputFiles[0].text+'</script></body></html>';
+try {
+  page=await browser.newPage({viewport:{width:1280,height:1000}});
+  await page.clock.install();
+  page.on('pageerror',e=>errors.push(e.message));
+  await page.route('https://knowledge.test/**',route=>route.fulfill({contentType:'text/html',body:html}));
+  await page.exposeFunction('invokeKnowledge',async(operation,input)=>{
+    if(operation==='mutation'&&blockMutation)throw Error('Disconnected before outcome known');
+    if(operation==='save_page')requests.push(structuredClone(input));
+    const result=await service[operation](input,context);
+    if(operation==='save_page'&&loseResponse){loseResponse=false;blockMutation=true;throw Error('Lost response after publication');}
+    return result;
+  });
+  services[0].start();
+  await page.goto('https://knowledge.test/');
+  await page.getByRole('button',{name:'New page',exact:true}).click();
+  await page.getByLabel('Title',{exact:true}).fill('Recovery fixture');
+  await page.getByLabel('Markdown',{exact:true}).fill('Unsaved draft text');
+  await page.getByRole('button',{name:'Close draft',exact:true}).click();
+  await page.evaluate(()=>window.remount());
+  await page.getByRole('dialog').waitFor();
+  assert.equal(await page.getByLabel('Title',{exact:true}).inputValue(),'Recovery fixture');
+  assert.equal(await page.getByLabel('Markdown',{exact:true}).inputValue(),'Unsaved draft text');
+  await page.reload();
+  await page.getByRole('dialog').waitFor();
+  assert.equal(await page.getByLabel('Markdown',{exact:true}).inputValue(),'Unsaved draft text');
+  await page.evaluate(()=>window.emit('changed',{}));
+  assert.equal(await page.getByLabel('Markdown',{exact:true}).inputValue(),'Unsaved draft text');
+  loseResponse=true;
+  await page.getByRole('button',{name:'Save page',exact:true}).click();
+  await page.getByRole('button',{name:'Retry same save',exact:true}).waitFor();
+  await page.reload();
+  await page.getByRole('button',{name:'Retry same save',exact:true}).waitFor();
+  assert.equal(await page.getByLabel('Title',{exact:true}).isDisabled(),true);
+  blockMutation=false;
+  await page.getByRole('button',{name:'Retry same save',exact:true}).click();
+  await page.getByRole('dialog').waitFor({state:'detached'});
+  assert.equal(requests.length,2);assert.deepEqual(requests[0],requests[1]);
+  const list=await service.records({},context);assert.equal(list.total,1);
+  const id=list.records[0].id;
+  const record=(await service.record({id,view:'raw'},context)).record;
+  const file=base+'/vault/private/'+record.path;
+  await fs.writeFile(file,record.raw.replace('Unsaved draft text','Externally updated body'));
+  await page.locator('.knowledge-body').filter({hasText:'Externally updated body'}).waitFor();
+  await page.getByRole('button',{name:'Edit page',exact:true}).click();
+  await page.getByLabel('Markdown',{exact:true}).fill('Conflicting local draft');
+  await fs.writeFile(file,record.raw.replace('Unsaved draft text','Newer external version'));
+  await page.locator('.knowledge-body').filter({hasText:'Newer external version'}).waitFor();
+  assert.equal(await page.getByLabel('Markdown',{exact:true}).inputValue(),'Conflicting local draft');
+  await page.getByRole('button',{name:'Save page',exact:true}).click();
+  await page.getByRole('status').filter({hasText:'Edit conflict'}).waitFor();
+  assert.equal(await page.getByLabel('Markdown',{exact:true}).inputValue(),'Conflicting local draft');
+  await page.getByRole('button',{name:'Close draft',exact:true}).click();
+  await page.evaluate(()=>window.connect(false));
+  await page.locator('.knowledge-status').filter({hasText:'Disconnected'}).waitFor();
+  await fs.writeFile(file,record.raw.replace('Unsaved draft text','Changed while disconnected'));
+  await page.evaluate(()=>window.connect(true));
+  await page.locator('.knowledge-body').filter({hasText:'Changed while disconnected'}).waitFor();
+  await page.evaluate(()=>window.remount());
+  await page.getByRole('dialog').waitFor();
+  assert.equal(await page.getByLabel('Markdown',{exact:true}).inputValue(),'Conflicting local draft');
+  assert.deepEqual(await page.evaluate(()=>window.subscriptions()),{events:1,connections:1});
+  await page.setViewportSize({width:390,height:844});
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  await page.screenshot({path:base+'/draft-mobile.png'});
+  await page.getByRole('button',{name:'Close draft',exact:true}).click();
+  await page.evaluate(()=>{window.emit=()=>{};});
+  await fs.rm(file);
+  await page.clock.runFor(30001);
+  await page.locator('.knowledge-content').getByText('No matching records.',{exact:true}).waitFor();
+  assert.deepEqual(errors,[]);
+  console.log(JSON.stringify({passed:['remount draft','browser reload draft','notification preserves draft','lost-response exact retry across reload','external edit auto refresh','conflict preserves both versions','reconnect snapshot','subscription cleanup','missed-delete periodic fallback','mobile overflow','no page errors'],artifacts:base},null,2));
+} finally {services.forEach(s=>s.stop());await browser.close();}

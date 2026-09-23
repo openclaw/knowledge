@@ -5,6 +5,7 @@ export const SavePage = Type.Object({
   requestId, title: Type.String({ minLength: 1, maxLength: 200 }), body: text(48000),
   type: Type.Optional(name), fields: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
   id: Type.Optional(Type.String({ pattern: "^[a-zA-Z0-9][a-zA-Z0-9_-]{7,95}$" })),
+  expectedVaultId: Type.Optional(requestId),
   expectedRevision: Type.Optional(Type.Integer({ minimum: 1 })),
   expectedHash: Type.Optional(Type.String({ pattern: "^[a-f0-9]{64}$" })),
   source: Type.Optional(Type.Object({ text: Type.String({ minLength: 1, maxLength: 48000 }), attribution: Type.String({ minLength: 1, maxLength: 1000 }) }, { additionalProperties: false })),

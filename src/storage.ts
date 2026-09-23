@@ -56,6 +56,7 @@ export class KnowledgeStorage {
   private checkReplay(row: Row, intent: string) { if (row.intent !== intent) throw Error("Request ID already belongs to a different payload. Use the original payload for retries."); }
   async save(input: SavePage, access: VaultAccess, actor: string): Promise<Receipt> {
     access.assertCurrent();
+    if (input.expectedVaultId && input.expectedVaultId !== this.config.vaultId) throw Error("Connected vault changed; this draft belongs to a different vault. No publication was accepted.");
     if (!this.config.writesEnabled) throw Error("Knowledge writes are disabled.");
     if (!Check(SavePage, input) || Boolean(input.id) !== Boolean(input.expectedHash && input.expectedRevision) || (!input.id && (input.expectedHash || input.expectedRevision))) throw Error("Create requires no preconditions; edit requires ID, observed revision, and hash.");
     const scope = scopeKey(access.scope), intent = digest(canonical(input));

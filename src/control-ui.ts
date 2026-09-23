@@ -2,6 +2,7 @@ import { defineControlUiPlugin } from "openclaw/plugin-sdk/control-ui";
 import { createFeatureClient, type FeatureOutput } from "openclaw/plugin-sdk/feature-contract";
 import { contract } from "./contract.js";
 import "./control-ui.css";
+import { DraftStore } from "./drafts.js";
 import { pageEditor } from "./page-editor.js";
 import { loadVocabulary } from "./inspection-client.js";
 import { ontologyView } from "./ontology-view.js";
@@ -32,10 +33,21 @@ export default defineControlUiPlugin({
         const status = el("div", "Loading vault…", "knowledge-status"); status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
         const nav = el("nav", undefined, "knowledge-tabs"); nav.setAttribute("aria-label", "Knowledge views");
         const toolbar = el("div", undefined, "knowledge-toolbar"), content = el("div", undefined, "knowledge-content");
-        section.append(header, banner, status, nav, toolbar, content); container.append(section);
+        const draftStatus = el("p", "", "knowledge-error"); draftStatus.setAttribute("role", "alert");
+        section.append(header, banner, status, nav, toolbar, draftStatus, content); container.append(section);
         let tab: "records" | "ontology" | "diagnostics" = "records", offset = 0, query = "", kind = "", type = "", selectedId = "";
         let writesEnabled = false;
-        const editPage = (record?: NonNullable<FeatureOutput<typeof contract, "record">["record"]>) => void pageEditor(section, feature, record, id => { selectedId = id; tab = "records"; renderToolbar(); void refresh(); }, message => context.host.redact(message));
+        const editorLifetime = new AbortController();
+        let vaultChanged = false;
+        let draftStore: DraftStore | undefined, draftIdentity = "", editor: ReturnType<typeof pageEditor> | undefined;
+        const editPage = (record?: NonNullable<FeatureOutput<typeof contract, "record">["record"]>) => {
+          if (editor) { void editor.then(handle => handle?.reopen()); return; }
+          if (!draftStore) return;
+          try {
+            const draft = draftStore.read();
+            editor = pageEditor(section, feature, record, id => { editor = undefined; selectedId = id; tab = "records"; renderToolbar(); void refresh(); }, message => context.host.redact(message), { store: draftStore, draft, signal: editorLifetime.signal, dismissed() { editor = undefined; } });
+          } catch { draftStatus.textContent = "Stored draft could not be opened. It has been preserved; do not clear browser storage."; }
+        };
         let generation = 0, detailGeneration = 0, disposed = false, debounce: ReturnType<typeof setTimeout> | undefined;
         const alive = (n: number) => !disposed && !context.signal.aborted && n === generation && context.host.connection.connected;
         const showError = (error: unknown) => { content.replaceChildren(el("p", "Knowledge unavailable: " + context.host.redact(error instanceof Error ? error.message : String(error)), "knowledge-error")); };
@@ -55,7 +67,7 @@ export default defineControlUiPlugin({
             const typeFilter = el("input"); typeFilter.placeholder = "Type or ontology alias"; typeFilter.value = type; typeFilter.setAttribute("aria-label", "Filter by type or ontology alias");
             typeFilter.oninput = () => { type = typeFilter.value.trim(); offset = 0; selectedId = ""; clearTimeout(debounce); debounce = setTimeout(() => void load(), 200); };
             toolbar.append(search, select, typeFilter);
-            if (writesEnabled) toolbar.append(button("New page", () => editPage()));
+            if (writesEnabled) { const create = button("New page", () => editPage()); create.disabled = !draftStore; toolbar.append(create); }
             toolbar.append(button("Refresh", () => void refresh()));
           }
           toolbar.hidden = tab !== "records";
@@ -118,6 +130,7 @@ export default defineControlUiPlugin({
           control.append(el("strong", record.title), el("span", `${record.kind} · ${record.type}`), el("small", record.valid ? `${record.acceptance} · ${record.lifecycle}` : "Needs attention")); return control;
         }
         async function load() {
+          if (vaultChanged) return;
           const n = ++generation; ++detailGeneration;
           content.replaceChildren(el("p", context.host.connection.connected ? "Loading…" : "Disconnected — reconnect to read the vault."));
           if (!context.host.connection.connected) return;
@@ -177,6 +190,7 @@ export default defineControlUiPlugin({
         }
         let statusGeneration = 0;
         async function refresh() {
+          if (vaultChanged) return;
           const n = ++statusGeneration;
           void load();
           if (!context.host.connection.connected) { status.textContent = "Disconnected — waiting for OpenClaw."; return; }
@@ -184,16 +198,32 @@ export default defineControlUiPlugin({
           try {
             const report = await feature.invoke("status", {});
             if (disposed || context.signal.aborted || n !== statusGeneration || !context.host.connection.connected) return;
-            writesEnabled = report.writesEnabled; renderToolbar();
+            writesEnabled = report.writesEnabled;
+            const identity = JSON.stringify([report.agent, report.vault, report.scope]);
+            if (draftIdentity && identity !== draftIdentity) {
+              // Remount to fence all editor callbacks and data from the previous identity.
+              vaultChanged = true; editorLifetime.abort(); ++generation; ++detailGeneration; writesEnabled = false; renderToolbar(); content.replaceChildren(el("p", "Connected vault changed. Reload this page to open it; the previous draft is retained separately."));
+              for (const dialog of section.querySelectorAll("dialog")) dialog.remove();
+              status.textContent = "Vault changed — reload required."; return;
+            }
+            if (!draftIdentity) {
+              draftIdentity = identity;
+              try { draftStore = new DraftStore(report, window.sessionStorage); if (writesEnabled && draftStore.read()) editPage(); }
+              catch { draftStatus.textContent = "Browser draft recovery unavailable. Copy any draft before leaving."; }
+            }
+            renderToolbar();
             banner.replaceChildren(el("strong", report.sample ? "Sample vault · Read only" : `${report.agent} · Private vault${writesEnabled ? "" : " · Read only"}`), el("p", report.sample ? "Fictional people and projects for exploring the data model. No private agent vault is connected." : (writesEnabled ? "Create pages, retain source text, and edit with revision checks." : "Your agent’s knowledge. Writing is not enabled for this connection.")));
             if (writesEnabled && selectedId) void load();
-            status.textContent = `${report.records} ${report.sample ? "sample " : ""}records${report.issues ? ` · ${report.issues} issues to review` : ""}`;
+            status.textContent = `${report.records} ${report.sample ? "sample " : ""}records${report.issues ? ` · ${report.issues} issues to review` : ""}` + (report.live === "unavailable" ? " · Live watcher unavailable; periodic refresh remains active." : "");
           } catch (error) { if (!disposed && n === statusGeneration) status.textContent = "Knowledge unavailable: " + context.host.redact(error instanceof Error ? error.message : String(error)); }
         }
         let connected = context.host.connection.connected;
         const unsubscribe = context.host.subscribe(() => { if (connected !== context.host.connection.connected) { connected = context.host.connection.connected; void refresh(); } });
+        const unwatch = feature.on("changed", () => void refresh());
+        // Covers dropped notifications, backend-only reload, and watcher failure.
+        const resync = setInterval(() => { if (context.host.connection.connected && !document.hidden) void refresh(); }, 30000);
         renderToolbar(); void refresh();
-        return { dispose() { disposed = true; ++generation; ++detailGeneration; ++statusGeneration; clearTimeout(debounce); unsubscribe(); section.remove(); } };
+        return { dispose() { editorLifetime.abort(); disposed = true; ++generation; ++detailGeneration; ++statusGeneration; clearTimeout(debounce); clearInterval(resync); unwatch(); unsubscribe(); section.remove(); } };
       },
     });
     return () => { removePage(); removeNavigation(); };
