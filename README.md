@@ -8,7 +8,7 @@ Evidence-backed knowledge vault and native explorer for OpenClaw.
 |---|---|
 | Scoped record listing, evidence inspection and ontology validation | Implemented |
 | Model-facing inspection | Concise defaults, targeted views, opt-in metadata/raw sources and pagination; see [API guide](docs/MODEL_API.md) |
-| Create/edit pages and retain supplied text evidence | Implemented, configuration/authority gated; new pages are candidates |
+| Create/edit pages and retain supplied text evidence | Implemented, configuration/authority gated; saved pages are immediately available, with no approval step |
 | Revision/hash preconditions, identical retries, receipts/history | Implemented |
 | Local Git history | Automatic in writable vaults when Git is installed; one commit per publication or observed external-change batch; visible retryable gaps |
 | Accepted-write interruption recovery and conflict retention | Implemented and exercised in isolated fault-injection/process tests; not a complete backup/restore protocol |
@@ -98,3 +98,7 @@ The page identifies sample versus real-vault mode and exposes the editor when wr
 Real-vault operations enforce the [authority and identity contract](docs/REAL_VAULT.md). A published receipt means files were published, not keyword-indexed (`indexed: false`). Exact reads and history support read-after-write. Precondition rejection does not save a server draft; accepted publication conflicts retain recovery material and block unsafe publication. No automatic conflict merge is provided.
 
 Page disposal cancels pending UI updates and releases subscriptions; reconnect requests fresh state. Draft recovery uses sessionStorage and does not promise recovery after closing the tab, clearing browser data or browser failure. A draft is not published knowledge. Ingestion, full backup/restore and the remaining v1 workflows are not claimed complete. Preserve the operational database and evidence alongside the vault; a Markdown-only copy is not a complete application backup.
+
+### Source file attachments
+
+Pages can attach original source files, with no evidence-specific character or reference-count cap. Upload/download is chunked; previews and evidence lists are bounded/paginated without truncating originals. Existing text evidence remains readable. See [evidence storage and gbrain comparison](docs/EVIDENCE.md).

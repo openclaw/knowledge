@@ -1,3 +1,4 @@
+import { AttachInput, AttachOutput, AttachmentInput, AttachmentOutput } from "./attachment-contract.js";
 import { SearchInput, SearchOutput, LookupInput, LookupOutput } from "./retrieval-contract.js";
 import { Type } from "typebox";
 import { defineFeatureContract } from "openclaw/plugin-sdk/feature-contract";
@@ -13,8 +14,16 @@ const issues = Type.Array(issue, { maxItems: 1000 });
 export const contract = defineFeatureContract({
   pluginId: "knowledge",
   operations: {
+    attach: {
+      kind: "action", description: "Retain an original source file in the authorized vault scope. Send base64 chunks of up to 48 KiB decoded, sequential byte offsets, the same requestId/filename/attribution for all chunks, and final=true on the last chunk. Retry identical chunks after interruption. No total file-size or evidence-count cap. A complete receipt returns evidence to append via save_page.attachments. Uploading alone does not create a page. No local filesystem path is accepted.",
+      input: AttachInput, output: AttachOutput, tool: { name: "knowledge_attach", label: "Attach knowledge source file" },
+    },
+    attachment: {
+      kind: "query", description: "Read the original bytes of a file referenced by an authorized record. Supply the evidence path and sha256 from knowledge_record. Returns a base64 chunk; follow nextOffset until null. Binary files are preserved without text conversion. No arbitrary filesystem paths or unreferenced files are exposed.",
+      input: AttachmentInput, output: AttachmentOutput, tool: { name: "knowledge_attachment", label: "Read knowledge source file" },
+    },
     save_page: {
-      kind: "action", description: "Create or edit a page in the authorized scope. Reuse requestId and identical payload for retries. Edits require observed revision and hash. Supplied source text is retained with its attribution; new pages remain candidates. A published receipt is a completed save; accepted publication conflicts retain recovery material and block publication. Requests rejected before acceptance are not saved.",
+      kind: "action", description: "Create or edit a page in the authorized scope. Reuse requestId and identical payload for retries. Edits require observed revision and hash. Append file evidence returned by knowledge_attach using attachments (no count cap). Legacy source text remains supported; saved pages are immediately available with no approval step. A published receipt is a completed save; accepted publication conflicts retain recovery material and block publication. Requests rejected before acceptance are not saved.",
       input: SavePage, output: Receipt, tool: { name: "knowledge_save_page", label: "Save knowledge page" },
     },
     resume: {
@@ -53,11 +62,11 @@ export const contract = defineFeatureContract({
       tool: { name: "knowledge_status", label: "Knowledge status" },
     },
     grep: {
-      kind: "query", description: "Rank authorized valid knowledge by title/alias/body keywords with SQLite FTS5. Default: all word tokens, accepted and active. mode=any ORs literal words; mode=phrase matches their order. No raw FTS/regex operators. Explicit acceptance=candidate/all includes drafts; lifecycle=superseded/all includes history, never withdrawn records. Filters apply before ranking. Snippets have revision/hash citations and body line locators. index.state=unavailable and total=null mean failed retrieval, not no matches. Compare index.snapshot across pages; restart on changes. Not exhaustive inventory: use knowledge_records. No embeddings.",
+      kind: "query", description: "Rank authorized valid knowledge by title/alias/body keywords with SQLite FTS5. Default: all word tokens, active records. Saved pages need no approval. mode=any ORs literal words; mode=phrase matches their order. No raw FTS/regex operators. lifecycle=superseded/all includes history, never withdrawn records. Filters apply before ranking. Snippets have revision/hash citations and body line locators. index.state=unavailable and total=null mean failed retrieval, not no matches. Compare index.snapshot across pages; restart on changes. Not exhaustive inventory: use knowledge_records. No embeddings.",
       input: SearchInput, output: SearchOutput, tool: { name: "knowledge_grep", label: "Search knowledge" },
     },
     lookup: {
-      kind: "query", description: "Resolve an exact stable ID, full title or declared alias in the trusted scope; returns found, ambiguous or missing without choosing an ambiguous identity. Names/aliases normalize Unicode, case and whitespace; IDs are case-sensitive. Accepted active records by default; candidate/historical filters are explicit. Invalid, withdrawn and unavailable dependencies are excluded. Independent of keyword indexing. Use knowledge_record for full inspection and knowledge_records for exhaustive listing.",
+      kind: "query", description: "Resolve an exact stable ID, full title or declared alias in the trusted scope; returns found, ambiguous or missing without choosing an ambiguous identity. Names/aliases normalize Unicode, case and whitespace; IDs are case-sensitive. Active records by default, with no approval step; historical filters are explicit. Invalid, withdrawn and unavailable dependencies are excluded. Independent of keyword indexing. Use knowledge_record for full inspection and knowledge_records for exhaustive listing.",
       input: LookupInput, output: LookupOutput, tool: { name: "knowledge_lookup", label: "Resolve knowledge identity" },
     },
     records: {
@@ -71,7 +80,7 @@ export const contract = defineFeatureContract({
       tool: { name: "knowledge_records", label: "Browse knowledge" },
     },
     record: {
-      kind: "query", description: "Read a scoped record by stable ID. Default content view returns body once (12,000 characters), revision/hash, attribution, issues and verified evidence (4,000 excerpt characters total). Follow content.nextOffset with offset to read more; compare hashes across chunks. view=summary omits text; view=raw returns original Markdown instead. Full metadata is opt-in as a structured object; references are opt-in and paginated. Missing/duplicate IDs return null. Never edit from a truncated body.",
+      kind: "query", description: "Read a scoped record by stable ID. Default content view returns body once (12,000 characters), revision/hash, attribution, issues and verified evidence (4,000 excerpt characters total). Follow content.nextOffset with offset to read more; compare hashes across chunks. view=summary omits text; view=raw returns original Markdown instead. Evidence is paginated with evidenceOffset/evidenceLimit and nextEvidenceOffset; preview limits never truncate originals. Full metadata is opt-in as a structured object; references are opt-in and paginated. Missing/duplicate IDs return null. Never edit from a truncated body.",
       input: RecordInput, output: RecordOutput,
       tool: { name: "knowledge_record", label: "Inspect knowledge" },
     },

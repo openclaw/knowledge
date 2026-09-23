@@ -8,7 +8,7 @@ const maxChars = Type.Optional(Type.Integer({ minimum: 256, maximum: 65536 }));
 const nullableOffset = Type.Union([Type.Integer(), Type.Null()]);
 export const Summary = Type.Object({
   id: text(96), title: text(200), kind: text(30), type: text(64), path: text(500),
-  acceptance: text(20), lifecycle: text(20), revision: Type.Integer(), valid: Type.Boolean(),
+  lifecycle: text(20), revision: Type.Integer(), valid: Type.Boolean(),
 });
 const Issue = Type.Object({ path: text(500), code: text(80), message: text(1000) });
 export const RecordInput = Type.Object({
@@ -17,6 +17,7 @@ export const RecordInput = Type.Object({
   offset, maxChars,
   includeMetadata: optionalBool(), includeEvidence: optionalBool(), includeReferences: optionalBool(),
   referenceOffset: offset, referenceLimit: limit,
+  evidenceOffset: offset, evidenceLimit: limit,
   maxEvidenceChars: Type.Optional(Type.Integer({ minimum: 0, maximum: 20000 })),
 }, { additionalProperties: false });
 export type RecordInput = Static<typeof RecordInput>;
@@ -31,7 +32,8 @@ export const RecordOutput = Type.Object({
   issues: Type.Array(Issue, { maxItems: 1000 }),
   references: Type.Optional(Type.Array(Summary, { maxItems: 100 })),
   referenceTotal: Type.Optional(Type.Integer()), nextReferenceOffset: Type.Optional(nullableOffset),
-  evidence: Type.Optional(Type.Array(Type.Object({ ...Evidence.properties, excerpt: text(20000), verified: Type.Boolean(), excerptTruncated: Type.Boolean() }), { maxItems: 20 })),
+  evidence: Type.Optional(Type.Array(Type.Object({ ...Evidence.properties, excerpt: text(20000), verified: Type.Boolean(), excerptTruncated: Type.Boolean() }), { maxItems: 100 })),
+  evidenceTotal: Type.Optional(Type.Integer()), nextEvidenceOffset: Type.Optional(nullableOffset),
 }, { additionalProperties: false });
 export type RecordOutput = Static<typeof RecordOutput>;
 

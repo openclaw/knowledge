@@ -26,7 +26,7 @@ async function fixture(t) {
   const service = createKnowledgeService(api), store = new SqliteIdentityStore(config.statePath);
   async function put(id, title, body, metadata = {}, partition = 'private') {
     const scope = partition === 'private' ? { visibility: 'agent-private', agentId: 'main' } : { visibility: 'conversation', agentId: 'main', sessionId: partition.split('/')[1] };
-    const envelope = { format: 'knowledge-record-v1', id, revision: 1, kind: 'page', title, scope, type: 'note', fields: {}, recorded_at: '2026-09-23T00:00:00Z', updated_at: '2026-09-23T00:00:00Z', acceptance: 'accepted', lifecycle: 'active', ...metadata };
+    const envelope = { format: 'knowledge-record-v1', id, revision: 1, kind: 'page', title, scope, type: 'note', fields: {}, recorded_at: '2026-09-23T00:00:00Z', updated_at: '2026-09-23T00:00:00Z', lifecycle: 'active', ...metadata };
     const target = path.join(root, partition, 'notes', id + '.md'); await mkdir(path.dirname(target), { recursive: true });
     await writeFile(target, `---\n${stringify(envelope)}---\n${body}`); return target;
   }
@@ -67,18 +67,17 @@ test('exact ID/name/alias lookup normalizes names, exposes ambiguity and never s
   assert.equal(ambiguous.outcome, 'ambiguous'); assert.equal(ambiguous.total, 2); assert.equal(ambiguous.nextOffset, 1);
 });
 
-test('accepted/active defaults and explicit candidate/historical filters precede ranking', async t => {
+test('all saved records are discoverable regardless of legacy approval metadata; lifecycle filters still apply', async t => {
   const f = await fixture(t);
   await f.put('accepted_one', 'Orbit', 'short text');
-  const before = await f.service.grep({ query: 'orbit' }, f.owner);
   await f.put('candidate_one', 'Orbit', 'orbit '.repeat(1000), { acceptance: 'candidate' });
   await f.put('historical_one', 'Orbit', 'orbit history', { lifecycle: 'superseded' });
   const after = await f.service.grep({ query: 'orbit' }, f.owner);
-  assert.deepEqual(after.hits, before.hits); assert.equal(after.total, 1);
-  assert.deepEqual(ids(await f.service.grep({ query: 'orbit', acceptance: 'candidate' }, f.owner)), ['candidate_one']);
+  assert.deepEqual(ids(after).sort(), ['accepted_one', 'candidate_one']);
+  assert.ok(after.hits.every(hit => !Object.hasOwn(hit.record, 'acceptance')));
   assert.deepEqual(ids(await f.service.grep({ query: 'orbit', lifecycle: 'superseded' }, f.owner)), ['historical_one']);
-  assert.equal((await f.service.grep({ query: 'orbit', acceptance: 'all', lifecycle: 'all' }, f.owner)).total, 3);
-  assert.equal((await f.service.lookup({ query: 'candidate_one' }, f.owner)).outcome, 'missing');
+  assert.equal((await f.service.grep({ query: 'orbit', lifecycle: 'all' }, f.owner)).total, 3);
+  assert.equal((await f.service.lookup({ query: 'candidate_one' }, f.owner)).outcome, 'found');
   assert.equal((await f.service.records({}, f.owner)).total, 3);
 });
 
@@ -121,7 +120,7 @@ test('observed withdrawals persist across stale-file reappearance, restart and p
   await writeFile(target, stale);
   f.store.withDatabase(db => { for (const row of db.prepare("SELECT name FROM sqlite_master WHERE sql LIKE 'CREATE VIRTUAL TABLE%'").all()) db.exec(`DROP TABLE ${row.name}`); });
   const service = createKnowledgeService(f.api);
-  const result = await service.grep({ query: 'secretword', acceptance: 'all', lifecycle: 'all' }, f.owner);
+  const result = await service.grep({ query: 'secretword', lifecycle: 'all' }, f.owner);
   assert.equal(result.total, 0); assert.equal((await service.lookup({ query: 'withdrawn_one', lifecycle: 'all' }, f.owner)).outcome, 'missing');
 });
 
@@ -206,9 +205,9 @@ test('ranking emphasizes titles, deterministic pagination and scoped index reuse
 
 test('native search client passes explicit typed mode and filters to the shared operations', async () => {
   const calls = [], feature = { invoke: async (name, input) => { calls.push({ name, input }); return {}; } };
-  const state = { query: 'name', mode: 'phrase', acceptance: 'candidate', lifecycle: 'active', kind: 'page', type: 'person', tag: 'team', offset: 20 };
+  const state = { query: 'name', mode: 'phrase', lifecycle: 'active', kind: 'page', type: 'person', tag: 'team', offset: 20 };
   await loadSearch(feature, state); await loadSearch(feature, { ...state, mode: 'exact' });
-  assert.equal(calls[0].name, 'grep'); assert.equal(calls[0].input.mode, 'phrase'); assert.equal(calls[0].input.acceptance, 'candidate'); assert.equal(calls[0].input.offset, 20);
+  assert.equal(calls[0].name, 'grep'); assert.equal(calls[0].input.mode, 'phrase'); assert.equal(calls[0].input.acceptance, undefined); assert.equal(calls[0].input.offset, 20);
   assert.equal(calls[1].name, 'lookup'); assert.equal(calls[1].input.mode, undefined);
   for (const { name, input } of calls) assert.ok(Check(contract.operations[name].input, input));
 });
@@ -219,17 +218,18 @@ test('sample search uses FTS without a configured real vault', async () => {
   assert.equal(result.index.state, 'ready'); assert.ok(result.total > 0); assert.ok(Check(contract.operations.grep.output, result));
 });
 
-test('published candidates are immediately searchable when requested; restored generations cannot serve a newer index', async t => {
+test('published pages are immediately searchable without approval; restored generations cannot serve a newer index', async t => {
   const f = await fixture(t), api = { ...f.api, pluginConfig: { vault: { ...f.config, writesEnabled: true } } }, service = createKnowledgeService(api);
   const receipt = await service.save_page({ requestId: randomUUID(), title: 'Fresh publication', type: 'note', body: 'newlypublishedword', source: { text: 'Original source\nSecond line', attribution: 'User note' } }, f.owner);
   assert.equal(receipt.state, 'published'); assert.equal(receipt.indexed, false); assert.match(receipt.message, /pending/);
-  assert.equal((await service.grep({ query: 'newlypublishedword' }, f.owner)).total, 0);
-  const indexed = await service.grep({ query: 'newlypublishedword', acceptance: 'candidate' }, f.owner);
+  const indexed = await service.grep({ query: 'newlypublishedword' }, f.owner);
   assert.equal(indexed.index.state, 'ready'); assert.equal(indexed.total, 1); assert.equal(indexed.hits[0].citation.hash, receipt.hash);
   assert.equal(indexed.hits[0].evidence.length, 1); assert.equal(indexed.hits[0].evidence[0].start_line, 1); assert.equal(indexed.hits[0].attribution, 'User note');
-  assert.equal((await service.lookup({ query: receipt.id, acceptance: 'candidate' }, f.owner)).outcome, 'found');
+  assert.equal((await service.lookup({ query: receipt.id }, f.owner)).outcome, 'found');
+  const raw = (await service.record({ id: receipt.id, view: 'raw' }, f.owner)).record.raw;
+  assert.doesNotMatch(raw, /acceptance:/);
   await writeFile(path.join(f.root, 'vault.json'), JSON.stringify(f.manifest));
-  for (const op of ['grep', 'lookup']) await assert.rejects(service[op]({ query: 'newlypublishedword', acceptance: 'all' }, f.owner), /identity/);
+  for (const op of ['grep', 'lookup']) await assert.rejects(service[op]({ query: 'newlypublishedword' }, f.owner), /identity/);
 });
 
 test('empty conversations return a ready empty scope without materializing a directory', async t => {
@@ -238,4 +238,20 @@ test('empty conversations return a ready empty scope without materializing a dir
   assert.equal(result.index.state, 'ready'); assert.equal(result.total, 0); assert.equal(result.coverage.complete, true);
   assert.equal((await f.service.lookup({ query: 'PRIVATE' }, f.owner)).outcome, 'missing');
   await assert.rejects(readFile(path.join(f.root, 'conversations', f.sessionId)), { code: 'ENOENT' });
+});
+
+
+test('editing a legacy page removes approval metadata through journaled publication and preserves authored material', async t => {
+  const f = await fixture(t);
+  await f.put('legacy_record', 'Legacy page', 'Original body', { acceptance: 'candidate', custom_note: 'Preserve me' });
+  const api = { ...f.api, pluginConfig: { vault: { ...f.config, writesEnabled: true } } }, service = createKnowledgeService(api);
+  const previous = (await service.record({ id: 'legacy_record', includeMetadata: true }, f.owner)).record;
+  const receipt = await service.save_page({ requestId: randomUUID(), id: previous.id, expectedRevision: previous.revision, expectedHash: previous.hash, title: previous.title, body: previous.body }, f.owner);
+  assert.equal(receipt.state, 'published');
+  const current = (await service.record({ id: previous.id, view: 'raw', includeMetadata: true }, f.owner)).record;
+  assert.doesNotMatch(current.raw, /acceptance:/);
+  assert.equal(current.metadata.custom_note, 'Preserve me');
+  assert.equal(current.revision, previous.revision + 1);
+  assert.equal((await service.grep({ query: 'Original body' }, f.owner)).total, 1);
+  for (const op of ['grep', 'lookup']) assert.equal(Check(contract.operations[op].input, { query: 'Legacy', acceptance: 'candidate' }), false);
 });

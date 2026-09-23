@@ -42,6 +42,7 @@ try {
     if(operation==='mutation'&&blockMutation)throw Error('Disconnected before outcome known');
     if(operation==='save_page')requests.push(structuredClone(input));
     const result=await service[operation](input,context);
+    assert.deepEqual(result,JSON.parse(JSON.stringify(result)),'Feature output must be JSON-safe before transport');
     if(operation==='save_page'&&loseResponse){loseResponse=false;blockMutation=true;throw Error('Lost response after publication');}
     return result;
   });
@@ -60,6 +61,10 @@ try {
   assert.equal(await page.getByLabel('Markdown',{exact:true}).inputValue(),'Unsaved draft text');
   await page.evaluate(()=>window.emit('changed',{}));
   assert.equal(await page.getByLabel('Markdown',{exact:true}).inputValue(),'Unsaved draft text');
+  await page.getByText('Structured fields & source evidence',{exact:true}).click();
+  const originalFile = Buffer.from('Original source 🌱\n'.repeat(6500));
+  const evidenceFiles = [{name:'transcript.txt',mimeType:'text/plain',buffer:originalFile}, ...Array.from({length:22},(_,i)=>({name:`source-${i}.txt`,mimeType:'text/plain',buffer:Buffer.from(`Original ${i}`)}))];
+  await page.getByLabel('Attach source files (optional)',{exact:true}).setInputFiles(evidenceFiles);
   loseResponse=true;
   await page.getByRole('button',{name:'Save page',exact:true}).click();
   await page.getByRole('button',{name:'Retry same save',exact:true}).waitFor();
@@ -72,14 +77,22 @@ try {
   assert.equal(requests.length,2);assert.deepEqual(requests[0],requests[1]);
   const list=await service.records({},context);assert.equal(list.total,1);
   const id=list.records[0].id;
+  const attached = await service.record({id},context);
+  assert.equal(attached.evidenceTotal,23);
+  await page.getByRole('heading',{name:'Source files (23)',exact:true}).waitFor();
+  await page.getByRole('button',{name:'More source files',exact:true}).click();
+  await page.locator('.knowledge-evidence strong').filter({hasText:'source-21.txt'}).waitFor();
+  await page.evaluate(()=>{window.showSaveFilePicker=undefined});
+  const downloaded=page.waitForEvent('download');
+  await page.getByRole('button',{name:'Download original',exact:true}).first().click();
+  const download=await downloaded;
+  assert.deepEqual(await fs.readFile(await download.path()),originalFile);
   const record=(await service.record({id,view:'raw'},context)).record;
   const file=base+'/vault/private/'+record.path;
   await page.locator('.knowledge-tabs').getByRole('button',{name:'Search',exact:true}).click();
   await page.getByRole('searchbox',{name:'Knowledge search query'}).fill('recovery');
   await page.locator('.knowledge-search-form').getByRole('button',{name:'Search',exact:true}).click();
-  await page.getByText('No eligible matches.',{exact:false}).waitFor();
-  await page.getByLabel('Acceptance',{exact:true}).selectOption('candidate');
-  await page.locator('.knowledge-search-form').getByRole('button',{name:'Search',exact:true}).click();
+  assert.equal(await page.getByLabel('Acceptance',{exact:true}).count(),0);
   await page.locator('.knowledge-search-hit').getByRole('button',{name:'Recovery fixture',exact:true}).waitFor();
   await page.getByRole('searchbox',{name:'Knowledge search query'}).focus();
   await page.evaluate(()=>window.emit('changed',{}));
@@ -90,7 +103,11 @@ try {
   await fs.writeFile(file,record.raw.replace('Unsaved draft text','Externally updated body'));
   await page.locator('.knowledge-detail .knowledge-body').filter({hasText:'Externally updated body'}).waitFor();
   assert.equal(await page.getByRole('searchbox',{name:'Knowledge search query'}).inputValue(),'recovery');
-  assert.equal(await page.getByLabel('Acceptance',{exact:true}).inputValue(),'candidate');
+  assert.equal(await page.getByLabel('Acceptance',{exact:true}).count(),0);
+  await page.locator('.knowledge-tabs').getByRole('button',{name:'Ontology',exact:true}).click();
+  await page.getByRole('button',{name:'Relationships',exact:true}).click();
+  await page.getByRole('heading',{name:'People & responsibility',exact:true}).waitFor();
+  assert.equal(await page.locator('.knowledge-type-card').count(),19);
   await page.locator('.knowledge-tabs').getByRole('button',{name:'Records',exact:true}).click();
   await page.locator('.knowledge-record').click();
   await page.getByRole('button',{name:'Edit page',exact:true}).click();
@@ -120,7 +137,7 @@ try {
   await page.clock.runFor(30001);
   await page.locator('.knowledge-content').getByText('No matching records.',{exact:true}).waitFor();
   assert.deepEqual(errors,[]);
-  console.log(JSON.stringify({passed:['search excludes candidates by default','explicit candidate search opens detail','live search refresh preserves selection and filters','background refresh preserves search focus','remount draft','browser reload draft','notification preserves draft','lost-response exact retry across reload','external edit auto refresh','conflict preserves both versions','reconnect snapshot','subscription cleanup','missed-delete periodic fallback','mobile overflow','no page errors'],artifacts:base},null,2));
+  console.log(JSON.stringify({passed:['file picker uploads 23 originals', 'source pagination and byte-exact browser download', 'uploaded files survive lost-save response and reload', 'new pages searchable by default without approval','ontology definitions render with JSON-safe transport','live search refresh preserves selection and filters','background refresh preserves search focus','remount draft','browser reload draft','notification preserves draft','lost-response exact retry across reload','external edit auto refresh','conflict preserves both versions','reconnect snapshot','subscription cleanup','missed-delete periodic fallback','mobile overflow','no page errors'],artifacts:base},null,2));
 } catch (error) {
   console.error(JSON.stringify({errors, page:await page?.locator('main').innerText()},null,2));
   throw error;

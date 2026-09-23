@@ -7,9 +7,12 @@ const timestamp = Type.String({ pattern: "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\
 const strings = Type.Array(text(), { maxItems: 100 });
 export const Evidence = Type.Object({
   path: text(500), sha256: Type.String({ pattern: "^[a-f0-9]{64}$" }),
-  start_line: Type.Integer({ minimum: 1 }), end_line: Type.Integer({ minimum: 1 }),
+  start_line: Type.Optional(Type.Integer({ minimum: 1 })), end_line: Type.Optional(Type.Integer({ minimum: 1 })),
+  filename: Type.Optional(text(200)), mediaType: Type.Optional(text(200)), size: Type.Optional(Type.Integer({ minimum: 0 })),
+  attribution: Type.Optional(text(1000)),
   quote: Type.Optional(text(4000)),
 }, { additionalProperties: false });
+export type Evidence = Static<typeof Evidence>;
 export const Scope = Type.Union([
   Type.Object({ visibility: Type.Literal("sample") }, { additionalProperties: false }),
   Type.Object({ visibility: Type.Literal("agent-private"), agentId: name }, { additionalProperties: false }),
@@ -22,7 +25,6 @@ export const Envelope = Type.Object({
   title: Type.String({ minLength: 1, maxLength: 200 }),
   scope: Scope,
   recorded_at: timestamp, updated_at: timestamp,
-  acceptance: Type.Union([Type.Literal("candidate"), Type.Literal("accepted")]),
   lifecycle: Type.Union([Type.Literal("active"), Type.Literal("superseded"), Type.Literal("withdrawn")]),
   aliases: Type.Optional(strings), tags: Type.Optional(strings),
   type: Type.Optional(name), fields: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
@@ -30,7 +32,7 @@ export const Envelope = Type.Object({
   assertion_origin: Type.Optional(Type.Union([Type.Literal("source"), Type.Literal("user_belief"), Type.Literal("agent_inference")])),
   attribution: Type.Optional(text(1000)), entities: Type.Optional(Type.Array(id, { maxItems: 100 })),
   from: Type.Optional(id), to: Type.Optional(id), label: Type.Optional(name),
-  evidence: Type.Optional(Type.Array(Evidence, { maxItems: 20 })),
+  evidence: Type.Optional(Type.Array(Evidence)),
   dependencies: Type.Optional(Type.Array(id, { maxItems: 100 })),
 }, { additionalProperties: true });
 export type Envelope = Static<typeof Envelope>;
@@ -54,6 +56,6 @@ export type Definition = Static<typeof Definition>;
 export type Issue = { path: string; code: string; message: string };
 export type RecordSummary = {
   id: string; title: string; kind: string; type: string; path: string;
-  acceptance: string; lifecycle: string; revision: number; valid: boolean;
+  lifecycle: string; revision: number; valid: boolean;
 };
 export type LoadedRecord = RecordSummary & { metadata: Envelope; body: string; raw: string; hash: string };

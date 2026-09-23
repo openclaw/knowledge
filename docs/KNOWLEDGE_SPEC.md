@@ -80,10 +80,10 @@ This document consolidates the revised proposal, including the deeper skills rev
 
 | Record | Purpose | Essential properties |
 |---|---|---|
-| Fact | One attributed claim | Opaque ID, revision, text, kind, assertion origin, attribution, evidence, entity references, validity/expiry, acceptance state, lifecycle state |
+| Fact | One attributed claim | Opaque ID, revision, text, kind, assertion origin, attribution, evidence, entity references, validity/expiry, lifecycle state |
 | Page | A document, note, meeting, or entity profile | Opaque ID, unique slug within its authorized namespace, revision, title, Markdown body, type, tags, optional aliases |
 | Entity | A typed page for a person, organization, project, or topic | Same page identity; aliases, linked facts, relationships, and derived event views |
-| Relationship | A directed labeled connection between pages/entities | Opaque edge ID, revision, endpoints, label, evidence, acceptance state, lifecycle state, optional validity dates |
+| Relationship | A directed labeled connection between pages/entities | Opaque edge ID, revision, endpoints, label, evidence, lifecycle state, optional validity dates |
 | Evidence artifact | Retained original or derived source material | Artifact ID, immutable content hash/version, media type, origin, byte length, access scope, retention mode |
 | History entry | Audit of a committed mutation | Mutation ID, action, affected ID/revision, timestamp, reason where applicable, host-attached origin |
 | Ingestion record | Durable progress for a multi-record workflow | Import key, revision, artifact references, planned items/checkpoints, committed outputs, verification findings, status |
@@ -102,7 +102,7 @@ Keep these concepts distinct:
 
 Unknown dates remain unknown. A commitment may have a known owner and optional `due_at`; capturing it does not schedule or execute it. Fact states include active, superseded, and withdrawn; expiry also excludes a fact from active retrieval.
 
-Acceptance (`candidate` / `accepted`) is independent of lifecycle (`active` / `superseded` / `withdrawn`) and publication progress (§7.2). Saving a candidate does not promote it into accepted knowledge; authorized workflows can accept records without a separate approval UI. Unresolved identities remain explicit.
+Created records are immediately available, with no candidate/accepted state, promotion, or approval workflow. Lifecycle (`active` / `superseded` / `withdrawn`) remains independent of publication progress (§7.2). Unresolved identities remain explicit through attribution and evidence, not an approval gate.
 
 Assertion origin distinguishes a source statement, a user belief, and an agent inference, independently of topical claim kind. Preserve attribution and evidence rather than collapsing extraction confidence, speaker confidence, evidential support, and validity into one score. Numerical confidence modeling is not required for v1.
 
@@ -110,7 +110,7 @@ Assertion origin distinguishes a source statement, a user belief, and an agent i
 
 Entity pages present a current, cited understanding rather than an ever-growing dump. Updates must preserve evidence and distinguish assessments from attributed claims. Updating a page does not implicitly overwrite its linked facts.
 
-A project is an entity type encompassing ongoing initiatives and workstreams, not only software or work with a repository. Use project status (such as active, paused, completed, or cancelled) separately from record acceptance/lifecycle; completing a project does not change its identity or withdraw its record. Do not introduce a separate workstream type without an evidenced semantic distinction.
+A project is an entity type encompassing ongoing initiatives and workstreams, not only software or work with a repository. Use project status (such as active, paused, completed, or cancelled) separately from record lifecycle; completing a project does not change its identity or withdraw its record. Do not introduce a separate workstream type without an evidenced semantic distinction.
 
 Aliases assist resolution but do not prove identity. Ambiguous names produce candidates; alias collisions must not silently reassign a name.
 
@@ -128,15 +128,15 @@ A recording ID or origin URL is provenance inside the one store, not a gbrain-st
 
 ### 4.4 Portable serialization and local schema
 
-Document a versioned Markdown/frontmatter representation for pages, claims, explicit relationships, citations, and their dependency references. Stable claim and relationship IDs are mandatory, not inferred from filenames or prose. Renaming a file preserves identity. The format must retain revisions, acceptance/lifecycle states, attribution, evidence locators, and access scope so authorized projections can be reconstructed deterministically without an LLM.
+Document a versioned Markdown/frontmatter representation for pages, claims, explicit relationships, citations, and their dependency references. Stable claim and relationship IDs are mandatory, not inferred from filenames or prose. Renaming a file preserves identity. The format must retain revisions, lifecycle states, attribution, evidence locators, and access scope so authorized projections can be reconstructed deterministically without an LLM.
 
 Start with one independently addressable page, claim, or explicit relationship per Markdown file. An entity is a typed page with the same identity, not an additional serialized entity record. UI views may assemble several records into an entity view without changing their storage authority. Exact frontmatter syntax and directory layout must be fixed and exercised against fixtures in the first slice.
 
 Keep three contracts distinct:
 
-- **Portable envelope:** stable ID, structural record kind, format version, revision, title/aliases and timestamps where applicable, access scope, applicable acceptance/lifecycle states, attribution, evidence/dependencies, authored Markdown body, and preserved extra metadata. Structural kinds such as page/claim/relationship are distinct from domain types such as person/project/meeting and from claim-kind vocabulary.
+- **Portable envelope:** stable ID, structural record kind, format version, revision, title/aliases and timestamps where applicable, access scope, applicable lifecycle states, attribution, evidence/dependencies, authored Markdown body, and preserved extra metadata. Structural kinds such as page/claim/relationship are distinct from domain types such as person/project/meeting and from claim-kind vocabulary.
 - **Domain ontology:** versioned human-readable definitions of types, typed fields, required fields/constraints, relationship labels and permitted endpoint types, and filing conventions. Optional display hints are limited to labels and field order; no executable schema code. Ship one locally configurable default taxonomy. Local inheritance and selective borrowing are included; distribution, automatic discovery, visual ontology authoring, and migration automation are deferred. See [ONTOLOGY.md](ONTOLOGY.md) for the implemented foundation contract.
-- **Operational schema:** vault identity/format, path/ID/hash catalog, publication journal, receipts/history, revisions/conflicts, and rebuildable projections. Operational progress is not portable record acceptance or lifecycle state.
+- **Operational schema:** vault identity/format, path/ID/hash catalog, publication journal, receipts/history, revisions/conflicts, and rebuildable projections. Operational progress is not portable record lifecycle state.
 
 Validate definitions before activating them. The Ontology inspector shows the effective version, resolved fingerprint, definition provenance, plus invalid edits and affected records. Malformed or unsupported definitions remain intact; do not silently adopt them or reinterpret existing records. A previously validated definition may remain explicitly labeled as last-known-good; without one, affected typed operations are unavailable. Ontology-dependent writes must check the effective resolved fingerprint and reject incompatible or unresolved definitions. Exact activation/migration mechanics remain an implementation decision; no automatic taxonomy migration is implied.
 
@@ -189,7 +189,7 @@ Signatures below are compact design schemas, not final JSON Schema. `?` means op
 |---|---|---|
 | `knowledge_recall` | `query?`, `entity_id?`, `kinds?`, `since?`, `limit?`, `budget_tokens?` | Ranked facts, page snippets, matched entities, evidence, and match reasons. Keyword retrieval in v1; no generated answer or query expansion. Semantic retrieval is deferred. |
 | `knowledge_get` | `id`, `revision?`, `offset?`, `max_chars?`, evidence locator where applicable | Exact record or historical revision; bounded page/artifact text and continuation. Binary artifacts use authorized host artifact access. |
-| `knowledge_list` | `record_type?`, `entity_type?`, `entity_id?`, `tags?`, acceptance/lifecycle filters, `updated_since?`, occurrence-time filters, `session?`, origin/import filters, `sort?`, `limit?`, `cursor?` | Deterministic exhaustive enumeration across authorized records, evidence, and ingestion state, with explicit continuation and completion. Ranked recall does not establish completeness. |
+| `knowledge_list` | `record_type?`, `entity_type?`, `entity_id?`, `tags?`, lifecycle filters, `updated_since?`, occurrence-time filters, `session?`, origin/import filters, `sort?`, `limit?`, `cursor?` | Deterministic exhaustive enumeration across authorized records, evidence, and ingestion state, with explicit continuation and completion. Ranked recall does not establish completeness. |
 | `knowledge_entity` | `name_or_id` | `found`, `ambiguous`, or `missing`; bounded entity card, aliases, facts, relationships, and dated views. A miss never creates a record. |
 | `knowledge_neighbors` | `id`, `direction?`, `relation?`, `occurred_since?`, `occurred_until?`, `limit?`, `cursor?` | One-hop visible neighborhood/backlinks, distinguishing derived links from evidenced edges, with continuation and truncation. |
 | `knowledge_history` | `id?`, `session?`, `since?`, `until?`, `action?`, `ingestion_id?`, `limit?`, `cursor?` | Mutation ledger answering questions such as “what was saved this session/today?” Not a transcript dump or ambient delta protocol. |
@@ -207,7 +207,7 @@ Keyword-only retrieval is the complete v1 baseline, not a degraded mode merely b
 - Factual content includes attribution and `evidence[]`. Missing provenance is reported, not fabricated.
 - Optional `ingestion_id` connects a mutation to an ingestion workflow.
 - Host-attached origin includes actor, agent, conversation, session/run identity when available, and storage time. Distinguish these from model-supplied source assertions.
-- Return `mutation_id`, affected `id`, `revision`, operation status, `publication_state`, and `index_state`; distinguish record acceptance/lifecycle from operation progress.
+- Return `mutation_id`, affected `id`, `revision`, operation status, `publication_state`, and `index_state`; distinguish record lifecycle from operation progress.
 - Use the recoverable publication protocol in §7.2. Commit receipt, audit entry, and ingestion association together in SQLite after durable file publication; never claim an atomic transaction spanning files and SQLite.
 - Successful published writes are immediately available to authorized exact reads, listing, and history. Reconcile authoritative state or use a current overlay if projections lag; derived keyword indexing may be pending and must be reported as such.
 
@@ -266,7 +266,7 @@ Files and SQLite cannot share one atomic transaction. Implement a durable journa
 
 | State | Guarantee |
 |---|---|
-| Accepted for publication | Validated intent, retry identity, expected revisions/hashes, target changes, and recovery material are durable. This is not a successful save or the record's semantic acceptance state. |
+| Accepted for publication | Validated intent, retry identity, expected revisions/hashes, target changes, and recovery material are durable. This is not a successful save or an approval step. |
 | Published | Authoritative file changes are durable and verified; receipt, audit entry, and applicable ingestion associations are committed. Exact reads, listing, and history expose the completed mutation. |
 | Indexed | Derived projections reflect the published generation; the receipt/status exposes any remaining index lag or failure. |
 
@@ -288,7 +288,7 @@ Operational-only mutations such as ingestion checkpoints commit their state and 
 - Resolve renames by stable identity, update path mappings, and diagnose broken links. Do not create a new record merely because its filename changed.
 - Preserve both versions and report a conflict when a plugin mutation overlaps an external edit or deletion. Do not silently recreate a deleted file. Missing files are surfaced and excluded from current views; deletion is not authorization to erase evidence/history or silently withdraw unrelated records.
 - Preserve malformed files, duplicate IDs, unknown schemas, and unresolved references for inspection. Do not index ambiguous structured assertions as accepted knowledge or silently serve an older projection as current; expose affected records as unavailable/conflicted until reconciled.
-- Reappearing stale content cannot clear a withdrawal safeguard or silently promote a candidate. Reconciliation obeys the same access, revision, lifecycle, and evidence rules as tool writes.
+- Reappearing stale content cannot clear a withdrawal safeguard or add an approval requirement. Reconciliation obeys the same access, revision, lifecycle, and evidence rules as tool writes.
 
 Filesystem operations must stay within authorized vault/artifact roots and account for symlinks, hardlinks, bounded traversal, and safe filename handling. Prove the preservation/conflict guarantees with realistic concurrent-editor tests; a watcher or a single pre-write stat is not a complete concurrency protocol.
 
@@ -428,7 +428,7 @@ Start with one **Knowledge** destination:
 
 | View | Required behavior |
 |---|---|
-| Records | Bounded list/filter and detail; rendered content, structured fields, raw Markdown, evidence references, and history as available; candidate/lifecycle filters; basic page create/edit once safe writes exist |
+| Records | Bounded list/filter and detail; rendered content, structured fields, raw Markdown, evidence references, and history as available; lifecycle filters; basic page create/edit once safe writes exist |
 | Schemas | Available domain types/relationships, fields/constraints, filing/display hints, effective versions, and invalid definitions or record-validation failures |
 | Activity & issues | Actual mutations and reconciled external edits, publication/index state, conflicts, recovery findings, and ingestion progress when implemented; link to inspectable authorized outputs |
 
@@ -482,7 +482,7 @@ Reuse engineering without making memory-wiki a dependency or inheriting its prod
 |---|---|
 | Adapt suitable utilities and tests | Guarded filesystem operations, YAML/frontmatter and filename handling, Markdown-link extraction, mutation coordination, diagnostics, and per-agent tool/Gateway/CLI/service integration patterns |
 | Borrow invariants and regression scenarios | Vault identity and publication ancestry, restored-vault compatibility, stale publishers, reused paths, and ingestion journals with hashes, snapshots, and resumable progress |
-| Design specifically for Knowledge | Authoritative editable records, external-edit reconciliation, portable IDs and acceptance/lifecycle semantics, access enforcement, corrections/withdrawals, and the recoverable file/SQLite protocol |
+| Design specifically for Knowledge | Authoritative editable records, external-edit reconciliation, portable IDs and lifecycle semantics, access enforcement, corrections/withdrawals, and the recoverable file/SQLite protocol |
 
 Prefer a supported OpenClaw SDK helper when available. Otherwise adapt a small module and its relevant tests with license/attribution preserved, or extract a shared helper if warranted. Do not import memory-wiki internals. Verify candidates against the chosen host version during implementation; this is not a promise that they are drop-in components.
 
@@ -508,7 +508,7 @@ Workflow coverage, not tool/skill count, determines readiness. Required checks i
 | Concurrent edit or deletion | Stale revision/content hash conflicts preserve both versions; no silent overwrite or file resurrection |
 | Keyword-only operation | Useful baseline retrieval with mode, citations, and actual lag/failure metadata; no embedding provider required |
 | Ranked search versus listing | Ranked hits are not represented as exhaustive; listing paginates to explicit completion |
-| Candidate and lifecycle handling | Unresolved identities stay explicit; candidates do not become accepted silently; withdrawn/superseded records stay out of active discovery |
+| Lifecycle handling | Saved records are immediately discoverable without approval; unresolved identities stay explicit; withdrawn/superseded records stay out of active discovery |
 | Links and local schema | Validated local types/filing; one-hop links resolve to identities; code/generated-block links ignored; deleting a wikilink does not withdraw an explicit edge |
 | Agent/private/shared-conversation access | No cross-scope records, counts, candidates, graph edges, history, or artifacts leak |
 | Article/PDF ingestion | Retained source, grounded output, entity connections, extraction gaps disclosed |
@@ -524,7 +524,7 @@ Workflow coverage, not tool/skill count, determines readiness. Required checks i
 | Interrupt after meeting page commit | Durable partial state; resume missing outputs/checks without duplicates |
 | Interrupt file/database publication | Exercise interruption before files, between files, and before receipt commit; recover or preserve conflicts, without duplicate receipts or half-applied corrections in plugin reads |
 | Published write awaiting indexing | Exact get/list/history read back the write; keyword lag is explicit and is not an empty-success or completed-workflow claim |
-| Malformed vault content | Malformed frontmatter, duplicate IDs, unsupported schema, and broken references are diagnosed without content loss or guessed acceptance |
+| Malformed vault content | Malformed frontmatter, duplicate IDs, unsupported schema, and broken references are diagnosed without content loss or guessed metadata |
 | Rebuild derived indexes | Deterministic reconstruction from portable records/schema/artifacts; no LLM and no claim to reconstruct lost operational history |
 | Older-vault restore, stale publisher, or reused path | Incompatible newer projections are rejected, stale publishers fenced, and replacement vaults cannot inherit old records/receipts |
 | Full backup and restore | Coherent vault/schema/artifact/operational snapshot restores and validates; vault-only recovery explicitly reports missing state |

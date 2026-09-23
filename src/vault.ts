@@ -1,3 +1,7 @@
+import * as fs from "node:fs";
+import path from "node:path";
+import { inspectEvidence, withEvidenceFile } from "./evidence-files.js";
+import { ATTACHMENT_CHUNK_BYTES } from "./attachment-contract.js";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { Check } from "typebox/value";
@@ -57,7 +61,7 @@ export class SampleVault {
               continue;
             }
             if (!Check(Envelope, metadata)) throw Error("Record envelope is invalid");
-            records.push({ id: metadata.id, title: metadata.title, kind: metadata.kind, type: metadata.type ?? metadata.label ?? metadata.claim_kind ?? "", path: file, revision: metadata.revision, acceptance: metadata.acceptance, lifecycle: metadata.lifecycle, valid: true, metadata, body: raw.slice(match[0].length), raw, hash: digest(raw) });
+            records.push({ id: metadata.id, title: metadata.title, kind: metadata.kind, type: metadata.type ?? metadata.label ?? metadata.claim_kind ?? "", path: file, revision: metadata.revision, lifecycle: metadata.lifecycle, valid: true, metadata, body: raw.slice(match[0].length), raw, hash: digest(raw) });
           } catch (e) { add(file, "invalid-record", this.scope.visibility === "sample" ? String((e as Error).message) : "Record is unreadable or malformed; original file preserved."); }
         }
       }
@@ -108,11 +112,13 @@ export class SampleVault {
       for (const e of m.evidence ?? []) {
         try {
           if (!e.path.startsWith("artifacts/")) throw Error("Evidence must be within artifacts/");
-          const content = await read(e.path);
-          if (digest(content) !== e.sha256) throw Error("Evidence hash does not match");
-          const lines = content.split(/\r?\n/);
-          if (e.end_line < e.start_line || e.end_line > lines.length) throw Error("Invalid evidence line range");
-          if (e.quote && !lines.slice(e.start_line - 1, e.end_line).join("\n").includes(e.quote)) throw Error("Quote not found at evidence locator");
+          const content = overlay?.artifacts[e.path];
+          if (content !== undefined) {
+            if (digest(content) !== e.sha256) throw Error("Evidence hash does not match");
+            const lines = content.split(/\r?\n/);
+            if (e.start_line === undefined || e.end_line === undefined || e.end_line < e.start_line || e.end_line > lines.length) throw Error("Invalid evidence line range");
+            if (e.quote && !lines.slice(e.start_line - 1, e.end_line).join("\n").includes(e.quote)) throw Error("Quote not found at evidence locator");
+          } else inspectEvidence(this.root, e);
         } catch { problem("invalid-evidence", "Evidence is missing, unsafe, changed, or its locator/quote does not match: " + e.path); }
       }
     }
@@ -145,21 +151,37 @@ export class SampleVault {
       issues: data.issues.slice(0, 1000), totalIssues: data.issues.length, truncated: data.issues.length > 1000,
     };
   }
-  async detail(id: string) {
+  async detail(id: string, evidenceOffset = 0, evidenceLimit = 20) {
     const data = await this.scan(), matches = data.records.filter(r => r.id === id);
     if (matches.length !== 1) return { record: null, issues: [], references: [], evidence: [] };
     const r = matches[0], refs = new Set([...(r.metadata.entities ?? []), ...(r.metadata.dependencies ?? []), ...[r.metadata.from, r.metadata.to].filter((x): x is string => Boolean(x))]);
     const references = data.records.filter(other => refs.has(other.id) || other.metadata.from === id || other.metadata.to === id || other.metadata.entities?.includes(id)).map(summary);
     const evidence = [];
-    for (const e of r.metadata.evidence ?? []) {
+    for (const e of (r.metadata.evidence ?? []).slice(evidenceOffset, evidenceOffset + evidenceLimit)) {
       let excerpt = "", verified = false, excerptTruncated = false;
       try {
         if (!e.path.startsWith("artifacts/")) throw Error("Unsafe evidence");
-        const raw = await this.read(e.path), lines = raw.split(/\r?\n/);
-        if (digest(raw) === e.sha256 && e.start_line <= e.end_line && e.end_line <= lines.length) { const full = lines.slice(e.start_line - 1, e.end_line).join("\n"); excerpt = full.slice(0, 20000); excerptTruncated = full.length > excerpt.length; verified = !e.quote || lines.slice(e.start_line - 1, e.end_line).join("\n").includes(e.quote); }
+        const inspected = inspectEvidence(this.root, e, 20000);
+        excerpt = inspected.excerpt; excerptTruncated = inspected.excerptTruncated; verified = true;
       } catch { /* The diagnostic is attached to the record; no raw filesystem error escapes. */ }
       evidence.push({ ...e, excerpt: verified ? excerpt : "", verified, excerptTruncated });
     }
-    return { record: { ...summary(r), body: r.body, raw: r.raw, hash: r.hash, metadata: JSON.stringify(r.metadata, null, 2) }, issues: data.issues.filter(i => i.path === r.path), references, evidence };
+    return { record: { ...summary(r), body: r.body, raw: r.raw, hash: r.hash, metadata: JSON.stringify(r.metadata, null, 2) }, issues: data.issues.filter(i => i.path === r.path), references, evidence, evidenceTotal: r.metadata.evidence?.length ?? 0 };
   }
+  async attachment(input: { id: string; path: string; sha256: string; offset?: number }) {
+    const data = await this.scan(), records = data.records.filter(r => r.id === input.id);
+    const evidence = records.length === 1 ? records[0].metadata.evidence?.find(e => e.path === input.path && e.sha256 === input.sha256) : undefined;
+    if (!evidence) throw Error("Attachment unavailable in this record and scope");
+    const offset = input.offset ?? 0;
+    return withEvidenceFile(this.root, evidence.path, (fd, size) => {
+      inspectEvidence(this.root, evidence);
+      if (offset > size) throw Error("Attachment offset exceeds file size");
+      const bytes = Buffer.alloc(Math.min(ATTACHMENT_CHUNK_BYTES, size - offset));
+      let used = 0;
+      while (used < bytes.length) { const n = fs.readSync(fd, bytes, used, bytes.length - used, offset + used); if (!n) throw Error("Attachment changed"); used += n; }
+      return { filename: evidence.filename ?? path.basename(evidence.path), mediaType: evidence.mediaType ?? "application/octet-stream", sha256: evidence.sha256,
+        size, offset, data: bytes.toString("base64"), nextOffset: offset + used < size ? offset + used : null };
+    });
+  }
+
 }

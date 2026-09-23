@@ -40,6 +40,8 @@ export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureE
     return accessFor(context, write);
   };
   return {
+    attach: async (input, context) => { const access = authority(context, true); return storage!.attach(input, access); },
+    attachment: (input, context) => run(context, vault => vault.attachment(input)),
     save_page: async (input, context) => { const access = authority(context, true); try { return await storage!.save(input, access, context.source === "tool" ? "agent" : "operator"); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); } },
     resume: async (input, context) => { const access = authority(context, true); try { return await storage!.resume(access, input.requestId); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); } },
     revision: async (input, context) => { const access = authority(context); return storage!.revision(access, input.sequence); },
@@ -54,7 +56,7 @@ export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureE
       if (scope === "agent-private") live?.ensureWatching();
       const data = await vault.scan();
       return {
-        service: "knowledge", phase: config?.writesEnabled ? "page-editor" : "read-only-explorer", backendRevision: "keyword-live-state-1", instanceId, startedAt,
+        service: "knowledge", phase: config?.writesEnabled ? "page-editor" : "read-only-explorer", backendRevision: "file-evidence-1", instanceId, startedAt,
         checkedAt: data.checkedAt, vault: config?.vaultId ?? "bundled-sample", agent: config?.agentId ?? "none — synthetic sample", scope, sample: !config, writesEnabled: Boolean(config?.writesEnabled && (() => { try { authority(context, true); return true; } catch { return false; } })()),
         live: scope === "agent-private" ? live?.state ?? "stopped" : "stopped",
         records: data.records.length, validRecords: data.records.filter(r => r.valid).length,

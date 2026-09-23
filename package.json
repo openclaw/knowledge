@@ -22,7 +22,8 @@
     "docs/REAL_VAULT.md",
     "docs/MODEL_API.md",
     "docs/LOCAL_HISTORY.md",
-    "docs/RETRIEVAL.md"
+    "docs/RETRIEVAL.md",
+    "docs/EVIDENCE.md"
   ],
   "peerDependencies": {
     "openclaw": ">=2026.9.5"

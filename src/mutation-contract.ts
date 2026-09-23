@@ -1,5 +1,5 @@
 import { Type, type Static } from "typebox";
-import { text, name } from "./model.js";
+import { text, name, Evidence } from "./model.js";
 export const requestId = Type.String({ pattern: "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$" });
 export const SavePage = Type.Object({
   requestId, title: Type.String({ minLength: 1, maxLength: 200 }), body: text(48000),
@@ -8,7 +8,8 @@ export const SavePage = Type.Object({
   expectedVaultId: Type.Optional(requestId),
   expectedRevision: Type.Optional(Type.Integer({ minimum: 1 })),
   expectedHash: Type.Optional(Type.String({ pattern: "^[a-f0-9]{64}$" })),
-  source: Type.Optional(Type.Object({ text: Type.String({ minLength: 1, maxLength: 48000 }), attribution: Type.String({ minLength: 1, maxLength: 1000 }) }, { additionalProperties: false })),
+  attachments: Type.Optional(Type.Array(Evidence)),
+  source: Type.Optional(Type.Object({ text: Type.String({ minLength: 1 }), attribution: Type.String({ minLength: 1, maxLength: 1000 }) }, { additionalProperties: false })),
 }, { additionalProperties: false });
 export type SavePage = Static<typeof SavePage>;
 export const GitCheckpoint = Type.Object({

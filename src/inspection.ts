@@ -8,7 +8,7 @@ const next = (offset: number, count: number, total: number) => offset + count < 
 /** Presentation projections are shared by agents and UI; authority stays in the service. */
 export async function inspectRecord(vault: SampleVault, input: RecordInput): Promise<RecordOutput> {
   const view = input.view ?? "content", offset = input.offset ?? 0, maxChars = input.maxChars ?? 12000;
-  const detail = await vault.detail(input.id), r = detail.record;
+  const detail = await vault.detail(input.id, input.evidenceOffset ?? 0, input.evidenceLimit ?? 20), r = detail.record;
   const result: RecordOutput = { view, record: null, content: { offset, totalChars: 0, nextOffset: null }, issues: detail.issues };
   if (!r) return result;
   const { body, raw, metadata: serialized, ...base } = r, metadata = JSON.parse(serialized);
@@ -29,6 +29,8 @@ export async function inspectRecord(vault: SampleVault, input: RecordInput): Pro
     result.nextReferenceOffset = next(start, result.references.length, detail.references.length);
   }
   if (input.includeEvidence ?? view === "content") {
+    result.evidenceTotal = detail.evidenceTotal ?? 0;
+    result.nextEvidenceOffset = next(input.evidenceOffset ?? 0, detail.evidence.length, result.evidenceTotal);
     let remaining = input.maxEvidenceChars ?? 4000;
     result.evidence = detail.evidence.map(e => {
       const excerpt = e.excerpt.slice(0, remaining); remaining -= excerpt.length;
@@ -64,7 +66,7 @@ export async function inspectOntology(vault: SampleVault, input: OntologyInput):
       return {
         name: def.name, label: def.label, kind: def.kind, primitive: def.primitive ?? "", description: def.description,
         aliases: def.aliases ?? [], recordCount: records.length,
-        ...(view === "definitions" ? { directory: def.directory, fields: def.fields, fromTypes: def.from_types ?? [], toTypes: def.to_types ?? [], pathPrefixes: def.path_prefixes ?? [], behaviors: def.behaviors, source: d.source, ontology: d.ontology, version: d.version } : {}),
+        ...(view === "definitions" ? { directory: def.directory, fields: def.fields, fromTypes: def.from_types ?? [], toTypes: def.to_types ?? [], pathPrefixes: def.path_prefixes ?? [], ...(def.behaviors ? { behaviors: def.behaviors } : {}), source: d.source, ontology: d.ontology, version: d.version } : {}),
         ...(input.includeRecords ? { records: records.slice(0, 20).map(summary), recordsTruncated: records.length > 20 } : {}),
       };
     });

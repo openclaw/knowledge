@@ -40,7 +40,6 @@ function filtered(data: Snapshot, records: LoadedRecord[], input: LookupInput | 
   const types = input.type ? expandTypes(data.ontology, input.type) : null;
   return records.filter(r => (!input.kind || r.kind === input.kind) && (!types || (r.kind === "page" ? types.has(r.type) : r.type === input.type)) &&
     (!input.tag || r.metadata.tags?.includes(input.tag)) &&
-    (input.acceptance === "all" || r.acceptance === (input.acceptance ?? "accepted")) &&
     (input.lifecycle === "all" || r.lifecycle === (input.lifecycle ?? "active")));
 }
 const coverage = (data: Snapshot) => ({ complete: data.issues.length === 0, message: data.issues.length ? "Some authorized source material has validation issues. Invalid, ambiguous, withdrawn and dependent records are excluded; inspect Activity & issues. Results do not establish a complete vault inventory." : "Current eligible scoped records only. Ranked search is not exhaustive vault listing." });
@@ -58,7 +57,7 @@ function hit(r: LoadedRecord, field: Hit["snippet"]["field"], at: number, matche
     record, citation: { id: r.id, path: r.path, revision: r.revision, hash },
     snippet: { field, text: value.slice(start, end), start, end, startLine: field === "body" ? line(start) : null, endLine: field === "body" ? line(Math.max(start, end - 1)) : null, truncated: start > 0 || end < value.length },
     matches, score, attribution: metadata.attribution ?? "", assertionOrigin: metadata.assertion_origin ?? "",
-    evidence: (metadata.evidence ?? []).slice(0, 3).map(({ path, sha256, start_line, end_line }) => ({ path, sha256, start_line, end_line })), evidenceTruncated: (metadata.evidence?.length ?? 0) > 3,
+    evidence: (metadata.evidence ?? []).slice(0, 3).map(({ path, sha256, start_line, end_line }) => ({ path, sha256, ...(start_line !== undefined ? { start_line } : {}), ...(end_line !== undefined ? { end_line } : {}) })), evidenceTruncated: (metadata.evidence?.length ?? 0) > 3,
   };
 }
 export function exactLookup(data: Snapshot, input: LookupInput, withdrawn = new Set<string>()): LookupOutput {

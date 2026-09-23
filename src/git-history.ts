@@ -1,9 +1,10 @@
+import { inspectEvidence, withEvidenceFile } from "./evidence-files.js";
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import path from "node:path";
 import { PublicationFiles } from "./publication-files.js";
 
-export type GitChange = { path: string; raw: string | null };
+export type GitChange = { path: string; raw: string | null; fileHash?: string };
 export type GitBatch = { token: string; changes: GitChange[]; actor: string; at: string };
 export class GitUnavailable extends Error {}
 
@@ -15,18 +16,18 @@ export class GitHistory {
   constructor(private readonly root: string, private readonly executable = "git") {
     this.gitDir = path.join(root, ".git");
   }
-  private command(args: string[], input?: string, extra: NodeJS.ProcessEnv = {}, optional = false): string {
+  private command(args: string[], input?: string, extra: NodeJS.ProcessEnv = {}, optional = false, inputFd?: number): string {
     const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_")));
     const result = spawnSync(this.executable, ["--no-pager", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "core.splitIndex=false", "-c", "core.sparseCheckout=false", "-c", "gc.auto=0", "-c", "maintenance.auto=false", ...args], {
-      cwd: this.root, input, encoding: "utf8", timeout: 10000, maxBuffer: 16 * 1024 * 1024,
+      cwd: this.root, input, ...(inputFd !== undefined ? { stdio: [inputFd, "pipe", "pipe"] as [number, "pipe", "pipe"] } : {}), encoding: "utf8", timeout: 10000, maxBuffer: 16 * 1024 * 1024,
       env: { ...env, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_TERMINAL_PROMPT: "0", ...extra },
     });
     if ((result.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") throw new GitUnavailable("Git is not installed; local history is waiting for Git.");
     if (result.error || (result.status !== 0 && !optional)) throw Error("Local Git checkpoint failed; resolve repository permissions, locks, or concurrent Git activity and retry.");
     return result.status === 0 ? result.stdout.trimEnd() : "";
   }
-  private git(args: string[], input?: string, extra?: NodeJS.ProcessEnv, optional = false) {
-    return this.command([`--git-dir=${this.gitDir}`, `--work-tree=${this.root}`, ...args], input, extra, optional);
+  private git(args: string[], input?: string, extra?: NodeJS.ProcessEnv, optional = false, inputFd?: number) {
+    return this.command([`--git-dir=${this.gitDir}`, `--work-tree=${this.root}`, ...args], input, extra, optional, inputFd);
   }
   private repository() {
     this.command(["--version"]);
@@ -63,7 +64,16 @@ export class GitHistory {
   }
   private apply(changes: GitChange[], index: string) {
     for (const change of changes) {
-      if (change.raw === null) this.git(["update-index", "--force-remove", "--", change.path], undefined, { GIT_INDEX_FILE: index });
+      if (change.fileHash) {
+        const at = change.path.indexOf("/artifacts/");
+        if (at < 0) throw Error("File-backed Git changes must be source artifacts");
+        const root = path.join(this.root, change.path.slice(0, at)), relative = change.path.slice(at + 1);
+        const oid = withEvidenceFile(root, relative, fd => {
+          inspectEvidence(root, { path: relative, sha256: change.fileHash! });
+          return this.git(["hash-object", "-w", "--stdin", "--no-filters"], undefined, undefined, false, fd);
+        });
+        this.git(["update-index", "--add", "--cacheinfo", "100644", oid, change.path], undefined, { GIT_INDEX_FILE: index });
+      } else if (change.raw === null) this.git(["update-index", "--force-remove", "--", change.path], undefined, { GIT_INDEX_FILE: index });
       else {
         const oid = this.git(["hash-object", "-w", "--stdin", "--no-filters"], change.raw);
         this.git(["update-index", "--add", "--cacheinfo", "100644", oid, change.path], undefined, { GIT_INDEX_FILE: index });

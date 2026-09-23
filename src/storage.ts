@@ -1,3 +1,7 @@
+import path from "node:path";
+import { attachChunk } from "./attachments.js";
+import { AttachInput, ATTACHMENT_CHUNK_BYTES } from "./attachment-contract.js";
+import { inspectEvidence } from "./evidence-files.js";
 import { keywordSearch, exactLookup, observeWithdrawals, withdrawnIds } from "./retrieval.js";
 import type { SearchInput, LookupInput } from "./retrieval-contract.js";
 import { GitHistory, GitUnavailable, type GitBatch, type GitChange } from "./git-history.js";
@@ -71,6 +75,17 @@ export class KnowledgeStorage {
   }
   private row(db: DatabaseSync, scope: string, request: string): Row | undefined { return db.prepare("SELECT * FROM mutations WHERE scope=? AND request=?").get(scope, request) as Row | undefined; }
   private checkReplay(row: Row, intent: string) { if (row.intent !== intent) throw Error("Request ID already belongs to a different payload. Use the original payload for retries."); }
+  async attach(input: AttachInput, access: VaultAccess) {
+    access.assertCurrent();
+    if (!this.config.writesEnabled) throw Error("Knowledge writes are disabled.");
+    if (input.expectedVaultId && input.expectedVaultId !== this.config.vaultId) throw Error("Connected vault changed; do not upload this file here.");
+    await this.initialize(access);
+    this.assertReadable();
+    return this.transaction(db => {
+      this.identity(db, new PublicationFiles(this.config.root));
+      return attachChunk(db, this.config.root, scopeKey(access.scope), input, () => access.assertCurrent(), this.hook);
+    });
+  }
   async save(input: SavePage, access: VaultAccess, actor: string): Promise<Receipt> {
     access.assertCurrent();
     if (input.expectedVaultId && input.expectedVaultId !== this.config.vaultId) throw Error("Connected vault changed; this draft belongs to a different vault. No publication was accepted.");
@@ -80,6 +95,18 @@ export class KnowledgeStorage {
     const prior = this.store.withDatabase(db => this.row(db, scope, input.requestId));
     if (prior) { this.checkReplay(prior, intent); return this.resume(access, input.requestId); }
     this.assertReadable();
+    // Old clients may still submit source text. Large values use the same file
+    // retention service; the page journal never needs to carry a large original.
+    let sourceAttachment: import("./model.js").Evidence | undefined;
+    if (input.source && Buffer.byteLength(input.source.text) > 65536) {
+      const bytes = Buffer.from(input.source.text);
+      for (let offset = 0; offset < bytes.length; offset += ATTACHMENT_CHUNK_BYTES) {
+        const chunk = bytes.subarray(offset, offset + ATTACHMENT_CHUNK_BYTES);
+        const receipt = await this.attach({ requestId: input.requestId, filename: "source.txt", mediaType: "text/plain", attribution: input.source.attribution,
+          offset, data: chunk.toString("base64"), final: offset + chunk.length === bytes.length }, access);
+        sourceAttachment = receipt.evidence;
+      }
+    }
     const prepared = await this.real.run(access, async vault => {
       const snapshot = new PublicationFiles(this.config.root).snapshot(scope);
       const data = await vault.scan();
@@ -95,11 +122,21 @@ export class KnowledgeStorage {
       const revision = (previous?.revision ?? 0) + 1;
       const metadata: Envelope = previous ? { ...previous.metadata, title: input.title, revision, updated_at: now } : {
         format: "knowledge-record-v1", id, revision, kind: "page", title: input.title, scope: access.scope,
-        type, fields: {}, recorded_at: now, updated_at: now, acceptance: "candidate", lifecycle: "active",
+        type, fields: {}, recorded_at: now, updated_at: now, lifecycle: "active",
       };
+      // Legacy approval metadata has no meaning; remove it on the next journaled save.
+      delete (metadata as Record<string, unknown>).acceptance;
       if (input.fields !== undefined) metadata.fields = input.fields;
+      if (input.attachments?.length) {
+        metadata.evidence = [...(metadata.evidence ?? [])];
+        for (const attachment of input.attachments) {
+          inspectEvidence(path.join(this.config.root, scope), attachment);
+          if (!metadata.evidence.some(e => canonical(e) === canonical(attachment))) metadata.evidence.push(attachment);
+        }
+      }
       const artifacts: Record<string, string> = {};
-      if (input.source) {
+      if (sourceAttachment) { metadata.evidence = [...(metadata.evidence ?? []), sourceAttachment]; metadata.attribution = input.source!.attribution; }
+      if (input.source && !sourceAttachment) {
         const artifact = `artifacts/${input.requestId}.txt`;
         artifacts[artifact] = input.source.text;
         metadata.evidence = [...(metadata.evidence ?? []), { path: artifact, sha256: digest(input.source.text), start_line: 1, end_line: input.source.text.split(/\r?\n/).length }];
@@ -110,12 +147,13 @@ export class KnowledgeStorage {
       if (previous) {
         const match = /^(?:\uFEFF)?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(previous.raw)!;
         const doc = parseDocument(match[1]);
-        for (const key of ["title", "revision", "updated_at", ...(input.fields !== undefined ? ["fields"] : []), ...(input.source ? ["evidence", "attribution"] : [])]) doc.set(key, (metadata as Record<string, unknown>)[key]);
+        doc.delete("acceptance");
+        for (const key of ["title", "revision", "updated_at", ...(input.fields !== undefined ? ["fields"] : []), ...(input.source ? ["evidence", "attribution"] : input.attachments?.length ? ["evidence"] : [])]) doc.set(key, (metadata as Record<string, unknown>)[key]);
         yaml = doc.toString();
       } else yaml = stringify(metadata);
       const raw = `---\n${yaml}---\n${input.body}`;
       if (Buffer.byteLength(raw) > 65536 || !Check(Envelope, metadata)) throw Error("Page exceeds limits or has invalid metadata.");
-      const record: LoadedRecord = { id, title: input.title, kind: "page", type: type!, path: relative, revision, acceptance: metadata.acceptance, lifecycle: metadata.lifecycle, metadata, raw, body: input.body, hash: digest(raw), valid: true };
+      const record: LoadedRecord = { id, title: input.title, kind: "page", type: type!, path: relative, revision, lifecycle: metadata.lifecycle, metadata, raw, body: input.body, hash: digest(raw), valid: true };
       const preview = await vault.scan({ record, artifacts });
       if (!record.valid) throw Error("Page validation failed: " + preview.issues.filter(i => i.path === relative).map(i => i.code).join(", "));
       if (new PublicationFiles(this.config.root).snapshot(scope) !== snapshot) throw Error("Edit conflict: vault changed during validation.");
@@ -238,8 +276,8 @@ export class KnowledgeStorage {
     const batch: GitBatch = { token, changes, actor, at: new Date().toISOString() };
     db.prepare("INSERT OR IGNORE INTO git_jobs(scope,token,batch,state,message) VALUES (?,?,?,'pending','Local Git checkpoint pending.')").run(scope, token, JSON.stringify(batch));
     for (const c of changes) {
-      if (c.raw === null) db.prepare("DELETE FROM git_files WHERE scope=? AND path=?").run(scope, c.path);
-      else db.prepare("INSERT OR REPLACE INTO git_files VALUES (?,?,?)").run(scope, c.path, digest(c.raw));
+      if (c.raw === null && !c.fileHash) db.prepare("DELETE FROM git_files WHERE scope=? AND path=?").run(scope, c.path);
+      else db.prepare("INSERT OR REPLACE INTO git_files VALUES (?,?,?)").run(scope, c.path, c.fileHash ?? digest(c.raw!));
     }
   }
   private gitStatus(db: DatabaseSync, scope: string) {
@@ -292,6 +330,7 @@ export class KnowledgeStorage {
         const files = new PublicationFiles(this.config.root);
         const snapshot = files.snapshot(key, true);
         const current = new Map<string, string>();
+        const originals = new Map<string, string>();
         for (const [relative, hash] of JSON.parse(snapshot) as [string, string][]) {
           if (hash === "directory") continue;
           const raw = files.read(relative);
@@ -303,11 +342,18 @@ export class KnowledgeStorage {
           for (const evidence of r.metadata.evidence ?? []) {
             if (!evidence.path.startsWith("artifacts/")) continue;
             const relative = `${key}/${evidence.path}`;
-            try { const raw = files.read(relative); if (raw !== null && digest(raw) === evidence.sha256) current.set(relative, raw); } catch { /* Validation already reports unsafe/missing evidence. */ }
+            try {
+              const checked = inspectEvidence(path.join(this.config.root, key), evidence);
+              // Match gbrain's Git sidecar routing threshold; media/large originals
+              // remain in the local vault, outside automatic Git snapshots.
+              const media = /^(image|audio|video)\//.test(evidence.mediaType ?? "") || /\.(png|jpe?g|gif|webp|mp[34]|mov|wav|ogg|flac)$/i.test(evidence.filename ?? evidence.path);
+              if (!media && checked.size < 100 * 1024 * 1024) originals.set(relative, evidence.sha256);
+            } catch { /* Validation already reports unsafe/missing evidence. */ }
           }
         }
         const prior = new Map(db.prepare("SELECT path,hash FROM git_files WHERE scope=?").all(key).map(r => [String(r.path), String(r.hash)]));
         const changes: GitChange[] = [...current].filter(([p, raw]) => prior.get(p) !== digest(raw)).map(([path, raw]) => ({ path, raw }));
+        for (const [path, fileHash] of originals) if (prior.get(path) !== fileHash) changes.push({ path, raw: null, fileHash });
         // Artifacts are retained originals; absent references are not deletions.
         for (const p of prior.keys()) if (!current.has(p) && !p.startsWith(`${key}/artifacts/`)) changes.push({ path: p, raw: null });
         if (files.snapshot(key, true) !== snapshot) throw Error("Vault changed during Git observation.");

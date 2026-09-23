@@ -107,3 +107,15 @@ test('inspection inputs reject invalid budgets and authority selectors', () => {
   for (const input of [{id:'sample_person_alex',maxChars:0},{id:'sample_person_alex',referenceLimit:101},{id:'sample_person_alex',root:'/etc'}]) assert.equal(Check(contract.operations.record.input,input),false);
   for (const input of [{view:'all'},{limit:0},{offset:-1},{agent:'other'}]) assert.equal(Check(contract.operations.ontology.input,input),false);
 });
+
+
+test('every ontology definition is JSON-safe before host serialization, including relationships without behaviors', async () => {
+  const vault = new SampleVault();
+  let offset = 0, total = 0;
+  do {
+    const result = checked('ontology', await inspectOntology(vault, { view: 'definitions', includeRecords: true, limit: 10, offset }));
+    assert.deepEqual(result, JSON.parse(JSON.stringify(result)), 'Undefined properties are rejected by the feature transport');
+    total += result.definitions.length; offset = result.nextOffset;
+  } while (offset !== null);
+  assert.equal(total, 38);
+});

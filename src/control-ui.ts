@@ -1,3 +1,4 @@
+import { evidenceView } from "./evidence-view.js";
 import { defineControlUiPlugin } from "openclaw/plugin-sdk/control-ui";
 import { createFeatureClient, type FeatureOutput } from "openclaw/plugin-sdk/feature-contract";
 import { contract } from "./contract.js";
@@ -37,6 +38,7 @@ export default defineControlUiPlugin({
         const draftStatus = el("p", "", "knowledge-error"); draftStatus.setAttribute("role", "alert");
         section.append(header, banner, status, nav, toolbar, draftStatus, content); container.append(section);
         const searchState = initialSearchState();
+        const evidenceExpansion = new Map<string, { count: number }>();
         let tab: "records" | "search" | "ontology" | "diagnostics" = "records", offset = 0, query = "", kind = "", type = "", selectedId = "";
         let writesEnabled = false;
         const editorLifetime = new AbortController();
@@ -83,16 +85,13 @@ export default defineControlUiPlugin({
             target.replaceChildren();
             if (!result.record) { target.append(el("h2", "Record unavailable"), el("p", "This ID is missing or duplicated. Inspect Activity & issues; no file was selected arbitrarily.")); return; }
             const r = result.record;
-            target.append(el("p", `${r.kind} / ${r.type}`, "knowledge-eyebrow"), el("h2", r.title), el("p", `${r.acceptance} · ${r.lifecycle} · Revision ${r.revision}`, "knowledge-muted"), el("code", r.path));
+            target.append(el("p", `${r.kind} / ${r.type}`, "knowledge-eyebrow"), el("h2", r.title), el("p", `${r.lifecycle} · Revision ${r.revision}`, "knowledge-muted"), el("code", r.path));
             if (!r.valid) target.append(el("p", "Validation issues — this record is not fully valid.", "knowledge-error"));
             if (writesEnabled && r.kind === "page" && r.valid) target.append(button("Edit page", () => editPage(r)));
             target.append(el("h3", "Authored Markdown"), el("pre", r.body, "knowledge-body"));
             if (result.evidence?.length) {
-              target.append(el("h3", "Evidence"));
-              for (const e of result.evidence) {
-                const evidence = el("article", undefined, "knowledge-evidence");
-                evidence.append(el("strong", e.verified ? "Verified source" : "Source could not be verified"), el("p", `${e.path} · Lines ${e.start_line}–${e.end_line}`), el("blockquote", e.excerpt || "No verified excerpt available."), rawBlock("Content hash", e.sha256)); target.append(evidence);
-              }
+              if (!evidenceExpansion.has(id)) evidenceExpansion.set(id, { count: 20 });
+              target.append(evidenceView(feature, result, () => alive(n) && detail === detailGeneration, s => context.host.redact(s), evidenceExpansion.get(id)));
             }
             if (result.references?.length) {
               target.append(el("h3", "Connected records"));
@@ -130,7 +129,7 @@ export default defineControlUiPlugin({
         function recordButton(record: Summary, detail: HTMLElement, n: number) {
           const control = button("", () => { for (const other of content.querySelectorAll(".knowledge-record")) other.setAttribute("aria-pressed", "false"); control.setAttribute("aria-pressed", "true"); void showDetail(record.id, detail, n); });
           control.className = "knowledge-record"; control.setAttribute("aria-pressed", String(record.id === selectedId));
-          control.append(el("strong", record.title), el("span", `${record.kind} · ${record.type}`), el("small", record.valid ? `${record.acceptance} · ${record.lifecycle}` : "Needs attention")); return control;
+          control.append(el("strong", record.title), el("span", `${record.kind} · ${record.type}`), el("small", record.valid ? `${record.lifecycle}` : "Needs attention")); return control;
         }
         async function load() {
           if (vaultChanged) return;
@@ -231,7 +230,7 @@ export default defineControlUiPlugin({
               catch { draftStatus.textContent = "Browser draft recovery unavailable. Copy any draft before leaving."; }
             }
             if (toolbarChanged) renderToolbar();
-            banner.replaceChildren(el("strong", report.sample ? "Sample vault · Read only" : `${report.agent} · Private vault${writesEnabled ? "" : " · Read only"}`), el("p", report.sample ? "Fictional people and projects for exploring the data model. No private agent vault is connected." : (writesEnabled ? "Create pages, retain source text, and edit with revision checks." : "Your agent’s knowledge. Writing is not enabled for this connection.")));
+            banner.replaceChildren(el("strong", report.sample ? "Sample vault · Read only" : `${report.agent} · Private vault${writesEnabled ? "" : " · Read only"}`), el("p", report.sample ? "Fictional people and projects for exploring the data model. No private agent vault is connected." : (writesEnabled ? "Create pages, attach source files, and edit with revision checks." : "Your agent’s knowledge. Writing is not enabled for this connection.")));
             if (writesEnabled && selectedId) void load();
             status.textContent = `${report.records} ${report.sample ? "sample " : ""}records${report.issues ? ` · ${report.issues} issues to review` : ""}` + (report.live === "unavailable" ? " · Live watcher unavailable; periodic refresh remains active." : "");
           } catch (error) { if (!disposed && n === statusGeneration) status.textContent = "Knowledge unavailable: " + context.host.redact(error instanceof Error ? error.message : String(error)); }

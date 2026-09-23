@@ -34,7 +34,7 @@ export class SqliteIdentityStore implements IdentityStore {
         const parent = openSync(path.dirname(this.filename), constants.O_RDONLY);
         try { fsyncSync(parent); } finally { closeSync(parent); }
       }
-      if (db.prepare("PRAGMA application_id").get()?.application_id !== APPLICATION_ID || ![1, 2, 3].includes(Number(db.prepare("PRAGMA user_version").get()?.user_version))) throw unavailable();
+      if (db.prepare("PRAGMA application_id").get()?.application_id !== APPLICATION_ID || ![1, 2, 3, 4].includes(Number(db.prepare("PRAGMA user_version").get()?.user_version))) throw unavailable();
       if (db.prepare("PRAGMA user_version").get()?.user_version === 1) db.exec(`BEGIN IMMEDIATE;
         CREATE TABLE IF NOT EXISTS mutations (
           scope TEXT NOT NULL, request TEXT NOT NULL, intent TEXT NOT NULL,
@@ -60,6 +60,17 @@ export class SqliteIdentityStore implements IdentityStore {
         CREATE TABLE git_files (scope TEXT NOT NULL, path TEXT NOT NULL, hash TEXT NOT NULL, PRIMARY KEY(scope,path)) STRICT;
         PRAGMA user_version=3;
         COMMIT;`);
+      if (db.prepare("PRAGMA user_version").get()?.user_version === 3) db.exec(`BEGIN IMMEDIATE;
+        CREATE TABLE attachment_uploads (
+          scope TEXT NOT NULL, request TEXT NOT NULL, metadata TEXT NOT NULL,
+          received INTEGER NOT NULL, receipt TEXT, PRIMARY KEY(scope,request)
+        ) STRICT;
+        CREATE TABLE attachment_chunks (
+          scope TEXT NOT NULL, request TEXT NOT NULL, offset INTEGER NOT NULL,
+          hash TEXT NOT NULL, size INTEGER NOT NULL, final INTEGER NOT NULL, data BLOB,
+          PRIMARY KEY(scope,request,offset)
+        ) STRICT;
+        PRAGMA user_version=4; COMMIT;`);
       return run(db);
     } finally { db.close(); }
   }

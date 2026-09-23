@@ -122,7 +122,7 @@ Scope metadata must match its partition. Missing/invalid/mismatched scope conten
 is withheld; it is never relabeled. Diagnostics describe problems without echoing
 malformed document values. File access uses the host's guarded root reader and
 bounded directory iterator with symlink and hardlink rejection. Limits remain
-500 entries, depth 8, 64 KiB per file, and 8 MiB per scan. Incomplete scans fail;
+500 catalog entries, depth 8, 64 KiB per record/ontology file, and 8 MiB per catalog scan. Original source files use streaming verification outside those text/scan-size limits; see [EVIDENCE.md](EVIDENCE.md). Incomplete scans fail;
 an unavailable vault is not reported as an empty successful result.
 
 ## Existing-solution review and decisions

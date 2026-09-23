@@ -15,7 +15,6 @@ ranked search never establishes that a vault inventory is complete.
 | `mode: "phrase"` | Word tokens in order and adjacent within one field |
 | `knowledge_lookup({query})` | Exact stable ID, full title or declared alias; `found`, `ambiguous`, or `missing` |
 | `kind`, `type`, `tag` | Structural kind, ontology type/alias expansion, exact case-sensitive tag |
-| `acceptance` | `accepted` (default), `candidate`, or `all` |
 | `lifecycle` | `active` (default), `superseded`, or `all` (active + superseded only) |
 | `limit`, `offset` | 1–50 results (default 20), offset 0–500; follow `nextOffset` with unchanged query/filters |
 
@@ -28,17 +27,16 @@ Exact lookup accepts up to 200 characters. IDs are case-sensitive; names/aliases
 use NFKC, lowercase, trimming and whitespace collapse (not fuzzy matching).
 Ambiguity is computed before pagination, not inferred from a single returned hit.
 
-Defaults follow the spec's accepted/active discovery policy. New editor pages are
-candidates: request `acceptance:"candidate"` or `"all"` to find them. Lifecycle and
-acceptance are separate. Invalid/duplicate IDs, withdrawn records and records
+Defaults include all active saved records. There is no approval or promotion step,
+and legacy candidate/accepted metadata does not restrict discovery. Invalid/duplicate IDs, withdrawn records and records
 with transitively unavailable structured dependencies/endpoints/entities are
 excluded in every retrieval mode. `knowledge_record` and Records remain explicit
-inspection surfaces for authoring/diagnostics, not accepted-knowledge retrieval.
+inspection surfaces for authoring/diagnostics, not ranked retrieval.
 Authored prose without declared dependencies cannot be automatically redacted.
 
 ## Results and citations
 
-Each hit carries a summary, visible acceptance/lifecycle, exact-match fields or
+Each hit carries a summary, visible lifecycle, exact-match fields or
 keyword-match fields, attribution/assertion origin, and stable ID, path,
 revision and SHA-256 of the observed original Markdown. The body/title/alias
 snippet is at most **480 UTF-16 characters**, with zero-based start/end offsets

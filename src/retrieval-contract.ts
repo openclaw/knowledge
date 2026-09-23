@@ -4,7 +4,6 @@ import { Summary } from "./inspection-contract.js";
 
 const filters = {
   kind: Type.Optional(Envelope.properties.kind), type: Type.Optional(text(64)), tag: Type.Optional(text(200)),
-  acceptance: Type.Optional(Type.Union([Type.Literal("accepted"), Type.Literal("candidate"), Type.Literal("all")])),
   lifecycle: Type.Optional(Type.Union([Type.Literal("active"), Type.Literal("superseded"), Type.Literal("all")])),
   offset: Type.Optional(Type.Integer({ minimum: 0, maximum: 500 })),
   limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50 })),
@@ -17,7 +16,7 @@ export const SearchInput = Type.Object({
   ...filters,
 }, { additionalProperties: false });
 export type SearchInput = Static<typeof SearchInput>;
-const locator = Type.Object({ path: text(500), sha256: text(64), start_line: Type.Integer(), end_line: Type.Integer() });
+const locator = Type.Object({ path: text(500), sha256: text(64), start_line: Type.Optional(Type.Integer()), end_line: Type.Optional(Type.Integer()) });
 const hit = Type.Object({
   record: Summary,
   citation: Type.Object({ id: text(96), path: text(500), revision: Type.Integer(), hash: text(64) }),

@@ -8,7 +8,6 @@ scope:
   visibility: sample
 recorded_at: 2026-09-22T12:00:00Z
 updated_at: 2026-09-22T12:00:00Z
-acceptance: accepted
 lifecycle: active
 claim_kind: decision
 assertion_origin: source

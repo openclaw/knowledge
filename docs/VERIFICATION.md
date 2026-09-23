@@ -1,3 +1,40 @@
+# File-backed evidence and immediate publication — 2026-09-23
+
+- Retained originals now use file-backed, hash-verified evidence with resumable,
+  idempotent chunk uploads and paginated source inspection. Removed the
+  48,000-character source and 20-reference storage caps; transport and previews
+  remain bounded. New pages are immediately searchable without an approval step.
+- `npm test`: **113 passed, 0 failed**. Includes the actual OpenClaw feature
+  adapter at the maximum upload/download chunk size, interruption/retry,
+  authorization/filesystem boundaries, binary preservation and source pagination.
+- `node test/browser/live-state.mjs`: **18 rendered checks passed**, including
+  23-file upload, source pagination, byte-exact browser download and retained
+  attachments across lost-save-response recovery and reload.
+- `npm run check`, `npm run build`, `npm run validate`, and `git diff --check`:
+  passed. Backend revision: `file-evidence-1`.
+- Live testing found that 64 KiB decoded chunks exceeded the host's JSON string
+  bound after base64 encoding. Upload and download chunks now use 48 KiB decoded;
+  the feature-adapter regression test exercises this host boundary.
+- Plugin hot reload failed with `Worker environment inventory has closed`.
+  A gateway restart activated the corrected build; live service start was
+  `2026-09-23T10:05:01.600Z`.
+- After restart, the actual native Knowledge editor uploaded a **119,056-byte**
+  synthetic binary, published its page and showed verified evidence. Downloaded
+  bytes matched the original exactly (SHA-256
+  `805410926e6289fa695ee1c820bd610ec1789818808dda7b33cac3bc6ef28857`).
+  The page and verified attachment survived a full browser reload.
+- Live download verification used the supported Blob fallback by disabling the
+  OS picker in the test page. The native save dialog is **not verified** in
+  headless Chromium. No backend or attachment responses were mocked.
+- Local live artifacts: `/tmp/knowledge-attachment-live-20260923/` contains the
+  result, verification script, screenshot and original/downloaded binary.
+  The private vault retains a clearly labeled synthetic verification page;
+  it is not real knowledge or an ingestion-completeness claim.
+- The next bundled-skill milestone is recorded in `KNOWLEDGE_SCOPE.md`; no skills
+  have been authored or installed by this change.
+
+---
+
 # Integrated retrieval and live-state reliability — 2026-09-23
 
 Merged keyword retrieval into `fix/live-state-reliability`, preserving draft recovery,

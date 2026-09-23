@@ -36,8 +36,7 @@ mode. Behavior flags describe vocabulary and do not enable unimplemented workflo
 
 ## Records: content once, extras on request
 
-`knowledge_record({id})` returns body text, identity, revision/hash, lifecycle and
-acceptance, attribution/assertion origin when present, validation issues and verified
+`knowledge_record({id})` returns body text, identity, revision/hash, lifecycle, attribution/assertion origin when present, validation issues and verified
 evidence. It does **not** return original Markdown a second time, full frontmatter,
 or connected-record lists by default.
 
@@ -49,6 +48,7 @@ or connected-record lists by default.
 - `includeReferences: true`: connected summaries, default 20/page, with
   `referenceTotal` and `nextReferenceOffset`. Continue with `referenceOffset`;
   `referenceLimit` accepts 1–100.
+- `evidenceOffset` / `evidenceLimit`: page through source references (default 20, max 100 **per response**, not per record), following `nextEvidenceOffset`; `evidenceTotal` reports the full count.
 - `includeEvidence`: override the view's default. `maxEvidenceChars` limits the
   **combined excerpt text** (default 4,000; range 0–20,000). Citation locators and
   verification remain present even if excerpts are shortened; each excerpt has
@@ -99,8 +99,8 @@ SQLite FTS5. Modes: `all` (default, every word), `any`, `phrase`; not regex/raw 
 `knowledge_lookup({query})` resolves exact IDs, full names and aliases, returning
 `found`, `ambiguous` or `missing`. Never infer identity from the first ambiguous hit.
 
-Both default to **accepted, active** valid records. New pages are candidates; use
-`acceptance:"candidate"` or `"all"` explicitly. `lifecycle:"superseded"` or `"all"`
+Both default to **active** valid records. Saved pages are immediately available;
+there is no approval status or acceptance filter. `lifecycle:"superseded"` or `"all"`
 includes historical records, never withdrawals. Both accept `kind`, `type` (ontology
 aliases supported), exact `tag`, `limit` (1–50, default 20), and `offset`.
 
@@ -132,3 +132,24 @@ Service stop closes watchers/timers and fences old and in-flight access. A retry
 uses the original request ID against the replacement service; accepted publication
 recovery and explicit conflict handling remain unchanged. Full backup/restore is
 not implemented by this lifecycle work.
+
+## File attachments
+
+Use `knowledge_attach` to retain original source bytes (text, PDF, image, audio,
+video or other files). Send sequential base64 chunks with a stable requestId,
+filename, mediaType, attribution, byte offset and final flag. Each decoded chunk
+is at most 48 KiB to fit the native transport; this is **not** a total file-size
+limit. Retry identical chunks with unchanged metadata after interruption.
+The complete receipt returns `evidence`; append it with `save_page.attachments`.
+There is no evidence-count cap. Pages can still be saved without any evidence.
+
+`knowledge_attachment({id,path,sha256,offset})` downloads originals referenced by
+an authorized record, one base64 chunk at a time. Follow nextOffset until null.
+Never mistake the bounded excerpt for the original. No tool accepts an arbitrary
+host filesystem path. Older source.text saves remain supported, without the old
+48,000-character schema cap; file upload is the normal authoring interface.
+
+The editor selects multiple files, retains completed uploads in draft recovery,
+and offers downloads from record detail. Browsers cannot restore an unuploaded
+File selection after reload: reselect those files. Completed originals remain in
+the vault even if the page draft is discarded. See [EVIDENCE.md](EVIDENCE.md).

@@ -43,7 +43,7 @@ In particular:
 | Native Control UI | Knowledge sidebar page: Records, Ontology, and Activity & issues; basic page editing, evidence/history inspection, and live state refresh | No external knowledge app required; no graph visualization, rich-text editor, or visual schema builder in the foundation |
 | Records and evidence | Pages, entities, attributed claims, inspectable sources, corrections, withdrawals, and mutation history | No prediction-calibration or automatic outcome-grading subsystem |
 | Relationships | Explicit typed relationships, Markdown-derived backlinks, direct neighbor lookup | No multi-hop answer engine, graph-assisted ranking, or inferred relationships |
-| Uncertain extraction | Preserve unresolved identities; distinguish candidate material from accepted records in tools and native record views | No specialized review queue or elaborate promotion-policy engine |
+| Uncertain extraction | Preserve unresolved identities and source attribution without a record-approval workflow | No specialized review queue or elaborate promotion-policy engine |
 | Retrieval | Exact ID/name/alias lookup, keyword search, filters, useful snippets, citations, and separate exhaustive listing | No required embedding provider, reranker, or query expansion |
 | Ingestion | Complete text/document and meeting-transcript workflows, duplicate checks, resumable progress, and honest partial outcomes | Use host capabilities for acquisition and extraction; no new connector or transcription stack |
 | Reliability | Revision checks, retry safety, interrupted-write recovery, backup/restore procedure | No distributed writers or sophisticated automatic merge system |
@@ -53,7 +53,7 @@ In particular:
 
 Claims must distinguish source statements, user beliefs, and agent inferences through attribution, a small claim-kind vocabulary, evidence references, and lifecycle status. Unknown information stays unknown.
 
-Candidate/accepted status is distinct from active/superseded/withdrawn status. Saving a candidate does not silently promote it into accepted knowledge. This does not require user approval for every write: ordinary authorized workflows can verify and accept records.
+Created records are immediately available. There is no candidate/accepted state, promotion, review queue, or approval step. Active/superseded/withdrawn lifecycle and source attribution remain independent of publication/index progress.
 
 Do not collapse extraction confidence, a speaker's confidence, evidential support, and current validity into one ambiguous score. V1 does not need numerical confidence fields for all of these.
 
@@ -121,16 +121,40 @@ Memory-wiki's compiled-page authority model, complete claim schema, search servi
 
 ### 5.2 Introspection is part of feature delivery
 
-Every capability includes an authorized view of its inputs, durable outputs, current state, and failures. Begin with Records, Ontology, and Activity & issues; extend these as ingestion, retrieval, correction, and recovery arrive. Show real service state, not optimistic completion inferred from agent prose. Distinguish acceptance/lifecycle from publication/index state.
+Every capability includes an authorized view of its inputs, durable outputs, current state, and failures. Begin with Records, Ontology, and Activity & issues; extend these as ingestion, retrieval, correction, and recovery arrive. Show real service state, not optimistic completion inferred from agent prose. Distinguish lifecycle from publication/index state; publication progress is not user approval.
 
 The page must identify the active agent/vault and distinguish loading, empty, disconnected, invalid, and unavailable states. Reconnect refreshes authoritative snapshots; live notifications are not durable history. Hot reload is a development requirement to exercise, including cleanup and state recovery, not permission to discard in-flight work.
 
 ## 6. Follow-ups
 
+### Next working milestone: bundled skills and real-content trials
+
+After file-evidence activation and verification, port the originally scoped
+workflows into repository-owned skills shipped with this plugin. Use semantic
+ports of gbrain procedures, Knowledge terminology, and the actual shared tool
+contracts—not command-name substitution or a second skill-management system.
+
+The original candidate bundle is knowledge-recall, knowledge-capture,
+knowledge-ingest, knowledge-meeting-ingest, knowledge-media-ingest,
+knowledge-entities, knowledge-correct, and knowledge-curate. Begin with shared
+source/identity/citation conventions and document/meeting ingestion, supported by
+recall, capture, and entity handling. Read upstream workflows in full, preserve
+license attribution, and explicitly map unsupported operations before authoring.
+Do not advertise claim/relationship mutation, correction, media extraction, or
+resumable multi-record ingestion until its required backend/host support exists.
+
+Exercise the shipped discovery/routing and capture-to-retrieval loop on a small
+representative document and meeting transcript: retain originals, resolve existing
+entities, distinguish statements from interpretation, verify citations by readback,
+and repeat/interrupt/resume without duplicate outputs or false completion. Include
+ambiguous speakers, corrections, and contradictory evidence as realistic cases.
+Use findings to prioritize backend gaps before bundling the remaining workflows.
+This is the next planned milestone, not a claim that these skills are implemented.
+
 ### Next: improve finding and using knowledge
 
 - Semantic retrieval, if representative cases show keyword search is insufficient.
-- Better entity resolution and candidate-review ergonomics.
+- Better entity resolution and ambiguity handling.
 - Bounded, opt-in proactive context pointers with repetition suppression.
 - Richer relationship queries and graph-assisted retrieval.
 - Better retrieval explanations and operational views.

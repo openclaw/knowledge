@@ -55,13 +55,15 @@
     "onStartup": true
   },
   "controlUi": {
-    "entry": "dist/control-ui/8fd289b73fc5425f19cdd2e1f8b4cec89ba723768c0de27e3802c640678ec3c4/index.js",
+    "entry": "dist/control-ui/fe43e699b8772cdd0e287cb4ab13a4af149e6b7f56bc1ab78ea3a253febe73e2/index.js",
     "styles": [
-      "dist/control-ui/8fd289b73fc5425f19cdd2e1f8b4cec89ba723768c0de27e3802c640678ec3c4/index.css"
+      "dist/control-ui/fe43e699b8772cdd0e287cb4ab13a4af149e6b7f56bc1ab78ea3a253febe73e2/index.css"
     ]
   },
   "contracts": {
     "tools": [
+      "knowledge_attach",
+      "knowledge_attachment",
       "knowledge_diagnostics",
       "knowledge_grep",
       "knowledge_history",
