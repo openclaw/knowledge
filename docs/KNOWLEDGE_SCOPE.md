@@ -127,7 +127,7 @@ The page must identify the active agent/vault and distinguish loading, empty, di
 
 ## 6. Follow-ups
 
-### Next working milestone: bundled skills and real-content trials
+### Current working milestone: bundled skills and real-content trials
 
 After file-evidence activation and verification, port the originally scoped
 workflows into repository-owned skills shipped with this plugin. Use semantic
@@ -149,7 +149,13 @@ entities, distinguish statements from interpretation, verify citations by readba
 and repeat/interrupt/resume without duplicate outputs or false completion. Include
 ambiguous speakers, corrections, and contradictory evidence as realistic cases.
 Use findings to prioritize backend gaps before bundling the remaining workflows.
-This is the next planned milestone, not a claim that these skills are implemented.
+The first five page-based workflows are now bundled: recall, capture, document
+ingestion, meeting ingestion, and entity handling. See [WORKFLOWS.md](WORKFLOWS.md)
+for the supported operation map and deliberate departures. Shared conventions,
+source retention and individual-publication recovery are exercised in isolated
+contract trials. Real-content agent trials remain next; structured claim and
+relationship writes, dedicated media/correction/curation skills, and multi-record
+ingestion jobs are not implemented by this bundle.
 
 ### Next: improve finding and using knowledge
 

@@ -4,11 +4,13 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "build": "tsc -p tsconfig.json && openclaw plugins build",
+    "build": "npm run skills:sync && tsc -p tsconfig.json && openclaw plugins build",
     "validate": "openclaw plugins validate --json",
     "pack": "openclaw plugins pack --json",
     "check": "tsc -p tsconfig.json --noEmit",
-    "test": "tsc -p tsconfig.json && node --test test/*.test.mjs"
+    "test": "tsc -p tsconfig.json && node --test test/*.test.mjs",
+    "skills:sync": "node scripts/sync-skill-references.mjs",
+    "prepack": "npm run skills:sync"
   },
   "files": [
     "dist",
@@ -23,7 +25,10 @@
     "docs/MODEL_API.md",
     "docs/LOCAL_HISTORY.md",
     "docs/RETRIEVAL.md",
-    "docs/EVIDENCE.md"
+    "docs/EVIDENCE.md",
+    "skills",
+    "docs/WORKFLOWS.md",
+    "scripts/sync-skill-references.mjs"
   ],
   "peerDependencies": {
     "openclaw": ">=2026.9.5"

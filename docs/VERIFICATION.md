@@ -1,3 +1,18 @@
+# Bundled workflow skills — 2026-09-23
+
+- Five repository-owned skills shipped through the plugin manifest and npm file list: recall, capture, document ingestion, meeting ingestion, and entity handling. Shared references are generated inside each skill directory so host per-skill materialization remains self-contained.
+- Upstream workflow/convention files were read in full and byte-compared to gbrain commit `7cdc3e30a898665a8c87b0c06937f6366f759f6c`. MIT attribution and explicit supported/unsupported operation mapping are in `THIRD_PARTY_NOTICES.md` and `WORKFLOWS.md`.
+- `npm run check`, `npm test` (**117 passed**), `npm run build`, `npm run validate`, five skill-creator validations, and `git diff --check` passed. The Python validator ran in an isolated temporary venv because the system Python lacked PyYAML; no project dependency was added.
+- New tests exercise the actual public feature adapter and storage in temporary vaults: source retention/download, exact citation locators, existing entity lookup, ambiguous names, conflicting document/transcript evidence, attributed prose correction, retained original/history, interrupted uploads, lost-save-response replay, service replacement, and retrieval/readback. These deterministic authored-output tests do not prove model routing or extraction judgment. No test content was written into the user's vault.
+- `npm pack` produced `openclaw-plugin-knowledge-0.1.0.tgz` with all five entrypoints, nine per-skill reference files, shared sources and attribution. Package tests check self-contained reference closure, schema-valid discovery metadata, actual tool names, reference freshness and payload inclusion.
+- The separate `openclaw plugins pack` artifact builder rejected the plugin's pre-existing module-relative runtime reads for the default ontology/sample vault. The regular npm package and linked-install route work; artifact activation packaging remains unsupported. No unrelated backend resource-loading change was made to bypass that restriction.
+- Inspected the running gateway and linked Knowledge install, then accepted the new skill surface and reloaded using the current gateway checkout's CLI. Receipt: `ok: true`, `restartRequired: false`, runtime generation 3. `skills list --agent main --json` lists all five skills as eligible and model-visible. This is discovery verification, not proof that this already-running turn has received refreshed skills.
+- All **14** skill entrypoint/reference files were fetched through live `plugins.skills.read`: complete inventories, ready text, and byte-identical content to the checkout. Installed plugin inspection reports the skill root accepted and no diagnostics.
+- An in-flight dynamic tool still referenced the retired instance (`live: stopped`); a fresh authenticated gateway session-action status verified the replacement instance, `live: watching`, two valid existing records, 38 definitions and zero findings. No vault configuration or content was changed by this task.
+- Next: user-provided real document/meeting trials and model-level workflow evaluation. Claim/relationship mutation, lifecycle correction/withdrawal, media extraction, and resumable multi-record jobs are not supplied by these skills.
+
+---
+
 # File-backed evidence and immediate publication — 2026-09-23
 
 - Retained originals now use file-backed, hash-verified evidence with resumable,

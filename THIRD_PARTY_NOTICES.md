@@ -4,6 +4,11 @@ Ontology taxonomy and composition semantics adapted from gbrain
 (https://github.com/garrytan/gbrain), commit 7cdc3e30a898665a8c87b0c06937f6366f759f6c:
 `src/core/schema-pack/base/gbrain-base-v2.yaml`, `merge.ts`, and `registry.ts`.
 
+Bundled workflow skills and shared conventions are also adapted from that commit:
+`skills/{query,capture,ingest,meeting-ingestion,resolve-before-asking,enrich,brain-link-discipline}/SKILL.md`,
+`skills/_brain-filing-rules.md`, and `skills/conventions/{quality,untrusted-content}.md`.
+See `docs/WORKFLOWS.md` for the operation map and deliberate departures.
+
 MIT License
 
 Copyright (c) 2026 Garry Tan

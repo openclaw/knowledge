@@ -15,11 +15,21 @@ Evidence-backed knowledge vault and native explorer for OpenClaw.
 | Browser drafts | One tab-local draft per authorized agent/vault/scope; survives navigation, page reload and plugin UI remount, retaining original edit preconditions and uncertain-save request |
 | Keyword retrieval and exact identity | Scoped SQLite FTS5, filters, bounded citations and native Search; [retrieval guide](docs/RETRIEVAL.md) |
 | Embeddings | Not implemented or required |
-| Document/meeting ingestion, claim correction/withdrawal workflows | Not implemented |
+| Document/meeting ingestion | Five bundled agent workflow skills over supported page/file tools; [workflow guide](docs/WORKFLOWS.md) |
+| Structured claim/relationship writes, correction/withdrawal jobs | Not implemented |
 | Live refresh | Private-vault filesystem invalidations, authorized snapshot refresh, reconnect and 30-second visible-page fallback; retired services are fenced |
 | Full backup/restore | Not implemented |
 
 See [setup and authority](docs/REAL_VAULT.md), [model-facing API](docs/MODEL_API.md), [ontology](docs/ONTOLOGY.md), and [record format](docs/FORMAT.md). Verification reports distinguish local checks from live activation; a build alone does not update the running backend.
+
+## Bundled skills
+
+`knowledge-recall`, `knowledge-capture`, `knowledge-ingest`,
+`knowledge-meeting-ingest`, and `knowledge-entities` ship with the plugin. They
+retain sources, resolve identities conservatively, and verify published pages.
+They are agent workflows, not an autonomous ingestion engine; host extraction
+and structured claim/relationship mutation have explicit limits. See the
+[upstream operation map and verification boundaries](docs/WORKFLOWS.md).
 
 ## Local file history
 
@@ -97,7 +107,7 @@ The page identifies sample versus real-vault mode and exposes the editor when wr
 
 Real-vault operations enforce the [authority and identity contract](docs/REAL_VAULT.md). A published receipt means files were published, not keyword-indexed (`indexed: false`). Exact reads and history support read-after-write. Precondition rejection does not save a server draft; accepted publication conflicts retain recovery material and block unsafe publication. No automatic conflict merge is provided.
 
-Page disposal cancels pending UI updates and releases subscriptions; reconnect requests fresh state. Draft recovery uses sessionStorage and does not promise recovery after closing the tab, clearing browser data or browser failure. A draft is not published knowledge. Ingestion, full backup/restore and the remaining v1 workflows are not claimed complete. Preserve the operational database and evidence alongside the vault; a Markdown-only copy is not a complete application backup.
+Page disposal cancels pending UI updates and releases subscriptions; reconnect requests fresh state. Draft recovery uses sessionStorage and does not promise recovery after closing the tab, clearing browser data or browser failure. A draft is not published knowledge. The bundled page-ingestion workflows do not complete the structured v1 ingestion contract; full backup/restore and the remaining v1 workflows are not claimed complete. Preserve the operational database and evidence alongside the vault; a Markdown-only copy is not a complete application backup.
 
 ### Source file attachments
 

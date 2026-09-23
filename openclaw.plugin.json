@@ -60,6 +60,9 @@
       "dist/control-ui/fe43e699b8772cdd0e287cb4ab13a4af149e6b7f56bc1ab78ea3a253febe73e2/index.css"
     ]
   },
+  "skills": [
+    "./skills"
+  ],
   "contracts": {
     "tools": [
       "knowledge_attach",
