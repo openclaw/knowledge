@@ -19,7 +19,7 @@ const api={runtime:{agent:{session:{getSessionEntry:()=>({sessionId:ownerSession
 const service=createKnowledgeService(api,{emit:(event,payload)=>{void page?.evaluate(({event,payload})=>window.emit?.(event,payload),{event,payload}).catch(()=>{});}});
 const context={source:'session-action',api,action:{client:{connId:'isolated-browser',scopes:['operator.write']}}};
 const agentContext={source:"tool",api,tool:{agentId:"main",sessionId:ownerSessionId,sessionKey:"agent:main:browser-lifecycle-test",senderIsOwner:true,assertInvocationCurrent(){}}};
-const browser=await chromium.launch({headless:true,executablePath:process.env.KNOWLEDGE_BROWSER_PATH??'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'});
+const browser=await chromium.launch({headless:true,args:['--disable-gpu'],executablePath:process.env.KNOWLEDGE_BROWSER_PATH??'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'});
 const entry=`import plugin from './src/control-ui.ts';
 const listeners=new Set(), events=new Map(); let mounted, controller;
 const host={pluginId:'knowledge',signal:new AbortController().signal,connection:{connected:true},redact:String,
@@ -146,7 +146,7 @@ try {
   await page.getByRole('button',{name:'Alex will deliver on Monday.',exact:true}).waitFor();
   assert.equal(await page.locator('.knowledge-page').count(),1);
   await page.screenshot({path:base+'/entity-dark-desktop.png',fullPage:true});
-  await page.setViewportSize({width:390,height:844}); await page.screenshot({path:base+'/entity-dark-mobile.png'});
+  await page.setViewportSize({width:390,height:844}); await page.waitForTimeout(150); await page.screenshot({path:base+'/entity-dark-mobile.png'});
   await page.getByRole('button',{name:'Recent',exact:true}).click();
   await page.locator('.knowledge-historical-notice').filter({hasText:'Current status: withdrawn'}).first().waitFor();
   assert.equal(await page.locator('.knowledge-feed').getByText('Readiness inference',{exact:true}).count(),0);
