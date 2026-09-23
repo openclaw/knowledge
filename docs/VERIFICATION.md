@@ -1,3 +1,43 @@
+# Agent-driven correction/withdrawal and UI redesign — 2026-09-23
+
+- Integrated the independent lifecycle and UI branches with
+  [the supporting API specification](UI_REDESIGN_SUPPORT.md).
+- Combined `npm test`: **150/150 passed**. `npm run check`, `npm run build`,
+  `npm run validate`, and `git diff --check` passed.
+- Lifecycle coverage includes exact revision/hash targets, replacement chains,
+  response-loss retries, two-record interruption boundaries, external conflicts,
+  durable lifecycle suppression, scope/authority checks, dependency impact,
+  repairing withheld pages, withdrawal with missing evidence, and preserved YAML.
+- The browser now inspects knowledge and hands requests to chat; it never calls
+  knowledge write operations. Legacy operator write transport remains compatible,
+  while the new lifecycle operations require agent-tool invocation.
+- [UI delivery boundaries](UI_REDESIGN_IMPLEMENTATION.md) distinguish the working
+  read-only redesign from future conversation provenance, attention, stable paging,
+  prefix suggestions, combined entity APIs, and host composer prefill. No prototype
+  sample identities/counts are used as production data.
+- All mutation tests use isolated synthetic vaults. Before activation, captured
+  hashes/revisions for all 10 existing live records; no new live fixtures added.
+- The rendered browser suite exercises corrected-claim replacement, withdrawal
+  removal, historical reason/replacement navigation, byte-exact source download,
+  read-only browser invocation, exact-reference chat handoff without sending,
+  paging limits, refresh/reconnect, and narrow layouts. Dark-mode screenshots use
+  the supplied design archive's tokens and locally embedded fonts; screenshots
+  were inspected. This is isolated real-service browser verification, not a
+  visual inspection of the user's live Control UI tab.
+- Hot reload succeeded without a gateway restart (runtime generation 6), accepting
+  the two new declared lifecycle tools. Fresh gateway status reports
+  `correction-withdrawal-1`, watcher active, and zero findings. UI asset reload
+  returned the new Knowledge entry/CSS with no diagnostics. All 10 existing
+  live record hashes remained unchanged. Historical inventory still contains
+  10 records; current discovery contains 9 because the pre-existing expired
+  synthetic assertion is now correctly excluded from listing/counts.
+- Live mutation behavior was not exercised against user content. The new
+  operations' successful mutation/recovery behavior is established by isolated
+  service tests and the rendered browser harness above.
+
+The sections below are historical milestone reports, not descriptions of the
+current editing UI or current API gaps.
+
 # Bundled workflow skills — 2026-09-23
 
 ## Structured-write foundation — 2026-09-23
