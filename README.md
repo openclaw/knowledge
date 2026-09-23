@@ -13,7 +13,8 @@ Evidence-backed knowledge vault and native explorer for OpenClaw.
 | Local Git history | Automatic in writable vaults when Git is installed; one commit per publication or observed external-change batch; visible retryable gaps |
 | Accepted-write interruption recovery and conflict retention | Implemented and exercised in isolated fault-injection/process tests; not a complete backup/restore protocol |
 | Browser drafts | One tab-local draft per authorized agent/vault/scope; survives navigation, page reload and plugin UI remount, retaining original edit preconditions and uncertain-save request |
-| Body keyword search / FTS, embeddings | Not implemented; listing filters ID/title/alias only |
+| Keyword retrieval and exact identity | Scoped SQLite FTS5, filters, bounded citations and native Search; [retrieval guide](docs/RETRIEVAL.md) |
+| Embeddings | Not implemented or required |
 | Document/meeting ingestion, claim correction/withdrawal workflows | Not implemented |
 | Live refresh | Private-vault filesystem invalidations, authorized snapshot refresh, reconnect and 30-second visible-page fallback; retired services are fenced |
 | Full backup/restore | Not implemented |
@@ -63,7 +64,7 @@ Use the CLI belonging to the actual running gateway. Inspect existing configurat
 openclaw plugins install --link --force --accept-capabilities /path/to/knowledge
 ```
 
-These flags acknowledge the local source and the reviewed plugin's capabilities. The checkout stays linked, so rebuilds update the installation. Open **Knowledge** in the sidebar. The shared tools are available after a tool-catalog refresh: `knowledge_status`, `knowledge_records`, `knowledge_record`, `knowledge_ontology`, `knowledge_diagnostics`, `knowledge_save_page`, `knowledge_history`, `knowledge_revision`, `knowledge_mutation`, and `knowledge_resume`. These expose only the caller’s authorized scope, or labeled sample data when no real vault is configured.
+These flags acknowledge the local source and the reviewed plugin's capabilities. The checkout stays linked, so rebuilds update the installation. Open **Knowledge** in the sidebar. The shared tools are available after a tool-catalog refresh: `knowledge_status`, `knowledge_records`, `knowledge_record`, `knowledge_ontology`, `knowledge_diagnostics`, `knowledge_save_page`, `knowledge_history`, `knowledge_revision`, `knowledge_mutation`, and `knowledge_resume`, `knowledge_grep`, and `knowledge_lookup`. These expose only the caller’s authorized scope, or labeled sample data when no real vault is configured.
 
 ## Live reload
 
@@ -96,4 +97,4 @@ The page identifies sample versus real-vault mode and exposes the editor when wr
 
 Real-vault operations enforce the [authority and identity contract](docs/REAL_VAULT.md). A published receipt means files were published, not keyword-indexed (`indexed: false`). Exact reads and history support read-after-write. Precondition rejection does not save a server draft; accepted publication conflicts retain recovery material and block unsafe publication. No automatic conflict merge is provided.
 
-Page disposal cancels pending UI updates and releases subscriptions; reconnect requests fresh state. Draft recovery uses sessionStorage and does not promise recovery after closing the tab, clearing browser data or browser failure. A draft is not published knowledge. Ingestion, ranked retrieval, full backup/restore and the remaining v1 workflows are not claimed complete. Preserve the operational database and evidence alongside the vault; a Markdown-only copy is not a complete application backup.
+Page disposal cancels pending UI updates and releases subscriptions; reconnect requests fresh state. Draft recovery uses sessionStorage and does not promise recovery after closing the tab, clearing browser data or browser failure. A draft is not published knowledge. Ingestion, full backup/restore and the remaining v1 workflows are not claimed complete. Preserve the operational database and evidence alongside the vault; a Markdown-only copy is not a complete application backup.

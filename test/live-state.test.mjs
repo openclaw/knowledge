@@ -63,6 +63,7 @@ test('retired services fence new and in-flight operations, leaving no accepted w
   assert.equal((await f.service.mutation({requestId:request.requestId},f.context)).receipt,null);
   f.services[0].stop(); await assert.rejects(f.service.status({},f.context),/reloaded/);
   await assert.rejects(f.service.save_page(request,f.context),/reloaded/);
+  for (const operation of ['grep','lookup']) await assert.rejects(f.service[operation]({query:'Fenced'},f.context),/reloaded/);
 });
 
 test('draft recovery isolates vault/agent/scope and preserves exact uncertain-save payload and base',()=>{
@@ -88,4 +89,12 @@ test('browser vault precondition cannot redirect a retained draft to a replaceme
   await assert.rejects(f.service.save_page(request,f.context),/different vault/);
   assert.equal((await f.service.mutation({requestId:request.requestId},f.context)).receipt,null);
   assert.equal((await f.service.records({},f.context)).total,0);
+});
+
+
+test('sample retrieval also respects retired service lifecycle',async()=>{
+  const services=[];
+  const service=createKnowledgeService({pluginConfig:{},registerService:s=>services.push(s)});
+  services[0].start(); services[0].stop();
+  for (const operation of ['grep','lookup']) await assert.rejects(service[operation]({query:'fictional'},{}),/reloaded/);
 });

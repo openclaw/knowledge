@@ -55,15 +55,17 @@
     "onStartup": true
   },
   "controlUi": {
-    "entry": "dist/control-ui/50571e6afebadc54f29de4b11292339968c97401615b1cc1ffeff8232d3578f3/index.js",
+    "entry": "dist/control-ui/8fd289b73fc5425f19cdd2e1f8b4cec89ba723768c0de27e3802c640678ec3c4/index.js",
     "styles": [
-      "dist/control-ui/50571e6afebadc54f29de4b11292339968c97401615b1cc1ffeff8232d3578f3/index.css"
+      "dist/control-ui/8fd289b73fc5425f19cdd2e1f8b4cec89ba723768c0de27e3802c640678ec3c4/index.css"
     ]
   },
   "contracts": {
     "tools": [
       "knowledge_diagnostics",
+      "knowledge_grep",
       "knowledge_history",
+      "knowledge_lookup",
       "knowledge_mutation",
       "knowledge_ontology",
       "knowledge_record",

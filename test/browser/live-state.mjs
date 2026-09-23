@@ -34,6 +34,7 @@ const bundle=await build({stdin:{contents:entry,resolveDir:process.cwd()},bundle
 const html='<html><head><style>:root{--bg:#fff;--text:#18221b;--muted:#66736b;--border:#c7d2cc;--card:#f5f8f6;--accent:#247044;--danger:#a32d26;--font-body:system-ui;--accent-subtle:#e3f1e8}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui}'+await fs.readFile('src/control-ui.css','utf8')+'</style></head><body><main></main><script>'+bundle.outputFiles[0].text+'</script></body></html>';
 try {
   page=await browser.newPage({viewport:{width:1280,height:1000}});
+  page.setDefaultTimeout(10000);
   await page.clock.install();
   page.on('pageerror',e=>errors.push(e.message));
   await page.route('https://knowledge.test/**',route=>route.fulfill({contentType:'text/html',body:html}));
@@ -73,8 +74,25 @@ try {
   const id=list.records[0].id;
   const record=(await service.record({id,view:'raw'},context)).record;
   const file=base+'/vault/private/'+record.path;
+  await page.locator('.knowledge-tabs').getByRole('button',{name:'Search',exact:true}).click();
+  await page.getByRole('searchbox',{name:'Knowledge search query'}).fill('recovery');
+  await page.locator('.knowledge-search-form').getByRole('button',{name:'Search',exact:true}).click();
+  await page.getByText('No eligible matches.',{exact:false}).waitFor();
+  await page.getByLabel('Acceptance',{exact:true}).selectOption('candidate');
+  await page.locator('.knowledge-search-form').getByRole('button',{name:'Search',exact:true}).click();
+  await page.locator('.knowledge-search-hit').getByRole('button',{name:'Recovery fixture',exact:true}).waitFor();
+  await page.getByRole('searchbox',{name:'Knowledge search query'}).focus();
+  await page.evaluate(()=>window.emit('changed',{}));
+  await page.locator('.knowledge-status').getByText('1 records',{exact:true}).waitFor();
+  assert.equal(await page.getByRole('searchbox',{name:'Knowledge search query'}).evaluate(el=>document.activeElement===el),true);
+  await page.locator('.knowledge-search-hit').getByRole('button',{name:'Recovery fixture',exact:true}).click();
+  await page.locator('.knowledge-detail .knowledge-body').filter({hasText:'Unsaved draft text'}).waitFor();
   await fs.writeFile(file,record.raw.replace('Unsaved draft text','Externally updated body'));
-  await page.locator('.knowledge-body').filter({hasText:'Externally updated body'}).waitFor();
+  await page.locator('.knowledge-detail .knowledge-body').filter({hasText:'Externally updated body'}).waitFor();
+  assert.equal(await page.getByRole('searchbox',{name:'Knowledge search query'}).inputValue(),'recovery');
+  assert.equal(await page.getByLabel('Acceptance',{exact:true}).inputValue(),'candidate');
+  await page.locator('.knowledge-tabs').getByRole('button',{name:'Records',exact:true}).click();
+  await page.locator('.knowledge-record').click();
   await page.getByRole('button',{name:'Edit page',exact:true}).click();
   await page.getByLabel('Markdown',{exact:true}).fill('Conflicting local draft');
   await fs.writeFile(file,record.raw.replace('Unsaved draft text','Newer external version'));
@@ -102,5 +120,8 @@ try {
   await page.clock.runFor(30001);
   await page.locator('.knowledge-content').getByText('No matching records.',{exact:true}).waitFor();
   assert.deepEqual(errors,[]);
-  console.log(JSON.stringify({passed:['remount draft','browser reload draft','notification preserves draft','lost-response exact retry across reload','external edit auto refresh','conflict preserves both versions','reconnect snapshot','subscription cleanup','missed-delete periodic fallback','mobile overflow','no page errors'],artifacts:base},null,2));
+  console.log(JSON.stringify({passed:['search excludes candidates by default','explicit candidate search opens detail','live search refresh preserves selection and filters','background refresh preserves search focus','remount draft','browser reload draft','notification preserves draft','lost-response exact retry across reload','external edit auto refresh','conflict preserves both versions','reconnect snapshot','subscription cleanup','missed-delete periodic fallback','mobile overflow','no page errors'],artifacts:base},null,2));
+} catch (error) {
+  console.error(JSON.stringify({errors, page:await page?.locator('main').innerText()},null,2));
+  throw error;
 } finally {services.forEach(s=>s.stop());await browser.close();}

@@ -1,3 +1,5 @@
+import { DatabaseSync } from "node:sqlite";
+import { keywordSearch, exactLookup } from "./retrieval.js";
 import { randomUUID } from "node:crypto";
 import type { FeatureHandlers, FeatureEventEmitter, FeatureInvocationContext } from "openclaw/plugin-sdk/feature-plugin";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
@@ -39,7 +41,7 @@ export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureE
   };
   return {
     save_page: async (input, context) => { const access = authority(context, true); try { return await storage!.save(input, access, context.source === "tool" ? "agent" : "operator"); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); } },
-    resume: async (input, context) => { const access = authority(context, true); try { return storage!.resume(access, input.requestId); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); } },
+    resume: async (input, context) => { const access = authority(context, true); try { return await storage!.resume(access, input.requestId); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); } },
     revision: async (input, context) => { const access = authority(context); return storage!.revision(access, input.sequence); },
     mutation: async (input, context) => { const access = authority(context); return storage!.mutation(access, input.requestId); },
     history: async (input, context) => {
@@ -52,13 +54,21 @@ export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureE
       if (scope === "agent-private") live?.ensureWatching();
       const data = await vault.scan();
       return {
-        service: "knowledge", phase: config?.writesEnabled ? "page-editor" : "read-only-explorer", backendRevision: "live-state-1", instanceId, startedAt,
+        service: "knowledge", phase: config?.writesEnabled ? "page-editor" : "read-only-explorer", backendRevision: "keyword-live-state-1", instanceId, startedAt,
         checkedAt: data.checkedAt, vault: config?.vaultId ?? "bundled-sample", agent: config?.agentId ?? "none — synthetic sample", scope, sample: !config, writesEnabled: Boolean(config?.writesEnabled && (() => { try { authority(context, true); return true; } catch { return false; } })()),
         live: scope === "agent-private" ? live?.state ?? "stopped" : "stopped",
         records: data.records.length, validRecords: data.records.filter(r => r.valid).length,
         definitions: data.ontology?.definitions.length ?? 0, ontologyAvailable: Boolean(data.ontology), ontologyFingerprint: data.ontology?.fingerprint ?? "", issues: data.issues.length,
       } as const;
     }),
+    grep: async (input, context) => {
+      if (storage) return storage.search(input, authority(context));
+      return run(context, async vault => {
+        const data = await vault.scan(), db = new DatabaseSync(":memory:");
+        try { return keywordSearch(db, data, input, "sample", "sample"); } finally { db.close(); }
+      });
+    },
+    lookup: async (input, context) => storage ? storage.lookup(input, authority(context)) : run(context, async vault => exactLookup(await vault.scan(), input)),
     records: (input, context) => run(context, vault => vault.list(input)),
     record: (input, context) => run(context, vault => inspectRecord(vault, input)),
     ontology: (input, context) => run(context, vault => inspectOntology(vault, input)),

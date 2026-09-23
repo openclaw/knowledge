@@ -1,3 +1,5 @@
+import { keywordSearch, exactLookup, observeWithdrawals, withdrawnIds } from "./retrieval.js";
+import type { SearchInput, LookupInput } from "./retrieval-contract.js";
 import { GitHistory, GitUnavailable, type GitBatch, type GitChange } from "./git-history.js";
 import type { SampleVault } from "./vault.js";
 import { randomUUID } from "node:crypto";
@@ -30,6 +32,21 @@ export class KnowledgeStorage {
     access.assertCurrent();
     this.assertReadable();
     return this.real.run(access, operation);
+  }
+  private retrievalBinding(access: VaultAccess) { return `${this.config.vaultId}:${scopeKey(access.scope)}`; }
+  async search(input: SearchInput, access: VaultAccess) {
+    return this.run(access, async vault => {
+      const data = await vault.scan();
+      access.assertCurrent();
+      return this.store.withDatabase(db => keywordSearch(db, data, input, this.retrievalBinding(access), this.config.vaultId, withdrawnIds(db, this.retrievalBinding(access))));
+    });
+  }
+  async lookup(input: LookupInput, access: VaultAccess) {
+    return this.run(access, async vault => {
+      const data = await vault.scan();
+      access.assertCurrent();
+      return this.store.withDatabase(db => exactLookup(data, input, withdrawnIds(db, this.retrievalBinding(access))));
+    });
   }
   async initialize(access: VaultAccess) {
     access.assertCurrent();
@@ -161,7 +178,7 @@ export class KnowledgeStorage {
         for (const change of plan.changes) if (files.read(change.path) !== change.after || (change.before !== null && files.read(change.backup) !== change.before)) throw Error("conflict");
         access.assertCurrent();
         db.prepare("UPDATE identities SET manifest=? WHERE agent_key=?").run(JSON.stringify(plan.after), `agent:${this.config.agentId}`);
-        receipt.state = "published"; receipt.message = "Published and available to exact reads; keyword indexing is not implemented.";
+        receipt.state = "published"; receipt.message = "Published and available to exact reads; keyword indexing is pending until the next search reconciles this scope.";
         this.recordObservation(db, plan.scope, plan.record, plan.actor);
         this.enqueueGit(db, plan.scope, plan.changes.filter(c => c.path !== "vault.json").map(c => ({ path: c.path, raw: c.after })), plan.actor, this.publicationToken(plan.scope, requestId));
         receipt.git = { state: "pending", message: "Published; local Git checkpoint pending." };
@@ -270,6 +287,7 @@ export class KnowledgeStorage {
       this.identity(db, new PublicationFiles(this.config.root));
       if (db.prepare("SELECT 1 FROM mutations WHERE state!='published' LIMIT 1").get()) throw blocked();
       const key = scopeKey(scope);
+      observeWithdrawals(db, records, this.retrievalBinding(access));
       if (this.config.writesEnabled) {
         const files = new PublicationFiles(this.config.root);
         const snapshot = files.snapshot(key, true);

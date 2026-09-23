@@ -5,6 +5,7 @@ import "./control-ui.css";
 import { DraftStore } from "./drafts.js";
 import { pageEditor } from "./page-editor.js";
 import { loadVocabulary } from "./inspection-client.js";
+import { initialSearchState, searchToolbar, loadSearch, searchResults } from "./retrieval-view.js";
 import { ontologyView } from "./ontology-view.js";
 
 type Summary = FeatureOutput<typeof contract, "records">["records"][number];
@@ -35,7 +36,8 @@ export default defineControlUiPlugin({
         const toolbar = el("div", undefined, "knowledge-toolbar"), content = el("div", undefined, "knowledge-content");
         const draftStatus = el("p", "", "knowledge-error"); draftStatus.setAttribute("role", "alert");
         section.append(header, banner, status, nav, toolbar, draftStatus, content); container.append(section);
-        let tab: "records" | "ontology" | "diagnostics" = "records", offset = 0, query = "", kind = "", type = "", selectedId = "";
+        const searchState = initialSearchState();
+        let tab: "records" | "search" | "ontology" | "diagnostics" = "records", offset = 0, query = "", kind = "", type = "", selectedId = "";
         let writesEnabled = false;
         const editorLifetime = new AbortController();
         let vaultChanged = false;
@@ -52,7 +54,7 @@ export default defineControlUiPlugin({
         const alive = (n: number) => !disposed && !context.signal.aborted && n === generation && context.host.connection.connected;
         const showError = (error: unknown) => { content.replaceChildren(el("p", "Knowledge unavailable: " + context.host.redact(error instanceof Error ? error.message : String(error)), "knowledge-error")); };
         const tabs = new Map<string, HTMLButtonElement>();
-        for (const [key, label] of [["records", "Records"], ["ontology", "Ontology"], ["diagnostics", "Activity & issues"]] as const) {
+        for (const [key, label] of [["records", "Records"], ["search", "Search"], ["ontology", "Ontology"], ["diagnostics", "Activity & issues"]] as const) {
           const control = button(label, () => { tab = key; selectedId = ""; clearTimeout(debounce); renderToolbar(); void load(); }); tabs.set(key, control); nav.append(control);
         }
         function renderToolbar() {
@@ -70,7 +72,8 @@ export default defineControlUiPlugin({
             if (writesEnabled) { const create = button("New page", () => editPage()); create.disabled = !draftStore; toolbar.append(create); }
             toolbar.append(button("Refresh", () => void refresh()));
           }
-          toolbar.hidden = tab !== "records";
+          if (tab === "search") toolbar.append(searchToolbar(searchState, () => void load(), () => { ++generation; ++detailGeneration; selectedId = ""; content.replaceChildren(el("p", "Search changed. Press Search to update results.")); }));
+          toolbar.hidden = tab !== "records" && tab !== "search";
         }
         async function showDetail(id: string, target: HTMLElement, n: number) {
           const detail = ++detailGeneration; selectedId = id; target.replaceChildren(el("p", "Loading record…"));
@@ -148,6 +151,21 @@ export default defineControlUiPlugin({
               if (result.nextOffset !== null) pages.append(button("Next", () => { offset = result.nextOffset!; void load(); }));
               content.append(pages);
               if (selectedId) void showDetail(selectedId, detail, n);
+            } else if (tab === "search") {
+              if (!searchState.query.trim()) { content.replaceChildren(el("p", "Search accepted, active knowledge by keywords, or resolve an exact identity. Use Records for exhaustive browsing, including records needing attention.")); return; }
+              const result = await loadSearch(feature, { ...searchState });
+              if (!alive(n)) return;
+              if ("index" in result && result.index.state === "ready") {
+                if (searchState.offset && searchState.snapshot && searchState.snapshot !== result.index.snapshot) {
+                  searchState.offset = 0; searchState.snapshot = undefined;
+                  content.replaceChildren(el("p", "Knowledge changed between result pages. Run Search again to restart from the current snapshot.")); return;
+                }
+                searchState.snapshot = result.index.snapshot;
+              }
+              const results = searchResults(result, searchState, (id, target) => void showDetail(id, target, n), () => void load());
+              content.replaceChildren(results);
+              const detail = results.querySelector<HTMLElement>(".knowledge-detail");
+              if (detail && selectedId && result.hits.some(hit => hit.record.id === selectedId)) void showDetail(selectedId, detail, n);
             } else if (tab === "ontology") {
               const result = await loadVocabulary(feature, true); if (!alive(n)) return;
               content.replaceChildren(ontologyView(result, id => {
@@ -198,6 +216,7 @@ export default defineControlUiPlugin({
           try {
             const report = await feature.invoke("status", {});
             if (disposed || context.signal.aborted || n !== statusGeneration || !context.host.connection.connected) return;
+            const toolbarChanged = !draftIdentity || writesEnabled !== report.writesEnabled;
             writesEnabled = report.writesEnabled;
             const identity = JSON.stringify([report.agent, report.vault, report.scope]);
             if (draftIdentity && identity !== draftIdentity) {
@@ -211,7 +230,7 @@ export default defineControlUiPlugin({
               try { draftStore = new DraftStore(report, window.sessionStorage); if (writesEnabled && draftStore.read()) editPage(); }
               catch { draftStatus.textContent = "Browser draft recovery unavailable. Copy any draft before leaving."; }
             }
-            renderToolbar();
+            if (toolbarChanged) renderToolbar();
             banner.replaceChildren(el("strong", report.sample ? "Sample vault · Read only" : `${report.agent} · Private vault${writesEnabled ? "" : " · Read only"}`), el("p", report.sample ? "Fictional people and projects for exploring the data model. No private agent vault is connected." : (writesEnabled ? "Create pages, retain source text, and edit with revision checks." : "Your agent’s knowledge. Writing is not enabled for this connection.")));
             if (writesEnabled && selectedId) void load();
             status.textContent = `${report.records} ${report.sample ? "sample " : ""}records${report.issues ? ` · ${report.issues} issues to review` : ""}` + (report.live === "unavailable" ? " · Live watcher unavailable; periodic refresh remains active." : "");
