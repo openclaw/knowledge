@@ -32,7 +32,9 @@ export default defineControlUiPlugin({
       const vocabularyButton = button("", () => navigate("ontology"), "knowledge-icon-button"); vocabularyButton.setAttribute("aria-label", "Vocabulary"); vocabularyButton.title = "Ontology & vault settings"; vocabularyButton.append(icon("book"));
       actions.append(status, vocabularyButton);
       const nav = el("nav", undefined, "knowledge-tabs"); nav.setAttribute("aria-label", "Knowledge views");
-      const recentTab = button("Recent", () => navigate("recent")), browseTab = button("Browse", () => navigate("browse")); nav.append(recentTab, browseTab);
+      // These are text navigation tabs, not host .btn controls. Theme-specific
+      // .btn rules otherwise reintroduce filled backgrounds in light mode.
+      const recentTab = button("Recent", () => navigate("recent"), "knowledge-tab"), browseTab = button("Browse", () => navigate("browse"), "knowledge-tab"); nav.append(recentTab, browseTab);
       const banner = el("p", "", "knowledge-notice"), toolbar = el("div", undefined, "knowledge-toolbar"), content = el("div", undefined, "knowledge-content");
       header.append(title, nav, actions);
       const body = el("div", undefined, "knowledge-page-body"); body.append(banner, toolbar, content);

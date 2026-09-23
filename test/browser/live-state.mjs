@@ -180,6 +180,20 @@ try {
   assert.equal(await page.locator('.knowledge-feed').getByText('Release commitment',{exact:true}).count(),0);
   await page.setViewportSize({width:1182,height:900}); await page.clock.runFor(200); await page.screenshot({animations:"disabled",path:base+'/recent-dark-desktop.png',fullPage:true});
   const searchGap=await page.evaluate(()=>document.querySelector('.knowledge-feed').getBoundingClientRect().top-document.querySelector('.knowledge-search input').getBoundingClientRect().bottom); assert.equal(searchGap,28,'Host form margins must not change reference section spacing');
+  // Test the real host's light-mode cascade, not just alternate color tokens.
+  for (const mode of ['light','dark']) {
+    await page.evaluate(mode=>{document.documentElement.dataset.theme=mode;document.documentElement.dataset.themeMode=mode;},mode);
+    for (const name of ['Browse','Recent']) {
+      const tab=page.locator('.knowledge-tabs').getByRole('button',{name,exact:true});
+      await tab.hover(); await tab.click();
+      await page.locator(name==='Browse'?'.knowledge-table':'.knowledge-feed').waitFor();
+      await page.clock.runFor(200);
+      const styles=await page.locator('.knowledge-tabs button').evaluateAll(nodes=>nodes.map(n=>{const s=getComputedStyle(n);return {background:s.backgroundColor,border:s.borderTopWidth,shadow:s.boxShadow};}));
+      for(const style of styles) { assert.equal(style.background,'rgba(0, 0, 0, 0)',`${mode} tabs remain unfilled, including hover/selection`); assert.equal(style.border,'0px'); assert.equal(style.shadow,'none'); }
+    }
+    await page.mouse.move(0,0); await page.clock.runFor(200);
+    await page.locator('.knowledge-header').screenshot({animations:'disabled',path:base+`/tabs-${mode}.png`});
+  }
   await page.locator('.knowledge-historical-notice').filter({hasText:'Current status: withdrawn'}).first().getByRole('button',{name:'Inspect historical record'}).click();
   await page.getByText('The readiness inference was withdrawn in chat.',{exact:true}).waitFor();
   await page.getByText(/withdrawn — historical knowledge/).waitFor();
@@ -189,7 +203,7 @@ try {
   await page.locator('.knowledge-feed').waitFor();
   assert.deepEqual(await page.evaluate(()=>window.subscriptions()),{events:1,connections:1});
   assert.deepEqual(errors,[]);
-  console.log(JSON.stringify({passed:['reference layout measurements and type icons','search keyboard shortcut','read-only browser contract','agent correction live refresh and historical linkage','withdrawal removes active claims and redacts historical feed titles','search offset cap','design-token dark screenshots','recent default and observed history','ontology-derived browse','native commitment/event/inference cards','attribution and retained inference premise evidence','byte-exact evidence download','revision/hash chat request and no autosend','handoff preserved across periodic refresh','exact name suggestions','ranked search','disconnect and reconnect','subscription cleanup','mobile overflow','no page errors'],artifacts:base},null,2));
+  console.log(JSON.stringify({passed:['light/dark text-tab styling under the production host cascade','reference layout measurements and type icons','search keyboard shortcut','read-only browser contract','agent correction live refresh and historical linkage','withdrawal removes active claims and redacts historical feed titles','search offset cap','design-token dark screenshots','recent default and observed history','ontology-derived browse','native commitment/event/inference cards','attribution and retained inference premise evidence','byte-exact evidence download','revision/hash chat request and no autosend','handoff preserved across periodic refresh','exact name suggestions','ranked search','disconnect and reconnect','subscription cleanup','mobile overflow','no page errors'],artifacts:base},null,2));
 } catch (error) {
   console.error(JSON.stringify({errors,page:await page?.locator('main').innerText()},null,2));throw error;
 } finally {services.forEach(s=>s.stop());await browser.close();}
