@@ -112,6 +112,7 @@ try {
   await page.locator('.knowledge-record').click();
   await page.getByRole('button',{name:'Edit page',exact:true}).click();
   await page.getByLabel('Markdown',{exact:true}).fill('Conflicting local draft');
+  await page.waitForFunction(()=>!document.querySelector('dialog button[type=submit]').disabled);
   await fs.writeFile(file,record.raw.replace('Unsaved draft text','Newer external version'));
   await page.locator('.knowledge-body').filter({hasText:'Newer external version'}).waitFor();
   assert.equal(await page.getByLabel('Markdown',{exact:true}).inputValue(),'Conflicting local draft');

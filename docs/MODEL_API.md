@@ -153,3 +153,70 @@ The editor selects multiple files, retains completed uploads in draft recovery,
 and offers downloads from record detail. Browsers cannot restore an unuploaded
 File selection after reload: reselect those files. Completed originals remain in
 the vault even if the page draft is discarded. See [EVIDENCE.md](EVIDENCE.md).
+
+## Structured authoring
+
+1. Read `knowledge_status` and `knowledge_ontology`; retain the vault ID and
+   effective ontology `fingerprint`. Resolve existing pages with lookup/records.
+2. Retain source bytes using `knowledge_attach`, or reuse evidence from an
+   authorized source record. Add only locators/quotes verified against that source.
+3. Publish through the operations below; use fresh UUIDs for genuinely new writes
+   and exact request/payload replay for uncertain outcomes. Publication is not
+   semantic truth, extraction completeness, deduplication or task execution.
+
+`knowledge_create_claim` example (replace symbolic UUIDs/fingerprint/evidence):
+
+```json
+{
+  "requestId": "<new UUID>",
+  "expectedVaultId": "<observed vault UUID>",
+  "expectedOntologyFingerprint": "<ontology fingerprint>",
+  "title": "Release commitment",
+  "body": "Alex committed to delivering the release on Friday.",
+  "claim_kind": "commitment",
+  "assertion_origin": "source",
+  "attribution": "Alex, meeting transcript line 12",
+  "entities": ["<project page ID>"],
+  "dependencies": ["<meeting page ID>"],
+  "owner": "<resolved person page ID>",
+  "due_at": "2026-09-25",
+  "evidence": [{"path": "<retained artifact path>", "sha256": "<observed hash>", "start_line": 12, "end_line": 12}]
+}
+```
+
+Kinds: fact/preference/decision/commitment/event/belief. Origins:
+source/user_belief/agent_inference. Omit unknown owners/dates. For a timeline event,
+use an event claim with `occurred_at` and relevant entity IDs. There is no dedicated
+chronological timeline query yet; inspect connected claims and their dates.
+
+`knowledge_create_relationship` uses the same request/vault/ontology controls,
+title/body/attribution/evidence/dependencies and optional validity/expiry, plus
+`from`, `to`, ontology `label`, and optional ontology `fields`. It does not accept
+claim kind/origin, occurrence or commitment fields. Inspect endpoint constraints
+before publication; backend enforces them. Same endpoint pair may carry multiple
+independently evidenced assertions. No implicit supersession or overwrite.
+
+`knowledge_save_page` additionally accepts aliases/tags/dependencies and optional
+`expectedOntologyFingerprint`. Omission preserves metadata; supplied collections
+replace (empty clears). Existing ID/revision/hash edit preconditions still apply.
+
+All three operations share accepted/published/conflict receipts, request replay,
+resume/history/Git behavior, service-generation fencing and live refresh. Changed
+payload or operation under an existing request ID fails. Creates generate their
+own ID/path. Structured assertions cannot be edited/withdrawn through these APIs;
+that is the next lifecycle milestone.
+
+`knowledge_record({id, includeMetadata:true})` returns all portable assertion
+fields as a typed object. `knowledge_connections({id})` returns paginated incoming
+and outgoing explicit relationships, reverse dependencies, and entity/owner claims.
+Filter `direction` with incoming/outgoing/dependents/claims, use `limit` (1–100,
+default 20), follow `nextOffset`, and compare `snapshot` between pages. Access and
+active temporal/lifecycle filtering happen before counts. Historical queries opt
+in with `historical:true`; withdrawn records remain excluded. Evidence is limited
+to three references per connection; `evidenceTruncated` signals further evidence
+available from record inspection. Markdown links are not relationship assertions.
+
+Native UI offers New claim/New relationship alongside New page. Advanced source
+controls accept file uploads or existing evidence with exact locators. Drafts
+retain operation kind, all form values and exact submitted payload/preconditions;
+failed authoring-option loads can be explicitly retried without losing a draft.

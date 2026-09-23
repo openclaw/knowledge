@@ -127,7 +127,7 @@ The page must identify the active agent/vault and distinguish loading, empty, di
 
 ## 6. Follow-ups
 
-### Current working milestone: bundled skills and real-content trials
+### Bundled skills baseline and next backend milestone
 
 After file-evidence activation and verification, port the originally scoped
 workflows into repository-owned skills shipped with this plugin. Use semantic
@@ -143,19 +143,26 @@ license attribution, and explicitly map unsupported operations before authoring.
 Do not advertise claim/relationship mutation, correction, media extraction, or
 resumable multi-record ingestion until its required backend/host support exists.
 
-Exercise the shipped discovery/routing and capture-to-retrieval loop on a small
+After the backend dependencies below and skill upgrades, exercise the shipped
+discovery/routing and capture-to-retrieval loop on a small
 representative document and meeting transcript: retain originals, resolve existing
 entities, distinguish statements from interpretation, verify citations by readback,
 and repeat/interrupt/resume without duplicate outputs or false completion. Include
 ambiguous speakers, corrections, and contradictory evidence as realistic cases.
-Use findings to prioritize backend gaps before bundling the remaining workflows.
+Use findings to refine the workflows before bundling the remaining workflows.
 The first five page-based workflows are now bundled: recall, capture, document
 ingestion, meeting ingestion, and entity handling. See [WORKFLOWS.md](WORKFLOWS.md)
 for the supported operation map and deliberate departures. Shared conventions,
 source retention and individual-publication recovery are exercised in isolated
-contract trials. Real-content agent trials remain next; structured claim and
-relationship writes, dedicated media/correction/curation skills, and multi-record
-ingestion jobs are not implemented by this bundle.
+contract trials. Structured claim/relationship writes and entity metadata edits
+are now implemented as a backend/UI milestone. Dedicated media/correction/curation
+skills and multi-record ingestion checkpoints remain missing.
+
+After the implemented [structured-write foundation](STRUCTURED_WRITES.md), the
+next milestones are correction/withdrawal, durable ingestion checkpoints, and
+upgrades to the bundled skills. Full real-content document/meeting agent trials follow those dependencies;
+small deterministic fixtures validate each backend slice during implementation.
+Media and curation follow, then the remaining recovery/reliability acceptance.
 
 ### Next: improve finding and using knowledge
 

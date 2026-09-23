@@ -1,3 +1,4 @@
+import { activeNow } from "./temporal.js";
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { Check } from "typebox/value";
@@ -22,15 +23,15 @@ export function withdrawnIds(db: DatabaseSync, binding: string): Set<string> {
 }
 
 /** Remove unavailable dependencies transitively; do not leak a hidden endpoint through its edge/prose. */
-export function eligible(data: Snapshot, withdrawn = new Set<string>()) {
+export function eligible(data: Snapshot, withdrawn = new Set<string>(), historical = true) {
   const counts = new Map<string, number>();
   for (const r of data.records) counts.set(r.id, (counts.get(r.id) ?? 0) + 1);
-  const allowed = new Map(data.records.filter(r => r.valid && counts.get(r.id) === 1 && r.lifecycle !== "withdrawn" && !withdrawn.has(r.id)).map(r => [r.id, r]));
+  const allowed = new Map(data.records.filter(r => r.valid && counts.get(r.id) === 1 && r.lifecycle !== "withdrawn" && !withdrawn.has(r.id) && (historical || activeNow(r.metadata))).map(r => [r.id, r]));
   let changed = true;
   while (changed) {
     changed = false;
     for (const [id, r] of allowed) {
-      const refs = [...(r.metadata.dependencies ?? []), ...(r.metadata.entities ?? []), ...[r.metadata.from, r.metadata.to].filter((s): s is string => Boolean(s))];
+      const refs = [...(r.metadata.dependencies ?? []), ...(r.metadata.entities ?? []), ...[r.metadata.from, r.metadata.to, r.metadata.owner].filter((s): s is string => Boolean(s))];
       if (refs.some(ref => !allowed.has(ref))) { allowed.delete(id); changed = true; }
     }
   }
@@ -63,7 +64,7 @@ function hit(r: LoadedRecord, field: Hit["snippet"]["field"], at: number, matche
 export function exactLookup(data: Snapshot, input: LookupInput, withdrawn = new Set<string>()): LookupOutput {
   if (!Check(LookupInput, input) || !input.query.trim()) throw Error("Lookup requires a nonempty exact ID, name or alias and valid filters.");
   const query = normalize(input.query);
-  const matches = filtered(data, eligible(data, withdrawn), input).flatMap(r => {
+  const matches = filtered(data, eligible(data, withdrawn, input.lifecycle !== undefined && input.lifecycle !== "active"), input).flatMap(r => {
     const fields = [...(r.id === input.query.trim() ? ["id"] : []), ...(normalize(r.title) === query ? ["title"] : []), ...((r.metadata.aliases ?? []).some(alias => normalize(alias) === query) ? ["aliases"] : [])];
     const field = fields.includes("title") ? "title" : fields.includes("aliases") ? "aliases" : "body";
     const at = field === "aliases" ? (r.metadata.aliases ?? []).join("\n").indexOf((r.metadata.aliases ?? []).find(alias => normalize(alias) === query)!) : 0;
@@ -85,7 +86,7 @@ export function keywordExpression(input: SearchInput): string {
 export function keywordSearch(db: DatabaseSync, data: Snapshot, input: SearchInput, binding: string, generation: string, withdrawn = new Set<string>()): SearchOutput {
   const expression = keywordExpression(input), offset = input.offset ?? 0, limit = input.limit ?? 20;
   const base = { mode: "keyword" as const, queryMode: input.mode ?? "all", offset, checkedAt: data.checkedAt, coverage: coverage(data) };
-  const records = eligible(data, withdrawn), selected = filtered(data, records, input);
+  const records = eligible(data, withdrawn, input.lifecycle !== undefined && input.lifecycle !== "active"), selected = filtered(data, records, input);
   const table = `keyword_fts_v1_${digest(binding)}`;
   const snapshot = digest(JSON.stringify([generation, data.ontology?.fingerprint, records.map(r => [r.id, r.path, r.hash, r.revision])]));
   try {

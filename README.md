@@ -2,7 +2,7 @@
 
 Evidence-backed knowledge vault and native explorer for OpenClaw.
 
-**Current milestone:** authorized real-vault browsing and journaled page creation/editing, shared by Control UI and agent tools. Writes require `vault.writesEnabled: true`; sample mode remains read-only. Owner-direct turns can access the configured agent’s private records; shared turns are restricted to their own conversation partition.
+**Current milestone:** authorized real-vault browsing and journaled pages, sourced claims/relationships and entity metadata edits, shared by Control UI and agent tools. Writes require `vault.writesEnabled: true`; sample mode remains read-only. Owner-direct turns can access the configured agent’s private records; shared turns are restricted to their own conversation partition.
 
 | Capability | Status |
 |---|---|
@@ -16,7 +16,8 @@ Evidence-backed knowledge vault and native explorer for OpenClaw.
 | Keyword retrieval and exact identity | Scoped SQLite FTS5, filters, bounded citations and native Search; [retrieval guide](docs/RETRIEVAL.md) |
 | Embeddings | Not implemented or required |
 | Document/meeting ingestion | Five bundled agent workflow skills over supported page/file tools; [workflow guide](docs/WORKFLOWS.md) |
-| Structured claim/relationship writes, correction/withdrawal jobs | Not implemented |
+| Structured claims, relationships and entity metadata | Implemented through tools and native UI, with evidence, temporal validation and retry recovery |
+| Correction/withdrawal and durable ingestion checkpoints | Not implemented |
 | Live refresh | Private-vault filesystem invalidations, authorized snapshot refresh, reconnect and 30-second visible-page fallback; retired services are fenced |
 | Full backup/restore | Not implemented |
 

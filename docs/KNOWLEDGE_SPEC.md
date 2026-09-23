@@ -580,6 +580,20 @@ The first milestone is a working Knowledge explorer. Build the vault, schemas, a
 
 Continue from this foundation into keyword retrieval and the remaining ingestion, correction/withdrawal, backup/restore, and workflow acceptance requirements. Neither a read-only explorer nor completion of these three slices alone is a v1 release claim.
 
+### 14.2 Structured-write foundation
+
+The concrete [structured-write implementation plan](STRUCTURED_WRITES.md) extends
+the existing page publisher to claims, explicit relationships, and entity metadata,
+with matching reads, native UI, and acceptance gates. Requirements above remain
+governing; the plan now records delivered contracts and remaining boundaries.
+Structured writes are implemented locally; activation/check results are recorded
+in VERIFICATION.md. Background extraction is explicitly deferred.
+
+Following structured writes, implement correction/withdrawal and durable ingestion
+checkpoints, before upgrading the skills and running full real-content agent
+workflow trials. Validate each foundation with small deterministic fixtures along
+the way; page-only trials do not establish complete ingestion readiness.
+
 ## 15. Design references
 
 These are upstream references used for the proposal, not pinned dependency versions or guarantees about future upstream behavior.

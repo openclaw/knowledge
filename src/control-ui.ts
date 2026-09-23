@@ -4,6 +4,7 @@ import { createFeatureClient, type FeatureOutput } from "openclaw/plugin-sdk/fea
 import { contract } from "./contract.js";
 import "./control-ui.css";
 import { DraftStore } from "./drafts.js";
+import type { WriteKind } from "./mutation-contract.js";
 import { pageEditor } from "./page-editor.js";
 import { loadVocabulary } from "./inspection-client.js";
 import { initialSearchState, searchToolbar, loadSearch, searchResults } from "./retrieval-view.js";
@@ -44,12 +45,12 @@ export default defineControlUiPlugin({
         const editorLifetime = new AbortController();
         let vaultChanged = false;
         let draftStore: DraftStore | undefined, draftIdentity = "", editor: ReturnType<typeof pageEditor> | undefined;
-        const editPage = (record?: NonNullable<FeatureOutput<typeof contract, "record">["record"]>) => {
+        const editPage = (record?: NonNullable<FeatureOutput<typeof contract, "record">["record"]>, initialKind: WriteKind = "page") => {
           if (editor) { void editor.then(handle => handle?.reopen()); return; }
           if (!draftStore) return;
           try {
             const draft = draftStore.read();
-            editor = pageEditor(section, feature, record, id => { editor = undefined; selectedId = id; tab = "records"; renderToolbar(); void refresh(); }, message => context.host.redact(message), { store: draftStore, draft, signal: editorLifetime.signal, dismissed() { editor = undefined; } });
+            editor = pageEditor(section, feature, record, id => { editor = undefined; selectedId = id; tab = "records"; renderToolbar(); void refresh(); }, message => context.host.redact(message), { store: draftStore, draft, signal: editorLifetime.signal, dismissed() { editor = undefined; } }, initialKind);
           } catch { draftStatus.textContent = "Stored draft could not be opened. It has been preserved; do not clear browser storage."; }
         };
         let generation = 0, detailGeneration = 0, disposed = false, debounce: ReturnType<typeof setTimeout> | undefined;
@@ -71,7 +72,7 @@ export default defineControlUiPlugin({
             const typeFilter = el("input"); typeFilter.placeholder = "Type or ontology alias"; typeFilter.value = type; typeFilter.setAttribute("aria-label", "Filter by type or ontology alias");
             typeFilter.oninput = () => { type = typeFilter.value.trim(); offset = 0; selectedId = ""; clearTimeout(debounce); debounce = setTimeout(() => void load(), 200); };
             toolbar.append(search, select, typeFilter);
-            if (writesEnabled) { const create = button("New page", () => editPage()); create.disabled = !draftStore; toolbar.append(create); }
+            if (writesEnabled) { const create = button("New page", () => editPage()); create.disabled = !draftStore; toolbar.append(create, button("New claim", () => editPage(undefined, "claim")), button("New relationship", () => editPage(undefined, "relationship"))); }
             toolbar.append(button("Refresh", () => void refresh()));
           }
           if (tab === "search") toolbar.append(searchToolbar(searchState, () => void load(), () => { ++generation; ++detailGeneration; selectedId = ""; content.replaceChildren(el("p", "Search changed. Press Search to update results.")); }));
@@ -121,6 +122,26 @@ export default defineControlUiPlugin({
                 raw.replaceWith(rawBlock("Original file (read only)", page.record.raw ?? "", true));
               }).catch(error => { if (alive(n) && detail === detailGeneration) { raw.disabled = false; target.append(el("p", context.host.redact(String(error)), "knowledge-error")); } });
             });
+            const connections = el("div");
+            target.append(connections);
+            const loadConnections = async (offset = 0, snapshot?: string) => {
+              const page = await feature.invoke("connections", { id, offset, limit: 20 });
+              if (!alive(n) || detail !== detailGeneration) return;
+              if (snapshot && snapshot !== page.snapshot) { connections.replaceChildren(el("p", "Connections changed; reopen this record.")); return; }
+              if (!offset && page.total) connections.append(el("h3", "Active relationships, claims & dependents"));
+              for (const link of page.connections) connections.append(button(`${link.direction} · ${link.label ? link.label + " · " : ""}${link.record.title}`, () => void showDetail(link.record.id, target, n)));
+              if (page.nextOffset !== null) { const more = button("More active connections", () => { more.remove(); void loadConnections(page.nextOffset!, page.snapshot).catch(showError); }); connections.append(more); }
+            };
+            void loadConnections().catch(error => { if (alive(n) && detail === detailGeneration) connections.append(el("p", context.host.redact(String(error)))); });
+            if (r.kind !== "page") {
+              const metadata = r.metadata!;
+              const facts = el("dl");
+              for (const key of ["claim_kind", "assertion_origin", "attribution", "from", "label", "to", "entities", "dependencies", "occurred_at", "owner", "due_at", "valid_from", "valid_until", "expires_at"]) {
+                const value = (metadata as Record<string, unknown>)[key];
+                if (value !== undefined) facts.append(el("dt", key.replaceAll("_", " ")), el("dd", Array.isArray(value) ? value.join(", ") : String(value)));
+              }
+              target.append(el("h3", "Assertion details"), facts);
+            }
             target.append(raw);
             if (result.issues.length) target.append(issueList(result.issues));
             target.append(rawBlock("Structured fields & metadata", JSON.stringify(r.metadata, null, 2)), rawBlock("Identity & observed content hash", `${r.id}\nSHA-256: ${r.hash}`));
@@ -230,7 +251,7 @@ export default defineControlUiPlugin({
               catch { draftStatus.textContent = "Browser draft recovery unavailable. Copy any draft before leaving."; }
             }
             if (toolbarChanged) renderToolbar();
-            banner.replaceChildren(el("strong", report.sample ? "Sample vault · Read only" : `${report.agent} · Private vault${writesEnabled ? "" : " · Read only"}`), el("p", report.sample ? "Fictional people and projects for exploring the data model. No private agent vault is connected." : (writesEnabled ? "Create pages, attach source files, and edit with revision checks." : "Your agent’s knowledge. Writing is not enabled for this connection.")));
+            banner.replaceChildren(el("strong", report.sample ? "Sample vault · Read only" : `${report.agent} · Private vault${writesEnabled ? "" : " · Read only"}`), el("p", report.sample ? "Fictional people and projects for exploring the data model. No private agent vault is connected." : (writesEnabled ? "Create pages, sourced claims and relationships; inspect evidence and edit entity metadata." : "Your agent’s knowledge. Writing is not enabled for this connection.")));
             if (writesEnabled && selectedId) void load();
             status.textContent = `${report.records} ${report.sample ? "sample " : ""}records${report.issues ? ` · ${report.issues} issues to review` : ""}` + (report.live === "unavailable" ? " · Live watcher unavailable; periodic refresh remains active." : "");
           } catch (error) { if (!disposed && n === statusGeneration) status.textContent = "Knowledge unavailable: " + context.host.redact(error instanceof Error ? error.message : String(error)); }

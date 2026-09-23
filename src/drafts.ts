@@ -1,11 +1,12 @@
 import { Check } from "typebox/value";
 import { Evidence } from "./model.js";
-import { SavePage } from "./mutation-contract.js";
+import { SavePage, ClaimInput, RelationshipInput, type WriteInput, type WriteKind } from "./mutation-contract.js";
 
 export type EditorDraft = {
   version: 1; key: string; title: string; body: string; type: string; fields: string; source: string; attribution: string;
   base?: { id: string; revision: number; hash: string };
-  submitted?: SavePage;
+  kind?: WriteKind; values?: Record<string, string>;
+  submitted?: WriteInput;
   attachments?: import("./model.js").Evidence[];
 };
 type DraftStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
@@ -25,7 +26,9 @@ export class DraftStore {
     if (value.version !== 1 || ![value.key, value.title, value.body, value.type, value.fields, value.source, value.attribution].every(v => typeof v === "string") ||
       (value.base && (typeof value.base.id !== "string" || typeof value.base.hash !== "string" || !Number.isInteger(value.base.revision))) ||
       (value.attachments && (!Array.isArray(value.attachments) || !value.attachments.every(e => Check(Evidence, e)))) ||
-      (value.submitted && !Check(SavePage, value.submitted))) throw Error("Stored draft is invalid; it was preserved but not opened.");
+      (value.kind && !["page", "claim", "relationship"].includes(value.kind)) ||
+      (value.values && (typeof value.values !== "object" || Object.values(value.values).some(v => typeof v !== "string"))) ||
+      (value.submitted && !Check(value.kind === "claim" ? ClaimInput : value.kind === "relationship" ? RelationshipInput : SavePage, value.submitted))) throw Error("Stored draft is invalid; it was preserved but not opened.");
     return value;
   }
   write(draft: EditorDraft) {

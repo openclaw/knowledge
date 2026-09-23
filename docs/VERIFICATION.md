@@ -1,5 +1,40 @@
 # Bundled workflow skills — 2026-09-23
 
+## Structured-write foundation — 2026-09-23
+
+- `npm run check`, `npm test` (**131 passed**), `npm run build`,
+  `npm run validate`, and `git diff --check` passed.
+- Added 14 structured-write tests: all claim kinds/origins, sourced decisions,
+  date-only/offset temporal fields, owned/undated commitments, explicit edges,
+  reverse dependencies/pagination, metadata replacement/preservation, aliases,
+  malformed evidence/dates/endpoint types, expired assertions, access/withdrawal
+  boundaries, cross-operation request collisions and interrupted/restarted writes.
+  Reference and evidence races immediately before acceptance reject publication.
+- `node test/browser/live-state.mjs` passed the existing rendered regression.
+  `node test/browser/structured-writes.mjs` passed native claim/edge creation,
+  typed readback, unsaved draft reload, exact replay after a lost save response,
+  retained locators, agent-created event live refresh, native metadata edits,
+  connection display, mobile overflow and absence of browser errors. All writes
+  used isolated temporary vaults, not the user's vault.
+- Inspected the captured mobile editor and exercised the delivered UI through
+  the feature-client/service harness. This is rendered isolated verification,
+  not a visual inspection of the user's live Control UI tab.
+- Verified the existing linked install points to this checkout and inspected its
+  accepted surface before activation. `plugins reload knowledge --accept-capabilities
+  --json` succeeded: `restartRequired: false`, runtime generation 4. A fresh
+  `plugins.sessionAction` read reports `structured-writes-1`, writes enabled,
+  watcher active, the same two records and zero findings. The new `connections`
+  action returned a valid empty result for a nonexistent ID. No synthetic live
+  writes, gateway restart or manual config replacement was performed.
+- The current turn's already-bound status tool still reported its old instance
+  after hot reload; verification therefore used a fresh gateway feature invocation,
+  not that stale tool binding. New tool visibility in an already-running turn is
+  not inferred from the reload receipt.
+- Background extraction, correction/withdrawal, ingestion checkpoints, dedicated
+  chronological timeline presentation and full workflow trials are not delivered
+  by this change. See STRUCTURED_WRITES.md for the boundary and API decisions.
+
+
 - Five repository-owned skills shipped through the plugin manifest and npm file list: recall, capture, document ingestion, meeting ingestion, and entity handling. Shared references are generated inside each skill directory so host per-skill materialization remains self-contained.
 - Upstream workflow/convention files were read in full and byte-compared to gbrain commit `7cdc3e30a898665a8c87b0c06937f6366f759f6c`. MIT attribution and explicit supported/unsupported operation mapping are in `THIRD_PARTY_NOTICES.md` and `WORKFLOWS.md`.
 - `npm run check`, `npm test` (**117 passed**), `npm run build`, `npm run validate`, five skill-creator validations, and `git diff --check` passed. The Python validator ran in an isolated temporary venv because the system Python lacked PyYAML; no project dependency was added.

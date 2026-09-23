@@ -38,10 +38,10 @@ slice; no new runtime, connector, extraction dependency or paid service is added
 | filing rules | Inspect `knowledge_ontology`; canonical type and server-generated UUID path; no assumed slug |
 | raw transcript / attribution | Retained original + labeled derived transcript; exact locators, unresolved speaker map, source-vs-inference distinction |
 | resolve/enrich | Exact lookup plus evidence-aware candidate comparison; selective supported entity page edits |
-| timeline-add / add_link / graph | Dated prose and verified relative links only; no structured timeline/relationship writes or automatic backlinks |
+| remember / timeline-add / add_link | `knowledge_create_claim` (dated event claims for timeline material), `knowledge_create_relationship`, `knowledge_connections`; no separate timeline store or automatic backlinks |
 | sync / embed | No sync command: saves publish; keyword search reconciles its own index |
 | bulk job checkpoints | Itemized agent work log + individual upload/publication receipts; no atomic/resumable multi-record job |
-| aliases/tags/frontmatter writes | Preserved existing metadata, but not exposed as save fields; no invented write API |
+| aliases/tags/dependencies | Supported collection replacement through `knowledge_save_page`; omitted fields preserve existing values |
 | claim correction/withdrawal | Not shipped as a skill: backend lifecycle/claim mutation still missing. Supported page edits can explicitly correct prose without deleting evidence |
 | media extraction/OCR/transcription | Host capability if available; otherwise source retention and explicit partial result. Dedicated media skill deferred |
 | curation/dreaming / automatic inbound enrichment | Deferred; no ambient capture, broad profile research or scheduling |
@@ -67,6 +67,6 @@ written into the user's vault.
 
 Package tests check skill metadata, local reference closure, tool references,
 generated reference freshness and npm payload inclusion. Host discovery is checked
-separately with the installed plugin catalog. User-provided real-content trials
-and agent behavioral evaluation remain the next milestone; bundling these skills
-does not complete the v1 structured claims/relationships acceptance criteria.
+separately with the installed plugin catalog. Structured writes are now available;
+full workflow upgrades and real-content agent trials follow correction/withdrawal
+and durable ingestion checkpoints. Bundling skills alone does not complete v1.

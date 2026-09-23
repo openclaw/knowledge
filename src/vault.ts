@@ -1,3 +1,4 @@
+import { temporalProblems } from "./temporal.js";
 import * as fs from "node:fs";
 import path from "node:path";
 import { inspectEvidence, withEvidenceFile } from "./evidence-files.js";
@@ -107,6 +108,8 @@ export class SampleVault {
           }
         }
       }
+      for (const message of temporalProblems(m)) problem("invalid-temporal", message);
+      if (m.owner) resolve(m.owner, true);
       for (const reference of m.entities ?? []) resolve(reference, true);
       for (const reference of m.dependencies ?? []) resolve(reference);
       for (const e of m.evidence ?? []) {
@@ -154,8 +157,8 @@ export class SampleVault {
   async detail(id: string, evidenceOffset = 0, evidenceLimit = 20) {
     const data = await this.scan(), matches = data.records.filter(r => r.id === id);
     if (matches.length !== 1) return { record: null, issues: [], references: [], evidence: [] };
-    const r = matches[0], refs = new Set([...(r.metadata.entities ?? []), ...(r.metadata.dependencies ?? []), ...[r.metadata.from, r.metadata.to].filter((x): x is string => Boolean(x))]);
-    const references = data.records.filter(other => refs.has(other.id) || other.metadata.from === id || other.metadata.to === id || other.metadata.entities?.includes(id)).map(summary);
+    const r = matches[0], refs = new Set([...(r.metadata.entities ?? []), ...(r.metadata.dependencies ?? []), ...[r.metadata.from, r.metadata.to, r.metadata.owner].filter((x): x is string => Boolean(x))]);
+    const references = data.records.filter(other => refs.has(other.id) || other.metadata.from === id || other.metadata.to === id || other.metadata.entities?.includes(id) || other.metadata.dependencies?.includes(id) || other.metadata.owner === id).map(summary);
     const evidence = [];
     for (const e of (r.metadata.evidence ?? []).slice(evidenceOffset, evidenceOffset + evidenceLimit)) {
       let excerpt = "", verified = false, excerptTruncated = false;

@@ -28,7 +28,8 @@
     "docs/EVIDENCE.md",
     "skills",
     "docs/WORKFLOWS.md",
-    "scripts/sync-skill-references.mjs"
+    "scripts/sync-skill-references.mjs",
+    "docs/STRUCTURED_WRITES.md"
   ],
   "peerDependencies": {
     "openclaw": ">=2026.9.5"

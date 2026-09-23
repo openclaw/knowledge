@@ -1,3 +1,4 @@
+import { ConnectionsInput, ConnectionsOutput } from "./connections-contract.js";
 import { AttachInput, AttachOutput, AttachmentInput, AttachmentOutput } from "./attachment-contract.js";
 import { SearchInput, SearchOutput, LookupInput, LookupOutput } from "./retrieval-contract.js";
 import { Type } from "typebox";
@@ -5,7 +6,7 @@ import { defineFeatureContract } from "openclaw/plugin-sdk/feature-contract";
 import { text } from "./model.js";
 import { RecordInput, RecordOutput, OntologyInput, OntologyOutput, Summary } from "./inspection-contract.js";
 
-import { SavePage, Receipt, HistoryEntry, GitStatus, requestId } from "./mutation-contract.js";
+import { SavePage, ClaimInput, RelationshipInput, Receipt, HistoryEntry, GitStatus, requestId } from "./mutation-contract.js";
 
 const empty = Type.Object({}, { additionalProperties: false });
 const issue = Type.Object({ path: text(500), code: text(80), message: text(1000) });
@@ -23,8 +24,20 @@ export const contract = defineFeatureContract({
       input: AttachmentInput, output: AttachmentOutput, tool: { name: "knowledge_attachment", label: "Read knowledge source file" },
     },
     save_page: {
-      kind: "action", description: "Create or edit a page in the authorized scope. Reuse requestId and identical payload for retries. Edits require observed revision and hash. Append file evidence returned by knowledge_attach using attachments (no count cap). Legacy source text remains supported; saved pages are immediately available with no approval step. A published receipt is a completed save; accepted publication conflicts retain recovery material and block publication. Requests rejected before acceptance are not saved.",
+      kind: "action", description: "Create or edit a page in the authorized scope. Reuse requestId and identical payload for retries. Edits require observed revision and hash. Aliases, tags, dependencies and fields replace their collections when supplied (empty clears); omission preserves on edit. Optional expectedOntologyFingerprint fences the observed schema. Append file evidence returned by knowledge_attach using attachments (no count cap). Legacy source text remains supported; saved pages are immediately available with no approval step. A published receipt is a completed save; accepted publication conflicts retain recovery material and block publication. Requests rejected before acceptance are not saved.",
       input: SavePage, output: Receipt, tool: { name: "knowledge_save_page", label: "Save knowledge page" },
+    },
+    create_claim: {
+      kind: "action", description: "Publish one evidence-backed claim (fact, preference, decision, commitment, event or belief). Agent chooses what the source supports; no automatic extraction or semantic deduplication. Required current ontology fingerprint comes from knowledge_ontology. Explicit attribution and assertion_origin distinguish source statements, user beliefs and agent inference. Unknown owner/dates remain absent. occurred_at and due_at preserve date-only or offset timestamp precision; validity/expiry are UTC instants. No task is scheduled. Reuse the exact request and payload for retries; no claim overwrite or lifecycle mutation.",
+      input: ClaimInput, output: Receipt, tool: { name: "knowledge_create_claim", label: "Create knowledge claim" },
+    },
+    create_relationship: {
+      kind: "action", description: "Publish one directed, evidenced relationship between existing active pages. Inspect knowledge_ontology for label, fields, endpoint constraints and required current fingerprint. Attribution and nonempty retained evidence are mandatory. Same endpoint pair is not automatically merged. Exact retries reuse the receipt. Markdown links are not asserted relationships.",
+      input: RelationshipInput, output: Receipt, tool: { name: "knowledge_create_relationship", label: "Create knowledge relationship" },
+    },
+    connections: {
+      kind: "query", description: "Inspect explicit incoming/outgoing relationships, reverse dependencies, and entity/owner claims. Access and active validity/expiry filtering precede counts and pagination. historical=true includes inactive/superseded but never withdrawn records. Follow nextOffset and compare snapshot across pages. Evidence here is a bounded preview; inspect each record for complete evidence. No inferred Markdown backlinks.",
+      input: ConnectionsInput, output: ConnectionsOutput, tool: { name: "knowledge_connections", label: "Inspect knowledge connections" },
     },
     resume: {
       kind: "action", description: "Resume an accepted publication or retry its local Git checkpoint in the authorized scope after interruption. Does not overwrite conflicts. Use the original requestId.",
@@ -53,7 +66,7 @@ export const contract = defineFeatureContract({
       kind: "query", description: "Read availability and counts for the authorized vault scope. Sample mode is read-only.",
       input: empty,
       output: Type.Object({
-        service: Type.Literal("knowledge"), phase: Type.Union([Type.Literal("read-only-explorer"), Type.Literal("page-editor")]),
+        service: Type.Literal("knowledge"), phase: Type.Union([Type.Literal("read-only-explorer"), Type.Literal("page-editor"), Type.Literal("structured-writes")]),
         backendRevision: text(80), instanceId: text(80), startedAt: text(40), checkedAt: text(40),
         vault: text(80), agent: text(80), scope: text(80), sample: Type.Boolean(), writesEnabled: Type.Boolean(),
         live: Type.Union([Type.Literal("stopped"), Type.Literal("watching"), Type.Literal("unavailable")]),

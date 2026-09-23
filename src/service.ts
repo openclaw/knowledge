@@ -1,3 +1,4 @@
+import { connections } from "./connections.js";
 import { DatabaseSync } from "node:sqlite";
 import { keywordSearch, exactLookup } from "./retrieval.js";
 import { randomUUID } from "node:crypto";
@@ -43,6 +44,9 @@ export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureE
     attach: async (input, context) => { const access = authority(context, true); return storage!.attach(input, access); },
     attachment: (input, context) => run(context, vault => vault.attachment(input)),
     save_page: async (input, context) => { const access = authority(context, true); try { return await storage!.save(input, access, context.source === "tool" ? "agent" : "operator"); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); } },
+    create_claim: async (input, context) => { const access = authority(context, true); try { return await storage!.createClaim(input, access, context.source === "tool" ? "agent" : "operator"); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); } },
+    create_relationship: async (input, context) => { const access = authority(context, true); try { return await storage!.createRelationship(input, access, context.source === "tool" ? "agent" : "operator"); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); } },
+    connections: (input, context) => storage ? storage.connections(input, authority(context)) : run(context, async vault => connections(await vault.scan(), input)),
     resume: async (input, context) => { const access = authority(context, true); try { return await storage!.resume(access, input.requestId); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); } },
     revision: async (input, context) => { const access = authority(context); return storage!.revision(access, input.sequence); },
     mutation: async (input, context) => { const access = authority(context); return storage!.mutation(access, input.requestId); },
@@ -56,7 +60,7 @@ export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureE
       if (scope === "agent-private") live?.ensureWatching();
       const data = await vault.scan();
       return {
-        service: "knowledge", phase: config?.writesEnabled ? "page-editor" : "read-only-explorer", backendRevision: "file-evidence-1", instanceId, startedAt,
+        service: "knowledge", phase: config?.writesEnabled ? "structured-writes" : "read-only-explorer", backendRevision: "structured-writes-1", instanceId, startedAt,
         checkedAt: data.checkedAt, vault: config?.vaultId ?? "bundled-sample", agent: config?.agentId ?? "none — synthetic sample", scope, sample: !config, writesEnabled: Boolean(config?.writesEnabled && (() => { try { authority(context, true); return true; } catch { return false; } })()),
         live: scope === "agent-private" ? live?.state ?? "stopped" : "stopped",
         records: data.records.length, validRecords: data.records.filter(r => r.valid).length,

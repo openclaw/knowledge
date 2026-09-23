@@ -1,8 +1,11 @@
+import { connections } from "./connections.js";
+import type { ConnectionsInput } from "./connections-contract.js";
+import type { Static } from "typebox";
 import path from "node:path";
 import { attachChunk } from "./attachments.js";
 import { AttachInput, ATTACHMENT_CHUNK_BYTES } from "./attachment-contract.js";
 import { inspectEvidence } from "./evidence-files.js";
-import { keywordSearch, exactLookup, observeWithdrawals, withdrawnIds } from "./retrieval.js";
+import { keywordSearch, exactLookup, observeWithdrawals, withdrawnIds, eligible } from "./retrieval.js";
 import type { SearchInput, LookupInput } from "./retrieval-contract.js";
 import { GitHistory, GitUnavailable, type GitBatch, type GitChange } from "./git-history.js";
 import type { SampleVault } from "./vault.js";
@@ -13,7 +16,7 @@ import { parseDocument, stringify } from "yaml";
 import { Manifest, RealVault, type VaultConfig } from "./real-vault.js";
 import { SqliteIdentityStore } from "./identity-store.js";
 import { PublicationFiles, type FileChange } from "./publication-files.js";
-import { SavePage, type Receipt } from "./mutation-contract.js";
+import { SavePage, ClaimInput, RelationshipInput, type WriteInput, type WriteKind, type Receipt } from "./mutation-contract.js";
 import { digest } from "./vault.js";
 import { Envelope, type LoadedRecord, type Scope } from "./model.js";
 import type { VaultAccess } from "./access.js";
@@ -52,6 +55,13 @@ export class KnowledgeStorage {
       return this.store.withDatabase(db => exactLookup(data, input, withdrawnIds(db, this.retrievalBinding(access))));
     });
   }
+  async connections(input: Static<typeof ConnectionsInput>, access: VaultAccess) {
+    return this.run(access, async vault => {
+      const data = await vault.scan();
+      access.assertCurrent();
+      return this.store.withDatabase(db => connections(data, input, withdrawnIds(db, this.retrievalBinding(access))));
+    });
+  }
   async initialize(access: VaultAccess) {
     access.assertCurrent();
     if (!await this.store.lookup(`agent:${this.config.agentId}`)) await this.real.run(access, async () => undefined);
@@ -86,12 +96,19 @@ export class KnowledgeStorage {
       return attachChunk(db, this.config.root, scopeKey(access.scope), input, () => access.assertCurrent(), this.hook);
     });
   }
-  async save(input: SavePage, access: VaultAccess, actor: string): Promise<Receipt> {
+  save(input: SavePage, access: VaultAccess, actor: string) { return this.publish(input, "page", access, actor); }
+  createClaim(input: ClaimInput, access: VaultAccess, actor: string) { return this.publish(input, "claim", access, actor); }
+  createRelationship(input: RelationshipInput, access: VaultAccess, actor: string) { return this.publish(input, "relationship", access, actor); }
+  private async publish(payload: WriteInput, kind: WriteKind, access: VaultAccess, actor: string): Promise<Receipt> {
+    const schema = kind === "page" ? SavePage : kind === "claim" ? ClaimInput : RelationshipInput;
+    if (!Check(schema, payload)) throw Error("Invalid structured write input.");
+    // Unified preparation only after validating the operation-specific closed contract.
+    const input = payload as SavePage & ClaimInput & RelationshipInput;
     access.assertCurrent();
     if (input.expectedVaultId && input.expectedVaultId !== this.config.vaultId) throw Error("Connected vault changed; this draft belongs to a different vault. No publication was accepted.");
     if (!this.config.writesEnabled) throw Error("Knowledge writes are disabled.");
-    if (!Check(SavePage, input) || Boolean(input.id) !== Boolean(input.expectedHash && input.expectedRevision) || (!input.id && (input.expectedHash || input.expectedRevision))) throw Error("Create requires no preconditions; edit requires ID, observed revision, and hash.");
-    const scope = scopeKey(access.scope), intent = digest(canonical(input));
+    if (Boolean(input.id) !== Boolean(input.expectedHash && input.expectedRevision) || (!input.id && (input.expectedHash || input.expectedRevision))) throw Error("Create requires no preconditions; edit requires ID, observed revision, and hash.");
+    const scope = scopeKey(access.scope), intent = digest(canonical(kind === "page" ? input : { operation: kind, input }));
     const prior = this.store.withDatabase(db => this.row(db, scope, input.requestId));
     if (prior) { this.checkReplay(prior, intent); return this.resume(access, input.requestId); }
     this.assertReadable();
@@ -110,22 +127,31 @@ export class KnowledgeStorage {
     const prepared = await this.real.run(access, async vault => {
       const snapshot = new PublicationFiles(this.config.root).snapshot(scope);
       const data = await vault.scan();
+      if (input.expectedOntologyFingerprint && input.expectedOntologyFingerprint !== data.ontology?.fingerprint) throw Error("Ontology changed; inspect the current definitions before submitting a new request.");
+      const allowed = this.store.withDatabase(db => eligible(data, withdrawnIds(db, this.retrievalBinding(access)), false));
+      const references = [...(input.dependencies ?? []), ...(input.entities ?? []), ...[input.from, input.to, input.owner].filter((id): id is string => Boolean(id))];
+      if (references.some(id => !allowed.some(r => r.id === id))) throw Error("Reference unavailable or inactive in this scope.");
+      if ([...(input.entities ?? []), ...[input.from, input.to, input.owner].filter((id): id is string => Boolean(id))].some(id => !allowed.some(r => r.id === id && r.kind === "page"))) throw Error("Entity, owner and endpoint references must be pages.");
       const matches = data.records.filter(r => r.id === input.id);
       const previous = input.id && matches.length === 1 ? matches[0] : undefined;
-      if (input.id && (!previous || !previous.valid || previous.kind !== "page" || previous.hash !== input.expectedHash || previous.revision !== input.expectedRevision)) throw Error("Edit conflict: record changed, disappeared, is ambiguous, or is invalid. No files were changed by this request, and this draft was not saved. Retain your proposed text, reread the current record, and reconcile before creating a new request.");
-      const type = input.type ?? previous?.type;
-      const definition = data.ontology?.definitions.find(d => d.definition.name === type && d.definition.kind === "page")?.definition;
-      if (!definition) throw Error("Choose a valid page type from the current ontology.");
+      if (input.id && (!previous || !allowed.some(r => r.id === previous.id) || !previous.valid || previous.kind !== "page" || previous.hash !== input.expectedHash || previous.revision !== input.expectedRevision)) throw Error("Edit conflict: record changed, disappeared, is ambiguous, or is invalid. No files were changed by this request, and this draft was not saved. Retain your proposed text, reread the current record, and reconcile before creating a new request.");
+      const type = kind === "claim" ? input.claim_kind : kind === "relationship" ? input.label : input.type ?? previous?.type;
+      const definition = data.ontology?.definitions.find(d => d.definition.name === type && d.definition.kind === kind)?.definition;
+      if (kind !== "claim" && !definition) throw Error("Choose a valid type from the current ontology.");
       if (previous && type !== previous.type) throw Error("Type changes are not supported by this page editor.");
       const now = new Date().toISOString(), id = previous?.id ?? randomUUID();
-      const relative = previous?.path ?? `${definition.directory}${id}.md`;
+      const relative = previous?.path ?? `${kind === "claim" ? "claims/" : definition!.directory}${id}.md`;
       const revision = (previous?.revision ?? 0) + 1;
       const metadata: Envelope = previous ? { ...previous.metadata, title: input.title, revision, updated_at: now } : {
-        format: "knowledge-record-v1", id, revision, kind: "page", title: input.title, scope: access.scope,
-        type, fields: {}, recorded_at: now, updated_at: now, lifecycle: "active",
+        format: "knowledge-record-v1", id, revision, kind, title: input.title, scope: access.scope,
+        ...(kind === "page" ? { type, fields: {} } : {}), recorded_at: now, updated_at: now, lifecycle: "active",
       };
       // Legacy approval metadata has no meaning; remove it on the next journaled save.
       delete (metadata as Record<string, unknown>).acceptance;
+      const portable = ["aliases", "tags", "dependencies", ...(kind === "page" ? [] : ["attribution", "evidence", "valid_from", "valid_until", "expires_at"]),
+        ...(kind === "claim" ? ["claim_kind", "assertion_origin", "entities", "occurred_at", "owner", "due_at"] : kind === "relationship" ? ["from", "to", "label"] : [])];
+      for (const key of portable) if ((input as Record<string, unknown>)[key] !== undefined) (metadata as Record<string, unknown>)[key] = (input as Record<string, unknown>)[key];
+      if (kind !== "page" && !input.attribution.trim()) throw Error("Attribution must not be blank.");
       if (input.fields !== undefined) metadata.fields = input.fields;
       if (input.attachments?.length) {
         metadata.evidence = [...(metadata.evidence ?? [])];
@@ -148,17 +174,18 @@ export class KnowledgeStorage {
         const match = /^(?:\uFEFF)?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(previous.raw)!;
         const doc = parseDocument(match[1]);
         doc.delete("acceptance");
-        for (const key of ["title", "revision", "updated_at", ...(input.fields !== undefined ? ["fields"] : []), ...(input.source ? ["evidence", "attribution"] : input.attachments?.length ? ["evidence"] : [])]) doc.set(key, (metadata as Record<string, unknown>)[key]);
+        for (const key of ["title", "revision", "updated_at", ...portable.filter(key => (input as Record<string, unknown>)[key] !== undefined), ...(input.fields !== undefined ? ["fields"] : []), ...(input.source ? ["evidence", "attribution"] : input.attachments?.length ? ["evidence"] : [])]) doc.set(key, (metadata as Record<string, unknown>)[key]);
         yaml = doc.toString();
       } else yaml = stringify(metadata);
       const raw = `---\n${yaml}---\n${input.body}`;
-      if (Buffer.byteLength(raw) > 65536 || !Check(Envelope, metadata)) throw Error("Page exceeds limits or has invalid metadata.");
-      const record: LoadedRecord = { id, title: input.title, kind: "page", type: type!, path: relative, revision, lifecycle: metadata.lifecycle, metadata, raw, body: input.body, hash: digest(raw), valid: true };
+      if (Buffer.byteLength(raw) > 65536 || !Check(Envelope, metadata)) throw Error("Record exceeds limits or has invalid metadata.");
+      const record: LoadedRecord = { id, title: input.title, kind, type: type!, path: relative, revision, lifecycle: metadata.lifecycle, metadata, raw, body: input.body, hash: digest(raw), valid: true };
       const preview = await vault.scan({ record, artifacts });
-      if (!record.valid) throw Error("Page validation failed: " + preview.issues.filter(i => i.path === relative).map(i => i.code).join(", "));
+      if (!record.valid) throw Error("Record validation failed: " + preview.issues.filter(i => i.path === relative).map(i => i.code).join(", "));
       if (new PublicationFiles(this.config.root).snapshot(scope) !== snapshot) throw Error("Edit conflict: vault changed during validation.");
       return { record, artifacts, previous, data, snapshot };
     });
+    this.hook("before-accept");
     access.assertCurrent();
     this.transaction(db => {
       const rival = this.row(db, scope, input.requestId);
@@ -171,6 +198,11 @@ export class KnowledgeStorage {
       for (const source of prepared.data.sources.filter(s => !s.path.startsWith("bundled:"))) {
         if (files.read(`${scope}/${source.path}`) !== source.raw) throw Error("Ontology changed during validation.");
       }
+      for (const evidence of prepared.record.metadata.evidence ?? []) if (!(evidence.path in prepared.artifacts)) inspectEvidence(path.join(this.config.root, scope), evidence);
+      const stillActive = eligible(prepared.data, withdrawnIds(db, this.retrievalBinding(access)), false);
+      const m = prepared.record.metadata;
+      const references = [...(m.dependencies ?? []), ...(m.entities ?? []), ...[m.from, m.to, m.owner].filter((id): id is string => Boolean(id))];
+      if (references.some(id => !stillActive.some(r => r.id === id))) throw Error("Reference unavailable or inactive in this scope.");
       const after = { ...before, generation: before.generation + 1, publicationId: randomUUID() };
       const changes: FileChange[] = [];
       const add = (target: string, old: string | null, raw: string) => {
