@@ -13,7 +13,7 @@ export function connections(data: Awaited<ReturnType<SampleVault["scan"]>>, inpu
     const m = r.metadata, directions: Static<typeof ConnectionsOutput>["connections"][number]["direction"][] = [];
     if (r.kind === "relationship") { if (m.from === input.id) directions.push("outgoing"); if (m.to === input.id) directions.push("incoming"); }
     if (m.dependencies?.includes(input.id)) directions.push("dependents");
-    if (r.kind === "claim" && (m.entities?.includes(input.id) || m.owner === input.id)) directions.push("claims");
+    if (r.kind === "claim" && (m.entities?.includes(input.id) || m.owner === input.id || m.source_page === input.id)) directions.push("claims");
     const summary = recordSummary(r);
     for (const direction of directions) if (!input.direction || input.direction === direction) rows.push({ direction, record: { ...summary, ...(input.includeCards && r.kind === "claim" ? { card: claimCard(r, records) } : {}) },
       ...(r.kind === "relationship" ? { from: m.from!, to: m.to!, label: m.label! } : {}),

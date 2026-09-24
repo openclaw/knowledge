@@ -5,7 +5,8 @@ import { evidenceView } from "./evidence-view.js";
 import { loadVocabulary } from "./inspection-client.js";
 import { ontologyView } from "./ontology-view.js";
 import { icon, type IconName } from "./ui-icons.js";
-import { formatSourceDate } from "./temporal.js";
+import { confidenceView, identityTag, assertionOrigin as origin } from "./knowledge-presentation.js";
+import { formatSourceDate, sourceDateNote } from "./temporal.js";
 import { captureReadingState } from "./reading-state.js";
 import { markdownView } from "./markdown-view.js";
 import "./control-ui.css";
@@ -25,8 +26,9 @@ const human = (text: string) => text.replaceAll("_", " ").replaceAll("-", " ");
 const label = (text: string) => human(text).replace(/^./, c => c.toUpperCase());
 const typeIcons: Record<string, [IconName, string]> = { person: ["circleUser", "teal"], company: ["box", "blue"], organization: ["box", "blue"], project: ["kanban", "green"], concept: ["spark", "amber"], meeting: ["users", "red"], email: ["mail", "neutral"], source: ["paperclip", "neutral"], decision: ["flag", "neutral"], commitment: ["listChecks", "neutral"], preference: ["star", "neutral"], fact: ["info", "neutral"], belief: ["brain", "neutral"], event: ["calendarClock", "neutral"] };
 const tile = (type: string, size = 28, kind = "page") => { const [glyph, tone] = (Object.hasOwn(typeIcons, type) ? typeIcons[type] : undefined) ?? [kind === "relationship" ? "link" : "fileText", "neutral"]; const n = el("span", undefined, `knowledge-tile knowledge-tone-${tone}${kind === "page" ? "" : " knowledge-tile-plain"}`); n.style.setProperty("--tile-size", `${size}px`); n.append(icon(glyph, size >= 48 ? 24 : size <= 24 ? 13 : 15)); return n; };
-const date = (text: string) => new Date(text).toLocaleString();
-const origin = (value?: string) => value === "source" ? "From source" : value === "user_belief" ? "User statement" : value === "agent_inference" ? "Agent inferred" : "Origin not recorded";
+const date = (text: string) => formatSourceDate(text);
+const time = (text: string) => new Date(text).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", timeZoneName: "short" });
+
 const rawBlock = (label: string, text: string) => { const n = el("details"); n.append(el("summary", label), el("pre", text)); return n; };
 
 export default defineControlUiPlugin({
@@ -39,7 +41,7 @@ export default defineControlUiPlugin({
       title.append(el("h1", "Knowledge"), el("p", "What your agent has saved, and where it came from."));
       const status = el("span", "Connecting…", "knowledge-status"); status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
       const vocabularyButton = button("", () => navigate("ontology"), "knowledge-icon-button"); vocabularyButton.setAttribute("aria-label", "Vocabulary"); vocabularyButton.title = "Ontology & vault settings"; vocabularyButton.append(icon("book"));
-      actions.append(status, vocabularyButton);
+      const sampleChip = chip("Sample vault"); sampleChip.hidden = true; actions.append(sampleChip, status, vocabularyButton);
       const nav = el("nav", undefined, "knowledge-tabs"); nav.setAttribute("aria-label", "Knowledge views");
       // These are text navigation tabs, not host .btn controls. Theme-specific
       // .btn rules otherwise reintroduce filled backgrounds in light mode.
@@ -51,6 +53,9 @@ export default defineControlUiPlugin({
       let tab: "recent" | "browse" | "search" | "ontology" | "diagnostics" = "recent", selectedId = "", query = "", kind: "page" | "claim" | "relationship" = "page", type = "", offset = 0;
       type RecentCursor = { upperSequence: number; beforeSequence: number } | undefined;
       let recentCursor: RecentCursor;
+      let includeHistory = false, browseQuery = "", originFilter = "";
+      let recentSequence = 0, lastChecked = "", pendingSnapshot: string | undefined;
+      const updates = button("", () => { updates.hidden = true; void load(true).then(ok => { if (ok) { snapshot = pendingSnapshot; pendingSnapshot = undefined; } }); }, "knowledge-new-saves"); updates.hidden = true; toolbar.after(updates);
       const recentBack: RecentCursor[] = [];
       const recentExpanded = new Set<number | string>();
       let generation = 0, statusGeneration = 0, disposed = false, identity = "", vaultChanged = false, agentId = "";
@@ -65,21 +70,28 @@ export default defineControlUiPlugin({
       const errorText = (error: unknown) => context.host.redact(error instanceof Error ? error.message : String(error));
       const failure = (error: unknown) => el("p", errorText(error), "knowledge-error");
       const empty = (heading: string, text: string) => { const n = el("div", undefined, "knowledge-empty"); n.append(el("h2", heading), el("p", text)); return n; };
-      function navigate(next: typeof tab) { tab = next; selectedId = ""; offset = 0; recentCursor = undefined; recentBack.length = 0; renderToolbar(); void load(); }
-      function open(id: string) { selectedId = id; renderToolbar(); void load(); }
-      function ask(record: Pick<NonNullable<Detail["record"]>, "id" | "title" | "kind" | "revision" | "hash">, correct = false) {
+      function navigate(next: typeof tab) { updates.hidden = true; pendingSnapshot = undefined; tab = next; selectedId = ""; offset = 0; recentCursor = undefined; recentBack.length = 0; renderToolbar(); void load(); }
+      function open(id: string) { updates.hidden = true; pendingSnapshot = undefined; selectedId = id; renderToolbar(); void load(); }
+      function ask(record: Pick<NonNullable<Detail["record"]>, "id" | "title" | "kind" | "revision" | "hash">, correct = false, candidate?: { id: string; title: string }) {
         root.querySelector(".knowledge-chat-handoff")?.remove();
-        const panel = el("section", undefined, "knowledge-chat-handoff knowledge-surface");
-        panel.append(el("h3", correct ? "Correct in chat" : "Ask your agent"), el("p", "Copy this request, then open chat and paste it. Review and send it there. This host cannot pre-fill the chat box yet."));
-        const prompt = el("textarea"); prompt.readOnly = true; prompt.rows = 5; prompt.setAttribute("aria-label", "Chat request");
-        prompt.value = `${correct ? "I want to correct" : "What do you know about"} this knowledge ${record.kind}: ${record.title}\nID: ${record.id}\nObserved revision: ${record.revision}\nObserved SHA-256: ${record.hash}\n${correct ? "The correction is: " : "Please explain it and its evidence."}`;
+        const previousFocus = document.activeElement as HTMLElement | null;
+        const panel = el("dialog", undefined, "knowledge-chat-handoff knowledge-surface");
+        panel.setAttribute("aria-label", candidate ? "Ask Molty to check this match" : correct ? "Ask Molty to correct this" : "Ask Molty");
+        panel.append(el("h3", panel.getAttribute("aria-label")!), el("p", "Copy the request, open chat, paste it, then review and send. Nothing is sent or changed from here."));
+        const prompt = el("textarea"); prompt.readOnly = true; prompt.rows = 9; prompt.setAttribute("aria-label", "Chat request");
+        const request = candidate ? `Is "${record.title}" the same person as "${candidate.title}"? Check the evidence on both pages. Link them only if it supports that; don't merge on the handle alone.` : correct ? "Please check this saved claim against its evidence and correct or withdraw it if the evidence supports that.\n\nWhat I think is wrong: " : `What do you know about "${record.title}", and where did it come from?`;
+        prompt.value = `${request}\n\nRecord: ${record.title}\nID: ${record.id}\nRevision: ${record.revision}\nHash: ${record.hash}${candidate ? `\nCandidate: ${candidate.id}` : ""}`;
+        prompt.onclick = () => prompt.select();
         const feedback = el("p"); feedback.setAttribute("role", "status");
-        const copy = button("Copy request", () => { void navigator.clipboard.writeText(prompt.value).then(() => { feedback.textContent = "Copied. Paste it in chat; nothing has been sent."; }).catch(() => { prompt.select(); feedback.textContent = "Select and copy the request above."; }); });
+        const copy = button("Copy request", () => { void navigator.clipboard.writeText(prompt.value).then(() => { copy.textContent = "Copied"; feedback.textContent = "Copied. Nothing has been sent."; }).catch(() => { prompt.select(); feedback.textContent = "Select and copy the request above."; }); });
         const chat = button("Open chat", () => {
           chat.disabled = true;
           void (async () => { const key = await context.host.sessions.create({ agentId: agentId || undefined }); if (key) context.host.sessions.open({ sessionKey: key, agentId: agentId || undefined }); else feedback.textContent = "Chat was not opened. Your request is still here."; })().catch(error => { feedback.textContent = errorText(error); }).finally(() => { chat.disabled = false; });
         });
-        panel.append(prompt, copy, chat, button("Dismiss", () => panel.remove(), "knowledge-quiet"), feedback); toolbar.after(panel); prompt.focus();
+        const dismiss = () => { panel.close(); panel.remove(); previousFocus?.focus(); };
+        panel.oncancel = event => { event.preventDefault(); dismiss(); };
+        const footer = el("div", undefined, "knowledge-actions"); footer.append(button("Cancel", dismiss, "knowledge-quiet"), copy, chat);
+        panel.append(prompt, el("p", "The ID, revision and hash let Molty confirm it's looking at the same version you are.", "knowledge-muted"), footer, feedback); root.append(panel); panel.showModal(); prompt.focus();
       }
       function renderToolbar() {
         recentTab.setAttribute("aria-pressed", String(!selectedId && tab === "recent")); browseTab.setAttribute("aria-pressed", String(!selectedId && tab === "browse"));
@@ -102,15 +114,17 @@ export default defineControlUiPlugin({
           // Exact identity lookup is supported today. Do not present it as prefix search.
           timer = setTimeout(() => { void feature.invoke("lookup", { query: query.trim(), limit: 10 }).then(result => {
             if (disposed || token !== suggestGeneration || !context.host.connection.connected || !form.isConnected) return;
-            suggestions.replaceChildren(); if (!result.hits.length) return;
-            suggestions.append(el("small", "Exact names and aliases"));
-            for (const hit of result.hits) { const item = button(hit.record.title, () => open(hit.record.id), "knowledge-suggestion"); item.prepend(tile(hit.record.type, 24, hit.record.kind)); suggestions.append(item); }
+            suggestions.replaceChildren();
+            suggestions.append(el("small", "Exact matches"));
+            if (!result.hits.length) suggestions.append(el("p", `No page is named exactly "${query}".`));
+            for (const hit of result.hits) { const item = button(hit.record.title, () => open(hit.record.id), "knowledge-suggestion"); item.prepend(tile(hit.record.type, 24, hit.record.kind)); item.append(identityTag(hit.record.identityStatus)); suggestions.append(item); }
+            suggestions.append(button(`Search all text for "${query}" · ranked`, () => form.requestSubmit(), "knowledge-suggestion"));
           }).catch(() => {}); }, 200);
         };
         input.onkeydown = event => { if (event.key === "Escape") { ++suggestGeneration; suggestions.replaceChildren(); } };
         return form;
       }
-      function summaryLink(r: Summary) { const b = button(r.title, () => open(r.id), "knowledge-record-link"); b.prepend(tile(r.type, 24, r.kind)); if (r.lifecycle !== "active") b.append(chip(human(r.lifecycle))); return b; }
+      function summaryLink(r: Summary) { const b = button(r.title, () => open(r.id), "knowledge-record-link"); b.prepend(tile(r.type, 24, r.kind)); b.append(identityTag(r.identityStatus)); if (r.lifecycle !== "active") b.append(chip(human(r.lifecycle))); return b; }
       function claimCard(r: Summary, n: number, aboutId?: string) {
         if (!r.card) return undefined;
         return renderClaim({ record: { ...r, ...r.card }, truncated: r.card.truncated, evidenceTotal: r.card.evidenceTotal, evidenceSourceTotal: r.card.evidenceSourceTotal }, n, aboutId);
@@ -125,13 +139,16 @@ export default defineControlUiPlugin({
         if (statement) statement.classList.add("knowledge-claim-text");
         copy.append(statement ?? (record.metadata?.source_event && record.source ? button(`Meeting: ${record.source.title}`, () => open(record.source!.id), "knowledge-claim-text") : button(record.body || record.title, () => open(record.id), "knowledge-claim-text")));
         const metadata = el("div", undefined, "knowledge-claim-meta");
-        const assertionOrigin = el("span", origin(record.assertionOrigin), `knowledge-origin knowledge-origin-${record.assertionOrigin ?? "unknown"}`);
+        const assertionOrigin = el("span", origin(record.assertionOrigin, record.attribution), `knowledge-origin knowledge-origin-${record.assertionOrigin ?? "unknown"}`);
         assertionOrigin.prepend(icon(record.assertionOrigin === "source" ? "paperclip" : record.assertionOrigin === "user_belief" ? "circleUser" : record.assertionOrigin === "agent_inference" ? "brain" : "info", 12));
+        if (record.metadata?.supersedes) metadata.append(chip("Corrected"));
+        if (record.metadata?.continuity?.length) metadata.append(el("span", record.metadata.continuity.some(link => link.relation === "contradicts") ? "Conflicting account" : "Reaffirmed"));
         metadata.append(el("span", label(record.kind === "relationship" ? record.type : record.claimKind ?? "claim")), assertionOrigin);
-        if (record.owner) metadata.append(button(`Owner: ${record.owner.title}`, () => open(record.owner!.id), "knowledge-quiet"));
+        if (record.owner) metadata.append(button(`Owner ${record.owner.title}`, () => open(record.owner!.id), "knowledge-quiet"));
         else if (record.claimKind === "commitment") metadata.append(el("span", "Owner not identified"));
-        if (record.metadata?.due_at) metadata.append(el("span", `Due ${formatSourceDate(record.metadata.due_at)}`));
-        if (record.metadata?.occurred_at) metadata.append(el("span", `Occurred ${formatSourceDate(record.metadata.occurred_at)}`));
+
+
+        if (record.about?.length && !(record.metadata?.entities?.length === 1 && record.metadata.entities[0] === aboutId)) { const about = el("span", "About "); for (const entity of record.about) about.append(button(entity.title, () => open(entity.id), "knowledge-quiet")); metadata.append(about); }
         copy.append(metadata);
         if (result.truncated) copy.append(el("small", "Excerpt — open claim for the complete text."));
         row.append(tile(record.kind === "relationship" ? record.type : record.claimKind ?? "claim", 28, record.kind), copy); card.append(row);
@@ -142,13 +159,26 @@ export default defineControlUiPlugin({
         const alive = () => !disposed && !vaultChanged && !context.signal.aborted && context.host.connection.connected && (card.isConnected || (live(n) && Boolean(staging?.contains(card))));
         const showEvidence = (loaded: Detail) => {
           evidenceBody.replaceChildren();
-          if (record.assertionOrigin === "agent_inference") evidenceBody.append(el("p", "This is the agent’s inference, not a quoted source statement. Supporting material, if any, is shown below.", "knowledge-notice"));
+          const details = el("dl", undefined, "knowledge-claim-details"), m = loaded.record?.metadata;
+          const field = (name: string, value: string | HTMLElement) => { const dd = el("dd"); dd.append(value); details.append(el("dt", name), dd); };
+          if (record.claimKind === "commitment") { field("Owner", record.owner ? button(record.owner.title, () => open(record.owner!.id), "knowledge-quiet") : "Owner not identified"); field("Deadline", m?.due_at ? formatSourceDate(m.due_at) : "No deadline recorded"); }
+          field("Source", record.source ? button(record.source.title, () => open(record.source!.id), "knowledge-quiet") : record.assertionOrigin === "user_belief" ? "Conversation not recorded" : "Source page not recorded");
+          const about = el("span"); for (const id of m?.entities ?? []) { const ref = loaded.references?.find(ref => ref.id === id); about.append(button(ref?.title ?? id, () => open(id), "knowledge-quiet")); }
+          if (about.childNodes.length) field("About", about);
+          field("Saved", `${record.recordedAt ? date(record.recordedAt) : "Time not recorded"} · revision ${record.revision}`); evidenceBody.append(details);
+          if (record.assertionOrigin === "agent_inference") evidenceBody.append(el("p", "No direct quote for this inference. Premises below.", "knowledge-notice"));
           const correct = button("Correct in chat", () => ask(record, true), "knowledge-quiet knowledge-correct"); correct.prepend(icon("pencil", 16));
-          if (loaded.evidence?.length) evidenceBody.append(evidenceView(feature, loaded, alive, errorText, undefined, correct));
+          if (loaded.evidence?.some(e => !e.verified) && !metadata.querySelector(".knowledge-unverified")) metadata.append(el("span", "Source file unavailable", "knowledge-unverified"));
+          if (loaded.evidence?.length) evidenceBody.append(evidenceView(feature, loaded, alive, errorText, undefined, record.lifecycle === "active" ? correct : undefined));
           else {
             if (record.attribution) evidenceBody.append(el("p", record.attribution, "knowledge-attribution"));
-            evidenceBody.append(el("p", "No source evidence recorded."), correct);
+            evidenceBody.append(el("p", "No source evidence recorded.")); if (record.lifecycle === "active") evidenceBody.append(correct);
           }
+          if (loaded.relatedStatements?.length) {
+            const related = el("section", undefined, "knowledge-related"); related.append(el("h4", "Related statements"));
+            for (const link of loaded.relatedStatements) { const row = el("div", undefined, "knowledge-related-row"); const verb = link.relation === "contradicts" ? "Conflicts with" : link.relation === "updates" ? link.incoming ? "Updated by" : "Updates" : link.incoming ? "Reaffirmed by" : "Reaffirms"; row.append(el("strong", verb), button(link.text || link.record.title, () => open(link.record.id), "knowledge-quiet"), el("small", origin(link.assertionOrigin, link.attribution)), el("p", `${link.basis}${link.source ? ` From ${link.source.title}.` : ""}`)); related.append(row); } evidenceBody.append(related);
+          }
+          if (!standalone) evidenceBody.append(button("Open claim", () => open(record.id), "knowledge-quiet"));
         };
         let loaded = Boolean(detail), loading = false;
         if (detail) showEvidence(detail);
@@ -156,7 +186,7 @@ export default defineControlUiPlugin({
           if (loaded || loading || !alive()) return;
           loading = true; evidenceBody.replaceChildren(el("p", "Loading evidence…", "knowledge-muted"));
           try {
-            const detail = await feature.invoke("record", { id: record.id, view: "summary", includeEvidence: true });
+            const detail = await feature.invoke("record", { id: record.id, view: "summary", includeEvidence: true, includeMetadata: true, includeReferences: true });
             if (!alive()) return;
             if (!detail.record || detail.record.hash !== record.hash) throw Error("Claim changed or is unavailable; reopen it to refresh evidence.");
             showEvidence(detail); loaded = true;
@@ -177,24 +207,31 @@ export default defineControlUiPlugin({
         const r = result.record, meta = r.metadata;
         const head = el("header", undefined, "knowledge-entity-header"), heading = el("div");
         heading.append(el("h2", r.title));
+        const occurred = r.occurredAt ?? meta?.occurred_at ?? (typeof meta?.fields?.occurred_at === "string" ? meta.fields.occurred_at : undefined);
+        if (occurred) { heading.append(el("p", `Occurred ${formatSourceDate(occurred)}`, "knowledge-occurred")); const note = sourceDateNote(occurred); if (note) heading.append(el("p", note, "knowledge-muted")); }
         const facts = el("div", undefined, "knowledge-inline-facts"); facts.append(el("span", label(r.type)));
         if (meta?.aliases?.length) { const aliases = el("span", "Also called ", "knowledge-aliases"); for (const alias of meta.aliases) aliases.append(chip(alias)); facts.append(aliases); }
-        if (meta?.identity?.status === "partial") facts.append(el("span", `Identity unresolved${meta.identity.context ? ` · ${meta.identity.context}` : ""}`, "knowledge-notice"));
+        facts.append(identityTag(meta?.identity?.status));
+        if (meta?.identity?.context) facts.append(el("span", `Context ${meta.identity.context}`));
         const fieldNodes = new Map<string, HTMLElement>();
-        for (const [name, value] of Object.entries(meta?.fields ?? {})) { const node = el("span", `${human(name)}: ${name === "occurred_at" && typeof value === "string" ? formatSourceDate(value) : typeof value === "object" ? JSON.stringify(value) : value}`); fieldNodes.set(name, node); facts.append(node); }
+        for (const [name, value] of Object.entries(meta?.fields ?? {})) { if (name === "occurred_at" || value === "" || value == null) continue; const node = el("span", `${human(name)}: ${name === "occurred_at" && typeof value === "string" ? formatSourceDate(value) : typeof value === "object" ? JSON.stringify(value) : value}`); fieldNodes.set(name, node); facts.append(node); }
         if (fieldNodes.size) pending.push(feature.invoke("ontology", { view: "definitions", name: r.type, limit: 1 }).then(schema => { if (!live(n)) return; for (const field of schema.definitions?.[0]?.fields ?? []) { const node = fieldNodes.get(field.name), value = meta?.fields?.[field.name]; if (node) node.textContent = `${field.label}: ${field.name === "occurred_at" && typeof value === "string" ? formatSourceDate(value) : typeof value === "object" ? JSON.stringify(value) : value}`; } }).catch(() => {}));
-        const askButton = button("Ask your agent", () => ask(r)); askButton.prepend(icon("messageSquare", 14));
-        heading.append(facts); const entityTile = tile(r.type, 48, r.kind); entityTile.classList.remove("knowledge-tile-plain"); head.append(entityTile, heading, askButton);
+        const askButton = button("Ask Molty", () => ask(r)); askButton.prepend(icon("messageSquare", 14));
+        heading.append(facts); if (r.type === "person" && meta?.identity?.context) heading.append(el("p", `“${meta.identity.context}” is how the source describes them. It isn’t recorded as a role or employer.`, "knowledge-muted")); const entityTile = tile(r.type, 48, r.kind); entityTile.classList.remove("knowledge-tile-plain"); head.append(entityTile, heading, askButton);
         const back = button("← Knowledge", () => { selectedId = ""; renderToolbar(); void load(); }, "knowledge-back"); back.setAttribute("aria-label", "← Knowledge"); back.replaceChildren(icon("arrowLeft", 14), el("span", "Knowledge"));
         const breadcrumb = el("nav", undefined, "knowledge-breadcrumb"); breadcrumb.setAttribute("aria-label", "Breadcrumb"); breadcrumb.append(back, icon("chevronRight", 12), el("span", label(r.type)));
         const grid = el("div", undefined, "knowledge-entity-grid"), main = el("div", undefined, "knowledge-entity-main"), aside = el("aside", undefined, "knowledge-entity-aside");
         if (!r.valid) main.append(el("p", "This record has validation issues.", "knowledge-notice"));
-        if (r.lifecycle !== "active") main.append(el("p", `${human(r.lifecycle)} — historical knowledge, not a current assertion.`, "knowledge-notice"));
+        if (r.lifecycle !== "active") { head.classList.add("knowledge-historical"); main.append(el("p", `Viewing history · ${r.lifecycle === "withdrawn" ? "Withdrawn" : "Replaced"}${meta?.lifecycle_change?.at ? ` ${date(meta.lifecycle_change.at)}` : ""}. ${r.lifecycle === "withdrawn" ? "Not used in search, connections or answers." : "An earlier version. Search and answers use the current one."}`, "knowledge-notice")); askButton.remove(); }
         const lifecycle = meta as Record<string, unknown> | undefined;
         const change = lifecycle?.lifecycle_change;
         if (change && typeof change === "object" && "reason" in change && typeof change.reason === "string") main.append(el("p", change.reason, "knowledge-notice"));
         if (typeof lifecycle?.superseded_by === "string") main.append(button("View replacement →", () => open(lifecycle.superseded_by as string), "knowledge-quiet"));
         if (typeof lifecycle?.supersedes === "string") main.append(button("View original assertion", () => open(lifecycle.supersedes as string), "knowledge-quiet"));
+        if (r.kind === "claim" && (meta?.supersedes || meta?.superseded_by)) {
+          const versions = el("section", undefined, "knowledge-versions"); versions.append(el("h3", "Versions")); main.append(versions);
+          pending.push((async () => { const seen = new Set<string>(), queue = [r.id]; while (queue.length && seen.size < 10) { const nextId = queue.shift()!; if (seen.has(nextId)) continue; seen.add(nextId); const version = nextId === r.id ? r : (await feature.invoke("record", { id: nextId, includeMetadata: true, maxChars: 4000 })).record; if (!live(n)) return; if (!version) continue; const item = el("div", undefined, "knowledge-version"); item.append(el("code", `rev ${version.revision}`), button(version.body || version.title, () => open(version.id), "knowledge-quiet"), el("small", `${version.lifecycle === "active" ? "Current · saved" : version.lifecycle === "withdrawn" ? "Withdrawn" : "Replaced"} ${version.metadata?.lifecycle_change?.at ? date(version.metadata.lifecycle_change.at) : version.recordedAt ? date(version.recordedAt) : "time not recorded"}`)); if (version.id === r.id) { item.classList.add("knowledge-version-viewing"); item.append(chip("Viewing")); } versions.append(item); for (const linked of [version.metadata?.supersedes, version.metadata?.superseded_by]) if (linked && !seen.has(linked)) queue.push(linked); } if (queue.length) versions.append(el("p", "Showing 10 linked versions. Open a version to continue.")); })().catch(error => { if (live(n)) versions.append(failure(error)); }));
+        }
         const body = el("div", undefined, "knowledge-summary");
         body.append(markdownView(r.body ?? "", targetId => {
           if (targetId !== id) { open(targetId); return; }
@@ -202,7 +239,7 @@ export default defineControlUiPlugin({
           const originals = files.querySelector<HTMLDetailsElement>(".knowledge-retained-originals");
           if (originals) { originals.open = true; originals.scrollIntoView({ block: "nearest" }); }
         }, result.links));
-        body.append(el("span", `Revision ${r.revision}${meta?.updated_at ? ` · updated ${date(meta.updated_at)}` : ""}`, "knowledge-summary-meta"));
+        body.append(el("span", `Written by Molty · revision ${r.revision}${meta?.updated_at ? ` · updated ${date(meta.updated_at)}` : ""}`, "knowledge-summary-meta"));
         if (meta?.attribution_confidence) {
           const confidence = meta.attribution_confidence;
           main.append(el("p", `Speaker attribution confidence: ${confidence.level}. ${confidence.basis}`, "knowledge-notice"));
@@ -211,17 +248,10 @@ export default defineControlUiPlugin({
           const candidates = el("section"); candidates.append(el("h3", "Possible identity matches"));
           for (const candidate of meta.identity.candidates) {
             const match = result.references?.find(ref => ref.id === candidate.id);
-            candidates.append(el("p", `${match?.title ?? "Candidate identity"}: ${candidate.basis}`));
+            const card = el("section", undefined, "knowledge-candidate knowledge-surface"); card.append(button(`Possible match: ${match?.title ?? "Candidate identity"}`, () => open(candidate.id), "knowledge-quiet"), el("p", candidate.basis), el("p", "Both records stay separate unless Molty finds evidence they’re the same person.", "knowledge-muted"), button("Ask Molty to check", () => ask(r, false, { id: candidate.id, title: match?.title ?? candidate.id }), "knowledge-quiet"));
+            for (const evidence of candidate.evidence) { const verified = result.identityEvidence?.find(item => item.id === candidate.id)?.evidence.find(e => e.path === evidence.path && e.sha256 === evidence.sha256 && e.start_line === evidence.start_line && e.end_line === evidence.end_line); if (verified) card.append(evidenceView(feature, { ...result, evidence: [verified], evidenceTotal: 1, evidenceSourceTotal: 1, nextEvidenceOffset: null }, () => live(n), errorText)); else card.append(el("p", `Evidence: ${evidence.filename ?? evidence.path}${evidence.start_line ? ` · lines ${evidence.start_line}–${evidence.end_line ?? evidence.start_line}` : ""}. Open the record to inspect this citation.`, "knowledge-muted")); } candidates.append(card);
           }
-          candidates.append(button("Discuss identity in chat", () => ask(r, true), "knowledge-quiet")); main.append(candidates);
-        }
-        if (meta?.continuity?.length) {
-          const continuity = el("section"); continuity.append(el("h3", "Related assertions — not replacements"));
-          for (const link of meta.continuity) {
-            const related = result.references?.find(ref => ref.id === link.id);
-            continuity.append(button(`${label(link.relation)}: ${related?.title ?? "View related assertion"}`, () => open(link.id), "knowledge-quiet"), el("p", link.basis));
-          }
-          main.append(continuity);
+          main.append(candidates);
         }
         if (r.kind === "page") main.append(body);
         else {
@@ -231,8 +261,12 @@ export default defineControlUiPlugin({
           statement.append(surface, el("p", `Revision ${r.revision}${meta?.updated_at ? ` · updated ${date(meta.updated_at)}` : ""}`, "knowledge-summary-meta")); main.append(statement);
         }
         if (result.content.nextOffset !== null) main.append(el("p", "Preview is truncated. Open the original Markdown in File details for paged content."));
+        const attended = el("section", undefined, "knowledge-attended"), attendanceRows = el("div", undefined, "knowledge-surface"); const attendanceIds = new Set<string>();
+        if (r.type === "meeting") { attended.append(el("h3", "Attended"), attendanceRows); main.append(attended); }
+        const knownFrom = el("span"); if (r.type === "person") facts.append(knownFrom);
+        const owned = el("section"); owned.append(el("h3", `Commitments owned · owner only, not about ${r.title}`));
         const claims = el("section"), connections = el("section"), learned = el("section");
-        if (r.kind === "page") { claims.append(el("h3", "What your agent knows")); main.append(claims); }
+        if (r.kind === "page") { claims.append(el("h3", "What Molty knows")); main.append(claims, owned); owned.hidden = true; }
         connections.append(el("h3", "Connections")); learned.append(el("h3", "Learned in"), el("p", "Conversation not recorded.", "knowledge-muted")); aside.append(connections, learned);
         const files = el("details", undefined, "knowledge-file-details"); files.dataset.readingKey = `files:${id}`; files.dataset.preserveSignature = `${r.hash}:${r.valid}`; const fileSummary = el("summary", "File details"); fileSummary.append(icon("chevronDown", 12)); files.append(fileSummary);
         const filePanel = el("div", undefined, "knowledge-surface knowledge-file-panel"), fileActions = el("div", undefined, "knowledge-file-actions");
@@ -247,6 +281,15 @@ export default defineControlUiPlugin({
         const historyList = el("div", undefined, "knowledge-history-list"); historyList.hidden = true;
         const historyButton = button("History", () => { historyList.hidden = !historyList.hidden; historyButton.setAttribute("aria-expanded", String(!historyList.hidden)); }, "knowledge-quiet"); historyButton.prepend(icon("clock", 14)); historyButton.setAttribute("aria-expanded", "false");
         fileActions.append(raw, historyButton); filePanel.append(fileActions, historyList, technical); files.append(filePanel); aside.append(files);
+        if (r.kind === "page" && result.sourceFiles?.length) {
+          const sources = el("section", undefined, "knowledge-sources"); sources.append(el("h3", "Sources"), el("p", `${result.sourceFilesTotal ?? result.sourceFiles.length} files · ${result.sourceFiles.reduce((sum, file) => sum + file.citations, 0)} citations from this ${r.type === "meeting" ? "meeting’s" : "source’s"} claims`, "knowledge-muted"));
+          for (const file of result.sourceFiles) { const item = el("div", undefined, "knowledge-source-file"); item.append(el("code", file.evidence.filename ?? file.evidence.path.split("/").at(-1)), el("p", `${file.evidence.mediaType ?? "Retained file"}${file.evidence.size !== undefined ? ` · ${file.evidence.size.toLocaleString()} bytes` : ""}`), el("p", file.citations ? `${file.citations} cited passages` : "Not cited directly"));
+            // Downloads use the citing claim when the source page doesn't itself retain this file.
+            const own = result.evidence?.some(e => e.path === file.evidence.path && e.sha256 === file.evidence.sha256);
+            if (own) { item.append(el("p", file.evidence.verified ? "File verified" : "Source file unavailable")); item.append(evidenceView(feature, { ...result, evidence: [file.evidence], evidenceTotal: 1, evidenceSourceTotal: 1, nextEvidenceOffset: null }, () => live(n), errorText)); } else item.append(el("p", file.evidence.verified ? "File verified · download from the citing claim" : "Source file unavailable")); sources.append(item);
+          }
+          if ((result.sourceFilesTotal ?? 0) > result.sourceFiles.length) sources.append(el("p", "Showing the first 100 files. Other files remain available from their citing claims.")); aside.insertBefore(sources, learned);
+        }
         if (r.kind === "page" && result.evidence?.length) { const originals = el("details", undefined, "knowledge-retained-originals"); originals.append(el("summary", "Retained originals"), evidenceView(feature, result, () => live(n), errorText)); filePanel.append(originals); }
         grid.append(main, aside); target.replaceChildren(breadcrumb, head, grid);
         if (r.kind === "claim" && meta?.entities?.length) {
@@ -290,16 +333,21 @@ export default defineControlUiPlugin({
             })),
           ]); if (!live(n)) return;
           for (const [i, link] of page.connections.entries()) {
-            if (link.direction === "claims" && r.kind === "page") { const card = cards[i]; if (!card) continue; const kind = card.dataset.kind!; let group = claimGroups.get(kind); if (!group) { group = el("div", undefined, "knowledge-claim-group"); group.append(el("h4", label(kind))); claimGroups.set(kind, group); claimSurface.append(group); } group.append(card); const count = group.querySelectorAll(".knowledge-claim").length; group.querySelector("h4")!.textContent = `${({belief:"Opinions",commitment:"Commitments",decision:"Decisions",preference:"Preferences",fact:"Facts",event:"Events"} as Record<string,string>)[kind] ?? label(kind)} · ${count}`; }
+            if (link.direction === "claims" && r.kind === "page") { const card = cards[i]; if (!card || (r.type === "meeting" && (link.record.sourceEvent || link.record.card?.source?.id !== id))) continue; if (card.dataset.kind === "Owned commitments") { owned.hidden = false; owned.append(card); continue; } const kind = card.dataset.kind!; let group = claimGroups.get(kind); if (!group) { group = el("div", undefined, "knowledge-claim-group"); group.append(el("h4", label(kind))); claimGroups.set(kind, group); claimSurface.append(group); } group.append(card); const count = group.querySelectorAll(".knowledge-claim").length; group.querySelector("h4")!.textContent = `${({belief:"Beliefs",commitment:"Commitments",decision:"Decisions",preference:"Preferences",fact:"Facts",event:"Events"} as Record<string,string>)[kind] ?? label(kind)} · ${count}`; }
             else { const row = el("div", undefined, "knowledge-connection"), target = endpoints[i] ?? link.record;
+              if (link.label === "attended" && ((r.type === "meeting" && link.to === id) || (r.type === "person" && link.from === id))) {
+                attendanceIds.add(target.id);
+                if (r.type === "person") knownFrom.textContent = `Known from ${attendanceIds.size} meeting${attendanceIds.size === 1 ? "" : "s"}${page.nextOffset !== null ? " shown" : ""}`;
+                else { const attendee = el("div", undefined, "knowledge-attendee"); attendee.append(summaryLink(target), el("p", link.record.attributionConfidence?.basis ?? "No attribution basis recorded"), confidenceView(link.record.attributionConfidence, true)); attendanceRows.append(attendee); attended.querySelector("h3")!.textContent = `Attended · ${attendanceIds.size} people${page.nextOffset !== null ? " shown" : ""} · from attendance connections`; }
+              }
               const destination = button("", () => open(target.id), "knowledge-connection-link"), copy = el("span", undefined, "knowledge-connection-copy");
               copy.append(el("small", `${link.direction === "incoming" ? "← " : link.direction === "outgoing" || link.direction === "links" || link.direction === "backlinks" ? "" : "Depends on this · "}${label(link.label ?? link.direction)}`), el("span", target.title));
-              destination.append(tile(target.type, 24, target.kind), copy); row.append(destination);
+              destination.append(tile(target.type, 24, target.kind), copy); row.append(destination); if (endpoints[i]) copy.querySelector("small")!.append(confidenceView(link.record.attributionConfidence, true));
               if (endpoints[i]) { const detail = button("", () => open(link.record.id), "knowledge-connection-evidence"); detail.setAttribute("aria-label", "Relationship evidence"); detail.title = "Relationship evidence"; detail.append(icon("paperclip", 13)); row.append(detail); } refs.append(row); }
           }
-          if (r.kind === "page") { const count = claims.querySelectorAll(".knowledge-claim").length; const heading = claims.querySelector("h3")!; heading.replaceChildren(document.createTextNode("What your agent knows "), el("span", `${count} ${count === 1 ? "claim" : "claims"}${page.nextOffset !== null ? " shown" : ""}`, "knowledge-section-count")); }
+          if (r.kind === "page") { const count = claims.querySelectorAll(".knowledge-claim").length; const heading = claims.querySelector("h3")!; heading.replaceChildren(document.createTextNode("What Molty knows "), el("span", `${count} ${count === 1 ? "claim" : "claims"}${page.nextOffset !== null ? " shown" : ""}`, "knowledge-section-count")); }
           loadMore.remove(); if (page.nextOffset !== null) { linkOffset = page.nextOffset; connections.append(loadMore); }
-          else { if (!refs.children.length) { refs.remove(); connections.append(el("p", "No connections recorded.", "knowledge-muted")); } if (r.kind === "page" && !claimGroups.size) { claimSurface.remove(); claims.append(el("p", "No active linked claims. Tell your agent in chat to add knowledge.")); } }
+          else { if (!refs.children.length) { refs.remove(); connections.append(el("p", "No connections recorded.", "knowledge-muted")); } if (r.kind === "page" && !claimGroups.size) { claimSurface.remove(); claims.append(el("p", `No claims about ${r.title}.${r.type === "person" && attendanceIds.size ? " Only attendance is recorded." : ""}`)); } }
         }
         const loadMore = button("More claims and connections", () => { ++connectionPages; loadMore.disabled = true; void moreConnections().catch(error => { connections.append(failure(error)); }).finally(() => { loadMore.disabled = false; }); });
         pending.push((async () => {
@@ -321,23 +369,28 @@ export default defineControlUiPlugin({
         await Promise.all(pending);
       }
       async function browse(n: number, target: HTMLElement) {
-        const result = await feature.invoke("records", { kind, offset, limit: 50, includeCards: kind === "claim", ...(type ? { type } : {}) });
+        const result = await feature.invoke("records", { kind, offset, limit: 50, includeCards: kind === "claim", ...(type ? { type } : {}), ...(browseQuery ? { query: browseQuery } : {}), ...(includeHistory ? { lifecycle: "all" } : {}), ...(originFilter && kind === "claim" ? { assertionOrigin: originFilter } : {}) });
         if (!live(n)) return;
         const layout = el("div", undefined, "knowledge-browse"), facets = el("nav", undefined, "knowledge-facets"); facets.setAttribute("aria-label", "Types");
         const facet = (name: string, label: string, count?: number) => { const control = button(label, () => { type = name; offset = 0; void load(); }, "knowledge-facet"); control.prepend(name ? tile(name, 20) : el("span", undefined, "knowledge-facet-spacer")); control.setAttribute("aria-pressed", String(type === name)); if (count !== undefined) control.append(el("span", count.toLocaleString(), "knowledge-facet-count")); facets.append(control); };
-        facet("", "Everything", kind === "page" && vocabulary ? vocabulary.definitions.reduce((sum, d) => sum + d.recordCount, 0) : !type ? result.total : undefined);
+        facet("", kind === "claim" ? "All claims" : "Everything", kind === "page" && vocabulary ? vocabulary.definitions.reduce((sum, d) => sum + d.recordCount, 0) : !type ? result.total : undefined);
         if (kind === "page" && vocabulary) { let group = ""; for (const def of [...vocabulary.definitions].filter(d => d.recordCount > 0).sort((a, b) => ["entity", "concept", "media", "temporal", "annotation"].indexOf(a.primitive) - ["entity", "concept", "media", "temporal", "annotation"].indexOf(b.primitive))) { if (group !== def.primitive) { group = def.primitive; facets.append(el("h3", ({entity:"People & things",concept:"Ideas & projects",media:"Sources & writing",temporal:"Events & conversations",annotation:"Annotations"} as Record<string,string>)[group] ?? human(group), "knowledge-eyebrow")); } facet(def.name, ({Person:"People",Company:"Companies",Project:"Projects",Concept:"Concepts",Meeting:"Meetings",Note:"Notes",Source:"Sources"} as Record<string,string>)[def.label] ?? def.label, def.recordCount); } facets.append(el("p", `${vocabulary.definitions.filter(d => !d.recordCount).length} empty types hidden`, "knowledge-muted")); }
+        if (kind === "claim" && result.facets) { facets.prepend(el("h3", "Claim kinds", "knowledge-eyebrow")); for (const [name, count] of Object.entries(result.facets.kinds)) if (count > 0) facet(name, label(name), count); const origins = Object.entries(result.facets.origins); facets.append(el("p", `${origins.length === 1 && origins[0][0] === "source" ? `All ${origins[0][1]} claims are from sources.` : origins.map(([name, count]) => `${count} ${origin(name)}`).join(" · ")} Kinds with no claims are hidden.`, "knowledge-muted")); }
         const panel = el("div", undefined, "knowledge-surface knowledge-table-wrap"), controls = el("div", undefined, "knowledge-table-toolbar");
-        controls.append(searchForm(true));
+        const filter = el("form", undefined, "knowledge-browse-filter"), input = el("input"); input.type = "search"; input.placeholder = kind === "claim" ? "Filter claim text" : "Filter by name or alias"; input.setAttribute("aria-label", input.placeholder); input.value = browseQuery; filter.append(input); filter.onsubmit = event => { event.preventDefault(); browseQuery = input.value.trim(); offset = 0; void load(); }; input.onchange = () => { browseQuery = input.value.trim(); offset = 0; void load(); }; controls.append(filter);
         const kinds = el("div", undefined, "knowledge-kind-switch"); kinds.setAttribute("role", "group"); kinds.setAttribute("aria-label", "Record kind");
         for (const [value, label] of [["page", "Pages"], ["claim", "Claims"], ["relationship", "Connections"]] as const) { const b = button(label, () => { kind = value; type = ""; offset = 0; void load(); }, "knowledge-quiet"); b.setAttribute("aria-pressed", String(kind === value)); kinds.append(b); }
-        controls.append(kinds); panel.append(controls);
-        if (kind === "claim") { const cards = result.records.map(r => claimCard(r, n)); for (const card of cards) if (card) panel.append(card); }
-        else { const table = el("table", undefined, "data-table knowledge-table"), head = el("thead"), row = el("tr"); for (const label of ["Name", "Type", "Occurred", "Status"]) row.append(el("th", label)); head.append(row); table.append(head); const body = el("tbody"); for (const record of result.records) { const row = el("tr"), name = el("td"); name.append(summaryLink(record)); row.append(name, el("td", label(record.type)), el("td", record.occurredAt ? formatSourceDate(record.occurredAt) : "—"), el("td", record.valid ? human(record.lifecycle) : "Needs attention")); body.append(row); } table.append(body); panel.append(table); }
+        controls.append(kinds);
+        const history = el("div", undefined, "knowledge-kind-switch"); for (const [all, name] of [[false, "Current"], [true, "Include history"]] as const) { const b = button(name, () => { includeHistory = all; offset = 0; void load(); }, "knowledge-quiet"); b.setAttribute("aria-pressed", String(includeHistory === all)); history.append(b); } controls.append(history);
+        if (kind === "claim" && result.facets && Object.keys(result.facets.origins).length > 1) { const select = el("select"); select.setAttribute("aria-label", "Assertion origin"); for (const value of ["", ...Object.keys(result.facets.origins)]) { const option = el("option", value ? origin(value) : "All origins"); option.value = value; select.append(option); } select.value = originFilter; select.onchange = () => { originFilter = select.value; offset = 0; void load(); }; controls.append(select); }
+        panel.append(controls);
+        if (kind === "claim") { for (const record of result.records) { if (record.lifecycle !== "active") { const row = el("div", undefined, "knowledge-historical knowledge-connection"); row.append(summaryLink(record), el("small", `${record.lifecycle === "withdrawn" ? "Withdrawn" : "Replaced"} · ${record.updatedAt ? date(record.updatedAt) : "Time not recorded"}`)); panel.append(row); } else { const card = claimCard(record, n); if (card) panel.append(card); } } }
+        else if (kind === "relationship") { await Promise.all(result.records.map(async record => { const row = el("div", undefined, "knowledge-connection knowledge-browse-connection"); panel.append(row); const endpoints = await Promise.all([record.from, record.to].map(id => id ? feature.invoke("record", { id, view: "summary" }).then(r => r.record) : null)); if (!live(n)) return; for (const [i, endpoint] of endpoints.entries()) { if (i) row.append(el("span", label(record.label ?? record.type))); row.append(endpoint ? summaryLink(endpoint) : el("span", "Page unavailable")); } row.append(record.lifecycle === "active" ? confidenceView(record.attributionConfidence, true) : button(`Withdrawn · ${record.updatedAt ? date(record.updatedAt) : "Time not recorded"}`, () => open(record.id), "knowledge-quiet")); })); }
+        else { const table = el("table", undefined, "data-table knowledge-table"), head = el("thead"), row = el("tr"); for (const label of ["Name", "Type", "Occurred", "Last updated"]) row.append(el("th", label)); head.append(row); table.append(head); const body = el("tbody"); for (const record of result.records) { const row = el("tr"), name = el("td"); name.append(summaryLink(record)); row.append(name, el("td", label(record.type)), el("td", record.occurredAt ? `${formatSourceDate(record.occurredAt)}${/^\d{4}-\d{2}-\d{2}$/.test(record.occurredAt) ? " · date only" : ""}` : "—"), el("td", record.updatedAt ? date(record.updatedAt) : "Not recorded")); body.append(row); } table.append(body); panel.append(table); }
         if (!result.records.length) panel.append(empty("Nothing here yet", "Tell your agent in chat and saved knowledge will appear here."));
         const pages = el("div", undefined, "knowledge-pagination");
         const capped = result.nextOffset !== null && result.nextOffset > 500;
-        pages.append(el("span", `${result.total ? offset + 1 : 0}–${offset + result.records.length} of ${result.total.toLocaleString()} · ${result.total > 550 ? "partial browse access" : "complete inventory, paginated"}`));
+        pages.append(el("span", `${result.total ? offset + 1 : 0}–${offset + result.records.length} of ${result.total.toLocaleString()} · ${result.total > 550 ? "partial browse access" : `complete list${includeHistory ? " · including history" : ""}`}`));
         const previous = button("Previous", () => { offset = Math.max(0, offset - 50); void load(); }); previous.disabled = !offset;
         const next = button("Next", () => { offset = result.nextOffset!; void load(); }); next.disabled = result.nextOffset === null || capped; pages.append(previous, next); panel.append(pages);
         if (capped) panel.append(el("p", "This server cannot page beyond 550 records. Narrow the type filter to see more.", "knowledge-notice"));
@@ -345,52 +398,75 @@ export default defineControlUiPlugin({
       }
       async function recent(n: number, target: HTMLElement) {
         const activity = await feature.invoke("recent", { limit: 20, groupBySource: true, ...recentCursor }); if (!live(n)) return;
+        if (!recentCursor) recentSequence = activity.upperSequence;
         const feed = el("div", undefined, "knowledge-feed");
-        let currentDay = "", group: HTMLElement | undefined;
+        let currentDay = "", group: HTMLElement | undefined, lifecycleGroup: HTMLElement | undefined; let firstSource = true;
         for (const entry of activity.items) {
           const day = new Date(entry.at).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" });
           if (day !== currentDay) {
             currentDay = day;
-            feed.append(el("h2", new Date(entry.at).toDateString() === new Date().toDateString() ? "Today" : day, "knowledge-eyebrow"));
+            const zone = new Intl.DateTimeFormat(undefined, { timeZoneName: "short" }).formatToParts(new Date(entry.at)).find(p => p.type === "timeZoneName")?.value ?? "local time";
+            feed.append(el("h2", `${new Date(entry.at).toDateString() === new Date().toDateString() ? `Today · ${day}` : day} · saved times in ${zone}`, "knowledge-eyebrow")); lifecycleGroup = undefined;
             group = el("section", undefined, "knowledge-surface"); feed.append(group);
           }
           const lifecycle = entry.change === "corrected" || entry.change === "withdrawn";
           const row = el("article", undefined, "knowledge-feed-item"); row.dataset.change = entry.change; row.dataset.readingKey = `activity:${entry.sequence}`;
           const copy = el("span", undefined, "knowledge-feed-copy");
           const kindLabel = entry.kind === "relationship" ? "Connection" : label(entry.type);
-          const time = new Date(entry.at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
-          const badgeLabel = ({created:"New", updated:"Updated", observed:"Observed", external:"Edited", corrected:"Corrected", withdrawn:"Withdrawn"})[entry.change];
+          const savedTime = time(entry.at);
+          const badgeLabel = ({created:"New", updated:"Updated", observed:"Observed in vault", external:"Edited outside OpenClaw", corrected:"Corrected", withdrawn:"Withdrawn"})[entry.change];
           const badge = chip(badgeLabel); if (entry.change === "created") badge.classList.add("knowledge-chip-new");
-          copy.append(el("span", entry.title || `${kindLabel} ${entry.change}`, "knowledge-feed-title"));
+          copy.append(el("span", entry.title || `${kindLabel} ${entry.change}`, "knowledge-feed-title"), identityTag(entry.identityStatus));
           const description = entry.change === "corrected" ? `${kindLabel} · Corrected` : entry.change === "withdrawn" ? `${kindLabel} · Withdrawn` : entry.change === "external" ? `${kindLabel} · Edited outside OpenClaw` : kindLabel;
-          copy.append(el("span", `${description} · ${time}`, "knowledge-feed-meta"));
+          copy.append(el("span", `${description} · Saved ${savedTime}`, "knowledge-feed-meta"));
           if (entry.group) {
             const source = entry.group.source, key = `source:${source.id}`;
-            const disclosure = el("details", undefined, "knowledge-activity-details"); disclosure.dataset.readingKey = key; disclosure.open = recentExpanded.has(key);
+            const disclosure = el("details", undefined, "knowledge-activity-details"); disclosure.dataset.readingKey = key; disclosure.open = recentExpanded.has(key) || (firstSource && !recentCursor && !recentExpanded.size); firstSource = false;
             disclosure.ontoggle = () => { if (disclosure.isConnected) { if (disclosure.open) recentExpanded.add(key); else recentExpanded.delete(key); } };
             const summary = el("summary", undefined, "knowledge-activity-summary"), text = el("span", undefined, "knowledge-feed-copy");
-            text.append(el("span", source.title, "knowledge-feed-title"), el("span", Object.entries(entry.group.counts).map(([kind, count]) => `${count} ${kind === "attendees" ? "attendees" : count === 1 ? kind : `${kind}s`}`).join(" · ") || `${entry.group.total} saved records`, "knowledge-feed-meta"));
-            summary.append(tile(source.type, 28), text, el("small", `Source group · saved ${time}`), icon("chevronDown", 14));
+            text.append(el("span", source.title, "knowledge-feed-title"));
+            if (source.occurredAt) text.append(el("span", `Occurred ${formatSourceDate(source.occurredAt)}`, "knowledge-feed-meta"));
+            const names: Record<string, string> = { attendees: "attended", decision: "decisions", commitment: "commitments", event: "events", belief: "beliefs", fact: "facts", preference: "preferences", page: "pages" };
+            text.append(el("span", Object.keys(names).filter(kind => entry.group!.counts[kind]).map(kind => `${entry.group!.counts[kind]} ${entry.group!.counts[kind] === 1 && kind !== "attendees" ? names[kind].replace(/s$/, "") : names[kind]}`).concat(entry.group.counts.sourceEvent ? ["meeting event"] : []).join(" · "), "knowledge-feed-meta"));
+            summary.append(tile(source.type, 28), text, el("small", `Source group · Saved ${entry.group.firstSaved && entry.group.lastSaved && time(entry.group.firstSaved) !== time(entry.group.lastSaved) ? `${time(entry.group.firstSaved)}–${time(entry.group.lastSaved)}` : savedTime} · ${entry.group.total} ${entry.group.total === 1 ? "record" : "records"}`), icon("chevronDown", 14));
             const detail = el("div", undefined, "knowledge-activity-body"); detail.append(button("Open source", () => open(source.id), "knowledge-quiet"));
-            for (const record of entry.group.records) if (record.id !== source.id && !record.sourceEvent) detail.append(summaryLink(record));
-            if (entry.group.truncated) detail.append(el("p", "Showing the first 20 records; open the source for linked knowledge."));
+            const attendance = el("details", undefined, "knowledge-attendance-group"); attendance.dataset.readingKey = `${key}:attendance`;
+            attendance.append(el("summary", `${entry.group.counts.attendees ?? 0} attended`), el("p", `${entry.group.counts.attendees ?? 0} attendance connections · each with its own attribution`, "knowledge-muted"));
+            const namesSeen: string[] = []; let attendanceShown = false;
+            const appendRecords = async (records: typeof entry.group.records) => {
+              for (const record of [...records].sort((a, b) => ["page", "relationship", "claim"].indexOf(a.kind) - ["page", "relationship", "claim"].indexOf(b.kind))) {
+                if (record.sourceEvent) continue;
+                if (record.kind === "relationship" && record.label === "attended" && record.to === source.id) {
+                  if (!attendanceShown) { detail.append(attendance); attendanceShown = true; }
+                  const person = record.from ? (await feature.invoke("record", { id: record.from, view: "summary" })).record : null;
+                  if (!live(n)) return;
+                  const row = el("div", undefined, "knowledge-attendee"); if (person) { row.append(summaryLink(person)); namesSeen.push(person.title); } else row.append(el("span", "Person unavailable"));
+                  row.append(el("p", record.attributionConfidence?.basis ?? "No attribution basis recorded"), confidenceView(record.attributionConfidence, true)); attendance.append(row);
+                  attendance.querySelector("summary")!.textContent = `${namesSeen.slice(0, 3).join(", ")}${(entry.group!.counts.attendees ?? 0) > 3 ? ` and ${entry.group!.counts.attendees - 3} more` : ""} attended`;
+                } else if (record.kind === "claim") { const card = claimCard(record, n); if (card) detail.append(card); }
+                else { const row = el("div", undefined, "knowledge-source-record"); row.append(summaryLink(record), chip(record.change === "created" ? "New" : record.change === "updated" ? "Updated" : "Observed in vault")); if (record.occurredAt) row.append(el("small", `Occurred ${formatSourceDate(record.occurredAt)}`)); detail.append(row); }
+              }
+            };
+            await appendRecords(entry.group.records);
+            let recordOffset = entry.group.nextRecordOffset;
+            if (recordOffset != null) { const more = button(`Load ${entry.group.total - recordOffset} more from this source`, () => { more.disabled = true; void (async () => { const page = await feature.invoke("recent", { groupBySource: true, sourceId: source.id, recordOffset: recordOffset!, upperSequence: activity.upperSequence }); if (!live(n)) return; const next = page.items.find(item => item.group?.source.id === source.id)?.group; if (!next) throw Error("Source changed; reopen Recent to refresh."); await appendRecords(next.records); recordOffset = next.nextRecordOffset; if (recordOffset == null) more.remove(); else { more.textContent = `Load ${next.total - recordOffset} more from this source`; detail.append(more); } })().catch(error => detail.append(failure(error))).finally(() => { more.disabled = false; }); }, "knowledge-quiet"); detail.append(more); }
             disclosure.append(summary, detail); row.append(disclosure);
           } else if (lifecycle) {
             row.classList.add("knowledge-activity-event");
             const disclosure = el("details", undefined, "knowledge-activity-details"), summary = el("summary", undefined, "knowledge-activity-summary");
             disclosure.open = recentExpanded.has(entry.sequence);
             disclosure.ontoggle = () => { if (disclosure.isConnected) { if (disclosure.open) recentExpanded.add(entry.sequence); else recentExpanded.delete(entry.sequence); } };
-            summary.append(tile(entry.type, 28, entry.kind), copy, badge, icon("chevronDown", 14));
+            summary.append(icon(entry.change === "corrected" ? "repeat" : "archive", 20), copy, badge, icon("chevronDown", 14));
             const detail = el("div", undefined, "knowledge-activity-body");
             const explanation = entry.change === "withdrawn"
-              ? "This is no longer used as current knowledge. You can still read it in history."
+              ? "It no longer appears in connections, search or answers. The original and its evidence are kept in history."
               : entry.replacementActive
-                ? "A corrected version is now used instead. The earlier version is kept in history."
+                ? "This replaced an earlier version. Search and answers now use the current version."
                 : "A corrected version was saved, but it is no longer current either. Both versions are kept in history.";
             detail.append(el("p", explanation, "knowledge-activity-reason"));
             const links = el("div", undefined, "knowledge-activity-links");
-            links.append(button(entry.change === "corrected" ? "View original" : "View history", () => open(entry.id), "knowledge-quiet"));
-            if (entry.replacementId) links.append(button(entry.replacementActive ? "View replacement" : "View replacement history", () => open(entry.replacementId!), "knowledge-quiet"));
+            links.append(button("View in history", () => open(entry.id), "knowledge-quiet"));
+            if (entry.replacementId) links.append(button(entry.replacementActive ? "Current version" : "View replacement history", () => open(entry.replacementId!), "knowledge-quiet"));
             detail.append(links); disclosure.append(summary, detail); row.append(disclosure);
             if (entry.reason) {
               const reason = el("details", undefined, "knowledge-activity-audit");
@@ -401,12 +477,12 @@ export default defineControlUiPlugin({
             const item = button("", () => open(entry.id), "knowledge-feed-link");
             item.append(tile(entry.type, 28, entry.kind), copy); row.append(item, badge);
           }
-          group!.append(row);
+          if (lifecycle) { if (!lifecycleGroup) { lifecycleGroup = el("section", undefined, "knowledge-lifecycle-group"); lifecycleGroup.append(el("h3", "Corrections & withdrawals", "knowledge-eyebrow")); group!.prepend(lifecycleGroup); } lifecycleGroup.append(row); lifecycleGroup.querySelector("h3")!.textContent = `Corrections & withdrawals · ${lifecycleGroup.querySelectorAll("article").length}`; } else group!.append(row);
         }
         if (!activity.items.length) feed.append(empty("No recent activity", "Knowledge saved by your agent will appear here. Earlier revisions remain in each record’s history."));
         const pages = el("div", undefined, "knowledge-pagination");
         if (recentBack.length) pages.append(button("Newer activity", () => { recentCursor = recentBack.pop(); void load(); }));
-        if (activity.nextBefore !== null) pages.append(button("Older activity", () => { recentBack.push(recentCursor); recentCursor = { upperSequence: activity.upperSequence, beforeSequence: activity.nextBefore! }; void load(); }));
+        if (activity.nextBefore !== null) pages.append(button("Load older activity", () => { recentBack.push(recentCursor); recentCursor = { upperSequence: activity.upperSequence, beforeSequence: activity.nextBefore! }; void load(); }));
         feed.append(pages); target.replaceChildren(feed);
       }
       async function load(background = false): Promise<boolean> {
@@ -462,7 +538,7 @@ export default defineControlUiPlugin({
       let refreshing = false, refreshAgain = false;
       async function refresh() {
         if (vaultChanged || disposed) return;
-        if (!context.host.connection.connected) { ++statusGeneration; snapshot = undefined; status.textContent = "Disconnected"; status.dataset.live = "false"; void load(); return; }
+        if (!context.host.connection.connected) { ++statusGeneration; status.textContent = viewReady ? "Reconnecting…" : "Offline"; status.dataset.live = "false"; banner.hidden = false; banner.textContent = `Can’t reach the vault. ${viewReady ? `Showing the last readable view, checked at ${lastChecked ? time(lastChecked) : "an unknown time"}. Retrying.` : "Reconnect to read your agent’s knowledge."}`; return; }
         if (refreshing) { refreshAgain = true; return; }
         refreshing = true;
         const n = ++statusGeneration, observedGeneration = generation;
@@ -471,14 +547,20 @@ export default defineControlUiPlugin({
           const nextIdentity = JSON.stringify([report.agent, report.vault, report.scope]);
           if (identity && identity !== nextIdentity) { vaultChanged = true; ++generation; ++suggestGeneration; toolbar.replaceChildren(); root.querySelector(".knowledge-chat-handoff")?.remove(); status.textContent = "Vault changed"; status.dataset.live = "false"; content.replaceChildren(empty("Vault changed", "Reload this page to open the newly connected vault.")); return; }
           identity = nextIdentity; agentId = report.agent;
+          lastChecked = new Date().toISOString(); status.title = `Checked ${time(lastChecked)}`;
           status.textContent = report.live === "watching" ? "Live" : "Periodic refresh"; status.dataset.live = String(report.live === "watching");
-          banner.hidden = !report.sample; banner.textContent = report.sample ? "Sample vault · Fictional people and projects. Your private knowledge is not connected." : "";
+          sampleChip.hidden = !report.sample; banner.hidden = true; banner.textContent = "";
           if (viewReady && report.snapshot && snapshot === report.snapshot) return;
           vocabulary = await loadVocabulary(feature); if (disposed || n !== statusGeneration) return;
           const pageCount = vocabulary.definitions.reduce((sum, d) => sum + d.recordCount, 0);
           const countBadge = el("span", pageCount.toLocaleString(), "knowledge-tab-count"); countBadge.setAttribute("aria-hidden", "true"); browseTab.replaceChildren(document.createTextNode("Browse"), countBadge);
           // A navigation started during the check owns the screen now.
           if (generation !== observedGeneration) return;
+          if (viewReady && tab === "recent" && !selectedId && !recentCursor) {
+            const recent = await feature.invoke("recent", { limit: 50, groupBySource: true }); if (disposed || n !== statusGeneration || generation !== observedGeneration) return;
+            const count = recent.items.filter(item => item.sequence > recentSequence).length;
+            pendingSnapshot = report.snapshot; updates.textContent = count ? `↑ ${count}${recent.nextBefore !== null ? "+" : ""} activity ${count === 1 ? "update" : "updates"} · Show` : "Knowledge changed · Show"; updates.hidden = false; return;
+          }
           if (await load(viewReady)) snapshot = report.snapshot;
         } catch (error) { if (!disposed && n === statusGeneration) { status.textContent = "Refresh unavailable"; status.dataset.live = "false"; if (!viewReady) content.replaceChildren(failure(error)); } }
         finally { refreshing = false; if (refreshAgain) { refreshAgain = false; void refresh(); } }

@@ -54,6 +54,14 @@ test('context annotations preserve assertion text/lifecycle, append evidence, an
   assert.equal(read.record.lifecycle,'active');assert.equal(read.record.metadata.supersedes,undefined);
   assert.equal(read.record.metadata.evidence.length,1,'Identical support is not duplicated');
   assert.equal(read.record.metadata.continuity[0].id,original.id);
+  assert.equal(read.relatedStatements[0].incoming,false);
+  const reverse=await f.service.record({id:original.id},f.owner);
+  assert.equal(reverse.relatedStatements[0].record.id,second.id);
+  assert.equal(reverse.relatedStatements[0].incoming,true);
+  assert.equal(reverse.relatedStatements[0].source.id,f.source.id);
+  const inventory=await f.service.records({kind:'claim',query:'reaffirmed'},f.owner);
+  assert.equal(inventory.total,1);assert.equal(inventory.facets.kinds.commitment,2);assert.equal(inventory.facets.origins.source,2);
+  assert.equal((await f.service.records({kind:'claim',assertionOrigin:'agent_inference'},f.owner)).total,0);
   assert.equal((await f.service.annotate(input,f.owner)).revision,result.revision,'Replay retains the accepted mutation');
   await assert.rejects(f.service.annotate({...input,requestId:randomUUID()},f.owner),/conflict/);
   await assert.rejects(f.service.annotate({...input,annotations:{body:'Changed meaning'}},f.owner),/Invalid/);
@@ -119,12 +127,16 @@ test('new records with shared annotation evidence serialize without YAML aliases
 test('source groups are counted before pagination; repeated saves and new activity do not split a source group',async t=>{
   const f=await setup(t), sourceB=await f.page('Meeting B');
   await f.claim({source_page:sourceB.id,title:'Other source commitment'});
-  for(let i=0;i<4;i++) await f.claim({title:`Meeting A commitment ${i}`});
+  for(let i=0;i<23;i++) await f.claim({title:`Meeting A commitment ${i}`});
   const first=await f.service.recent({groupBySource:true,limit:1},f.owner);
   assert.ok(Check(contract.operations.recent.output,first));
   assert.equal(first.items.length,1);assert.equal(first.items[0].group.source.id,f.source.id);
-  assert.equal(first.items[0].group.counts.commitment,4);
-  assert.equal(first.items[0].group.total,5,'Source page and four distinct claims');
+  assert.equal(first.items[0].group.counts.commitment,23);
+  assert.equal(first.items[0].group.total,24,'Source page and twenty-three distinct claims');
+  const continuation=await f.service.recent({groupBySource:true,sourceId:f.source.id,recordOffset:first.items[0].group.nextRecordOffset,upperSequence:first.upperSequence},f.owner);
+  assert.equal(continuation.items[0].group.records.length,4);assert.equal(continuation.items[0].group.nextRecordOffset,null);
+  assert.equal(new Set([...first.items[0].group.records,...continuation.items[0].group.records].map(r=>r.id)).size,24);
+  assert.ok(first.items[0].group.records.some(r=>r.card?.body));
   await f.claim({title:'New activity after the pinned upper sequence'});
   const next=await f.service.recent({groupBySource:true,limit:1,upperSequence:first.upperSequence,beforeSequence:first.nextBefore},f.owner);
   assert.equal(next.items[0].group.source.id,sourceB.id);

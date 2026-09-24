@@ -10,18 +10,21 @@ export const Summary = Type.Object({
   id: text(96), title: text(200), kind: text(30), type: text(64), path: text(500),
   lifecycle: text(20), revision: Type.Integer(), valid: Type.Boolean(),
   recordedAt: Type.Optional(text(40)), updatedAt: Type.Optional(text(40)), occurredAt: Type.Optional(text(40)),
+  from: Envelope.properties.from, to: Envelope.properties.to, label: Envelope.properties.label,
+  attributionConfidence: Envelope.properties.attribution_confidence,
   identityStatus: Type.Optional(text(20)), identityContext: Type.Optional(text(1000)), sourceEvent: Type.Optional(Type.Boolean()),
 });
 // Bounded card data, projected from the same authorized scan as the list.
 // Evidence files and full metadata are deliberately loaded only on disclosure.
 export const ClaimCard = Type.Object({
   hash: text(64), body: text(4000), truncated: Type.Boolean(), evidenceTotal: Type.Integer(),
-  evidenceSourceTotal: Type.Optional(Type.Integer()), owner: Type.Optional(Summary), source: Type.Optional(Summary),
+  evidenceSourceTotal: Type.Optional(Type.Integer()), about: Type.Optional(Type.Array(Summary, { maxItems: 2 })), owner: Type.Optional(Summary), source: Type.Optional(Summary),
   attribution: Type.Optional(text(1000)), assertionOrigin: Type.Optional(text(30)), claimKind: Type.Optional(text(30)),
   metadata: Type.Object({
     entities: Envelope.properties.entities, owner: Envelope.properties.owner,
     due_at: Envelope.properties.due_at, occurred_at: Envelope.properties.occurred_at,
-    source_event: Envelope.properties.source_event,
+    source_event: Envelope.properties.source_event, supersedes: Envelope.properties.supersedes,
+    continuity: Envelope.properties.continuity, attribution_confidence: Envelope.properties.attribution_confidence,
   }, { additionalProperties: false }),
 }, { additionalProperties: false });
 export const CardSummary = Type.Object({ ...Summary.properties, card: Type.Optional(ClaimCard) });
@@ -36,19 +39,24 @@ export const RecordInput = Type.Object({
   maxEvidenceChars: Type.Optional(Type.Integer({ minimum: 0, maximum: 20000 })),
 }, { additionalProperties: false });
 export type RecordInput = Static<typeof RecordInput>;
+export const InspectedEvidence = Type.Object({ ...Evidence.properties, excerpt: text(20000), verified: Type.Boolean(), excerptTruncated: Type.Boolean() });
 export const RecordOutput = Type.Object({
   view: Type.Union([Type.Literal("content"), Type.Literal("summary"), Type.Literal("raw")]),
   record: Type.Union([Type.Intersect([Summary, Type.Object({
     hash: text(64), body: Type.Optional(text(65536)), raw: Type.Optional(text(65536)),
     metadata: Type.Optional(Envelope), attribution: Type.Optional(text(1000)),
     assertionOrigin: Type.Optional(text(30)), claimKind: Type.Optional(text(30)),
-    owner: Type.Optional(Summary), source: Type.Optional(Summary),
+    owner: Type.Optional(Summary), source: Type.Optional(Summary), about: Type.Optional(Type.Array(Summary, { maxItems: 2 })),
   })]), Type.Null()]),
   content: Type.Object({ offset: Type.Integer(), totalChars: Type.Integer(), nextOffset: nullableOffset }),
   issues: Type.Array(Issue, { maxItems: 1000 }),
+  sourceFiles: Type.Optional(Type.Array(Type.Object({ evidence: InspectedEvidence, citations: Type.Integer() }), { maxItems: 100 })),
+  sourceFilesTotal: Type.Optional(Type.Integer()),
+  identityEvidence: Type.Optional(Type.Array(Type.Object({ id: text(96), evidence: Type.Array(InspectedEvidence, { maxItems: 20 }) }), { maxItems: 10 })),
+  relatedStatements: Type.Optional(Type.Array(Type.Object({ record: Summary, text: Type.Optional(text(4000)), attribution: Type.Optional(text(1000)), assertionOrigin: Type.Optional(text(30)), relation: text(30), incoming: Type.Boolean(), basis: text(1000), source: Type.Optional(Summary) }), { maxItems: 100 })),
   references: Type.Optional(Type.Array(Summary, { maxItems: 100 })),
   referenceTotal: Type.Optional(Type.Integer()), nextReferenceOffset: Type.Optional(nullableOffset),
-  evidence: Type.Optional(Type.Array(Type.Object({ ...Evidence.properties, excerpt: text(20000), verified: Type.Boolean(), excerptTruncated: Type.Boolean() }), { maxItems: 100 })),
+  evidence: Type.Optional(Type.Array(InspectedEvidence, { maxItems: 100 })),
   links: Type.Optional(Type.Array(Type.Object({ href: text(200000), status: Type.Union([Type.Literal("resolved"), Type.Literal("missing"), Type.Literal("ambiguous")]), id: Type.Optional(text(96)) }), { maxItems: 1000 })),
   linksTruncated: Type.Optional(Type.Boolean()),
   evidenceTotal: Type.Optional(Type.Integer()), evidenceSourceTotal: Type.Optional(Type.Integer()), nextEvidenceOffset: Type.Optional(nullableOffset),

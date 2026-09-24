@@ -1,5 +1,6 @@
 import type { FeatureClient, FeatureOutput } from "openclaw/plugin-sdk/feature-contract";
 import type { contract } from "./contract.js";
+import { confidenceView } from "./knowledge-presentation.js";
 import { icon } from "./ui-icons.js";
 
 type Detail = FeatureOutput<typeof contract, "record">;
@@ -10,6 +11,7 @@ export function evidenceView(feature: FeatureClient<typeof contract>, result: De
   const root = el("section"), id = result.record!.id, hash = result.record!.hash;
   root.className = "knowledge-evidence-list";
   root.setAttribute("aria-label", "Source evidence");
+  if ((result.evidenceTotal ?? 0) > 1 || (result.evidenceSourceTotal ?? 0) > 1) root.append(el("p", `${result.evidenceTotal} citations · ${result.evidenceSourceTotal} files`));
   const sources = new Map<string, { node: HTMLDetailsElement; label: HTMLElement; count: number }>();
   const seen = new Set<string>();
   const append = (e: FileEvidence) => {
@@ -28,11 +30,14 @@ export function evidenceView(feature: FeatureClient<typeof contract>, result: De
     const article = el("article"), quote = el("figure"), metadata = el("figcaption"), actions = el("div");
     article.className = "knowledge-evidence-item"; quote.className = "knowledge-evidence";
     metadata.className = "knowledge-evidence-meta"; actions.className = "knowledge-evidence-actions";
-    if (e.excerpt) quote.append(el("blockquote", `“${e.excerpt}”`));
+    const caption = el("div"); caption.className = "knowledge-excerpt-label";
+    caption.append(el("strong", result.record?.assertionOrigin === "agent_inference" ? "PREMISE · EXCERPT" : "EXCERPT"), el("code", `${e.filename ?? e.path.split("/").at(-1)}${e.start_line ? ` · lines ${e.start_line}–${e.end_line ?? e.start_line}` : ""}${e.excerptTruncated ? " · Truncated" : ""}`)); quote.append(caption);
+    if (!e.verified) { quote.classList.add("knowledge-source-unavailable"); quote.append(el("strong", "Source file unavailable"), el("p", "The retained file or cited location could not be verified.")); }
+    else if (e.excerpt) quote.append(el("blockquote", `“${e.excerpt}”`));
     else quote.append(el("p", "No text preview available. Open the original file to inspect this source."));
     if (e.excerptTruncated) quote.append(el("small", "Excerpt · Original retained in full."));
     const attribution = e.attribution;
-    if (attribution) metadata.append(el("span", `— ${attribution}`));
+    metadata.append(el("span", attribution ?? "Speaker not identified"), confidenceView(result.record?.metadata?.attribution_confidence));
     // The filename is the disclosure: hashes and other file mechanics stay out
     // of the quote-first reading path without losing inspection access.
     const details = el("details"), sourceName = el("summary", e.filename ?? e.path.split("/").at(-1)!);
@@ -45,7 +50,7 @@ export function evidenceView(feature: FeatureClient<typeof contract>, result: De
     if (e.mediaType || e.size !== undefined) technical.append(el("p", [e.mediaType, e.size !== undefined ? `${e.size.toLocaleString()} bytes` : ""].filter(Boolean).join(" · ")));
     if (result.record?.attribution && result.record.attribution !== attribution) technical.append(el("p", `Assertion attribution: ${result.record.attribution}`));
     details.append(sourceName, technical); metadata.append(details);
-    const retained = el("span", e.verified ? "Original retained" : "Source not verified");
+    const retained = el("span", e.verified ? "File verified" : "Source file unavailable");
     retained.className = e.verified ? "knowledge-retained" : "knowledge-unverified";
     retained.prepend(icon(e.verified ? "badgeCheck" : "info", 12)); metadata.append(retained);
     quote.append(metadata);
@@ -80,7 +85,7 @@ export function evidenceView(feature: FeatureClient<typeof contract>, result: De
       } catch (error) { await writer?.abort().catch(() => {}); status.textContent = redact(String(error)); }
       finally { download.disabled = !e.verified; }
     };
-    actions.append(download);
+    if (e.verified) actions.append(download);
     if (correction && !correction.parentElement) actions.append(correction);
     article.append(quote, actions, status); group.node.append(article);
   };

@@ -11,7 +11,7 @@ import { ATTACHMENT_DOWNLOAD_CHUNK_BYTES } from "./attachment-contract.js";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { Check } from "typebox/value";
-import { Envelope, type Issue, type LoadedRecord, type Scope } from "./model.js";
+import { Envelope, type Evidence, type Issue, type LoadedRecord, type Scope } from "./model.js";
 
 import { readText, parseYaml, safeRoot } from "./files.js";
 import { bundledOntology, parseOntology, resolveOntology, expandTypes, inferType, type OntologySource } from "./ontology.js";
@@ -137,14 +137,17 @@ export class SampleVault {
     records.sort((a,b) => a.path.localeCompare(b.path));
     return { records, ontology, sources, issues, checkedAt: new Date().toISOString() };
   }
-  async list(input: { includeCards?: boolean; offset?: number; limit?: number; kind?: string; type?: string; query?: string; lifecycle?: "active" | "all" }) {
+  async list(input: { assertionOrigin?: string; includeCards?: boolean; offset?: number; limit?: number; kind?: string; type?: string; query?: string; lifecycle?: "active" | "all" }) {
     const data = await this.scan();
     const query = input.query?.toLowerCase().trim();
     const types = input.type ? expandTypes(data.ontology, input.type) : null;
     const current = eligible(data, undefined, false);
-    const matched = (input.lifecycle === "all" ? data.records : current).filter(r => (!input.kind || r.kind === input.kind) && (!types || (r.kind === "page" ? types.has(r.type) : r.type === input.type)) && (!query || [r.id, r.title, ...(r.metadata.aliases ?? [])].some(v => v.toLowerCase().includes(query))));
+    const facets = { kinds: {} as Record<string, number>, origins: {} as Record<string, number> };
+    for (const r of current.filter(r => r.kind === "claim")) { facets.kinds[r.type] = (facets.kinds[r.type] ?? 0) + 1; const origin = r.metadata.assertion_origin ?? "unknown"; facets.origins[origin] = (facets.origins[origin] ?? 0) + 1; }
+    const matched = (input.lifecycle === "all" ? data.records : current).filter(r => (!input.kind || r.kind === input.kind) && (!input.assertionOrigin || (r.metadata.assertion_origin ?? "unknown") === input.assertionOrigin) && (!types || (r.kind === "page" ? types.has(r.type) : r.type === input.type)) && (!query || [r.id, r.title, ...(r.kind === "claim" ? [r.body] : []), ...(r.metadata.aliases ?? [])].some(v => v.toLowerCase().includes(query))));
+    matched.sort((a, b) => b.metadata.updated_at.localeCompare(a.metadata.updated_at) || a.id.localeCompare(b.id));
     const offset = input.offset ?? 0, limit = input.limit ?? 50;
-    return { records: matched.slice(offset, offset + limit).map(r => ({ ...summary(r), ...(input.includeCards && r.kind === "claim" ? { card: claimCard(r, current) } : {}) })), total: matched.length, offset, nextOffset: offset + limit < matched.length ? offset + limit : null, checkedAt: data.checkedAt };
+    return { facets, records: matched.slice(offset, offset + limit).map(r => ({ ...summary(r), ...(input.includeCards && r.kind === "claim" ? { card: claimCard(r, current) } : {}) })), total: matched.length, offset, nextOffset: offset + limit < matched.length ? offset + limit : null, checkedAt: data.checkedAt };
   }
   async inspectOntology() {
     const data = await this.scan(), o = data.ontology;
@@ -177,7 +180,24 @@ export class SampleVault {
       } catch { /* The diagnostic is attached to the record; no raw filesystem error escapes. */ }
       evidence.push({ ...e, excerpt: verified ? excerpt : "", verified, excerptTruncated });
     }
-    return { record: { ...summary(r), body: r.body, raw: r.raw, hash: r.hash, metadata: JSON.stringify(r.metadata, null, 2) }, issues: data.issues.filter(i => i.path === r.path), references, links: resolveLinks(r, eligible(data, undefined, false)), evidence, evidenceTotal: r.metadata.evidence?.length ?? 0, evidenceSourceTotal: sourceCount(r.metadata.evidence) };
+    const current = eligible(data, undefined, false);
+    const inspect = (e: Evidence) => { try { if (!e.path.startsWith("artifacts/")) throw Error("Unsafe evidence"); const result = inspectEvidence(this.root, e, 4000); return { ...e, ...result, verified: true }; } catch { return { ...e, excerpt: "", excerptTruncated: false, verified: false }; } };
+    const identityEvidence = (r.metadata.identity?.candidates ?? []).map(candidate => ({ id: candidate.id, evidence: candidate.evidence.map(inspect) }));
+    const files = new Map<string, { evidence: Evidence; citations: Set<string> }>();
+    if (r.kind === "page") {
+      for (const evidence of r.metadata.evidence ?? []) files.set(`${evidence.path}:${evidence.sha256}`, { evidence, citations: new Set() });
+      for (const claim of current.filter(claim => claim.kind === "claim" && claim.metadata.source_page === r.id)) for (const evidence of claim.metadata.evidence ?? []) { const key = `${evidence.path}:${evidence.sha256}`; let file = files.get(key); if (!file) { file = { evidence, citations: new Set() }; files.set(key, file); } file.citations.add(JSON.stringify([evidence.start_line, evidence.end_line, evidence.quote, evidence.attribution])); }
+    }
+    const sourceFiles = [...files.values()].slice(0, 100).map(file => ({ evidence: inspect(file.evidence), citations: file.citations.size }));
+    const relatedStatements = current.flatMap(other => {
+      const outgoing = (r.metadata.continuity ?? []).filter(link => link.id === other.id).map(link => ({ link, incoming: false }));
+      const incoming = (other.metadata.continuity ?? []).filter(link => link.id === r.id).map(link => ({ link, incoming: true }));
+      return [...outgoing, ...incoming].map(({ link, incoming }) => {
+        const source = current.find(source => source.id === other.metadata.source_page);
+        return { record: summary(other), text: other.body.slice(0, 4000), ...(other.metadata.attribution ? { attribution: other.metadata.attribution } : {}), ...(other.metadata.assertion_origin ? { assertionOrigin: other.metadata.assertion_origin } : {}), relation: link.relation, basis: link.basis, incoming, ...(source ? { source: summary(source) } : {}) };
+      });
+    }).slice(0, 100);
+    return { sourceFiles, sourceFilesTotal: files.size, identityEvidence, relatedStatements, record: { ...summary(r), body: r.body, raw: r.raw, hash: r.hash, metadata: JSON.stringify(r.metadata, null, 2) }, issues: data.issues.filter(i => i.path === r.path), references, links: resolveLinks(r, eligible(data, undefined, false)), evidence, evidenceTotal: r.metadata.evidence?.length ?? 0, evidenceSourceTotal: sourceCount(r.metadata.evidence) };
   }
   async attachment(input: { id: string; path: string; sha256: string; offset?: number }) {
     const data = await this.scan(), records = data.records.filter(r => r.id === input.id);

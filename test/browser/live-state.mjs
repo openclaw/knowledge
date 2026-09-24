@@ -75,7 +75,7 @@ try {
   await page.screenshot({animations:"disabled",path:base+'/recent-desktop.png'});
   await page.getByRole('button',{name:'Browse',exact:true}).click();
   await page.locator('.knowledge-table').waitFor();
-  assert.ok((await page.locator('.knowledge-pagination').innerText()).includes('complete inventory'));
+  assert.ok((await page.locator('.knowledge-pagination').innerText()).includes('complete list'));
   await page.screenshot({animations:"disabled",path:base+'/browse-desktop.png'});
   const browseStart = requests.length;
   await page.getByRole('button',{name:'Claims',exact:true}).click();
@@ -128,9 +128,9 @@ try {
   assert.equal(await page.locator('.knowledge-summary strong').innerText(),'Northwind');
   assert.equal(await page.locator('.knowledge-summary h2').innerText(),'Summary');
   assert.equal(await page.locator('.knowledge-summary li').innerText(),'The agent maintains this summary.');
-  await page.getByText('Agent inferred',{exact:true}).waitFor();
+  await page.getByText('Molty inferred',{exact:true}).waitFor();
   await page.locator('.knowledge-claim[data-kind=belief]').locator('summary').filter({hasText:'Evidence · 1 file · 1 citation'}).click();
-  await page.getByText('This is the agent’s inference, not a quoted source statement. Supporting material, if any, is shown below.',{exact:true}).waitFor();
+  await page.getByText('No direct quote for this inference. Premises below.',{exact:true}).waitFor();
   await page.locator('.knowledge-claim[data-kind=commitment]').locator('summary').filter({hasText:'Evidence · 1 file · 1 citation'}).click();
   await page.evaluate(()=>{window.showSaveFilePicker=undefined});
   const downloaded=page.waitForEvent('download');
@@ -143,7 +143,7 @@ try {
   await page.locator('.knowledge-claim[data-kind=commitment]').locator('summary').filter({hasText:'Evidence · 1 file · 1 citation'}).click();
   await page.locator('.knowledge-claim[data-kind=commitment]').getByRole('button',{name:'Correct in chat'}).click();
   const prompt=await page.getByLabel('Chat request').inputValue();
-  assert.match(prompt,/Observed revision: 1/);assert.match(prompt,/Observed SHA-256: [a-f0-9]{64}/);
+  assert.match(prompt,/Revision: 1/);assert.match(prompt,/Hash: [a-f0-9]{64}/);
   await page.evaluate(() => {
     window.readingCard = document.querySelector('.knowledge-claim[data-kind=commitment]');
     window.readingContent = document.querySelector('.knowledge-content').firstChild;
@@ -174,12 +174,13 @@ try {
   await page.getByRole('button',{name:'Open chat',exact:true}).click();
   assert.deepEqual(await page.evaluate(()=>window.openedChat),{sessionKey:'new-chat',agentId:'main'});
   assert.equal(await page.evaluate(()=>window.createdChat.agentId),'main');
-  await page.getByRole('button',{name:'Dismiss',exact:true}).click();
+  await page.getByRole('button',{name:'Cancel',exact:true}).click();
   await page.setViewportSize({width:390,height:844});
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
   await page.screenshot({animations:"disabled",path:base+'/entity-mobile.png'});
   await page.getByRole('button',{name:'← Knowledge',exact:true}).click();
   await page.locator('.knowledge-table').waitFor();
+  await page.getByRole('button',{name:'Recent',exact:true}).click();
   await page.getByLabel('Search knowledge').fill('Alex');
   await page.clock.runFor(250);
   await page.locator('.knowledge-suggestions').getByRole('button',{name:'Alex Rivera'}).waitFor();
@@ -191,7 +192,7 @@ try {
   await page.getByText(/cannot page beyond 520 search results/).waitFor();
   cappedSearch=false;
   await page.evaluate(()=>window.connect(false));
-  await page.locator('.knowledge-status').getByText('Disconnected',{exact:true}).waitFor();
+  await page.locator('.knowledge-status').getByText('Reconnecting…',{exact:true}).waitFor();
   await page.evaluate(()=>window.connect(true));
   await page.getByText(/Ranked text search, not a complete inventory/).waitFor();
   // Agent/service lifecycle operations refresh the read-only UI without browser writes.
@@ -205,7 +206,7 @@ try {
   await page.getByRole('button',{name:'Alex will deliver on Monday.',exact:true}).click();
   await page.getByRole('button',{name:'View original assertion',exact:true}).click();
   await page.getByText('The delivery date was corrected in chat.',{exact:true}).waitFor();
-  await page.getByText(/superseded — historical knowledge/).waitFor();
+  await page.getByText(/Viewing history · Replaced/).waitFor();
   await page.getByRole('button',{name:'View replacement →',exact:true}).click();
   await page.getByRole('heading',{name:'Updated release commitment',exact:true}).waitFor();
   await service.withdraw({requestId:randomUUID(),id:inference.id,expectedRevision:inference.revision,expectedHash:inference.hash,reason:'The readiness inference was withdrawn in chat.'},agentContext);
@@ -248,18 +249,18 @@ try {
   await page.setViewportSize({width:1182,height:900});
   await page.getByRole('button',{name:'Browse',exact:true}).click(); await page.locator('.knowledge-table').waitFor();
   assert.equal(await page.locator('.knowledge-table .knowledge-tile svg').count(),3);
-  await page.getByLabel('Search knowledge').fill('');
+  await page.getByLabel('Filter by name or alias').fill('');
   await page.clock.runFor(200); await page.screenshot({animations:"disabled",path:base+'/browse-dark-desktop.png'});
   for(const width of [760,390]) { await page.setViewportSize({width,height:900}); assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,`Browse does not overflow at ${width}px`); await page.screenshot({animations:"disabled",path:base+`/browse-dark-${width}.png`}); }
   await page.setViewportSize({width:1182,height:900});
-  await page.keyboard.press('/'); assert.equal(await page.getByLabel('Search knowledge').evaluate(n=>document.activeElement===n),true);
-  await page.getByLabel('Search knowledge').fill('');
+  await page.keyboard.press('/'); assert.equal(await page.getByLabel('Filter by name or alias').evaluate(n=>document.activeElement===n),true);
+  await page.getByLabel('Filter by name or alias').fill('');
   await page.getByRole('button',{name:'Recent',exact:true}).click();
   await page.locator('.knowledge-feed-item[data-change=withdrawn]').waitFor();
   assert.equal(await page.locator('.knowledge-feed-item[data-change=corrected]').count(),1);
-  assert.equal(await page.locator('.knowledge-feed').getByText('Updated release commitment',{exact:true}).count(),0,'Replacement creation is part of the correction, not another new item');
+  assert.equal(await page.locator('.knowledge-feed').getByText('Updated release commitment',{exact:true}).count(),1,'Correction identifies the current saved title exactly once');
   await page.locator('.knowledge-feed-item[data-change=withdrawn]').getByText('Readiness inference',{exact:true}).waitFor();
-  await page.locator('.knowledge-feed-item[data-change=corrected]').getByText('Release commitment',{exact:true}).waitFor();
+  await page.locator('.knowledge-feed-item[data-change=corrected]').getByText('Updated release commitment',{exact:true}).waitFor();
   await page.setViewportSize({width:1182,height:900}); await page.clock.runFor(200); await page.screenshot({animations:"disabled",path:base+'/recent-dark-desktop.png',fullPage:true});
   const searchGap=await page.evaluate(()=>document.querySelector('.knowledge-feed').getBoundingClientRect().top-document.querySelector('.knowledge-search input').getBoundingClientRect().bottom); assert.equal(searchGap,28,'Host form margins must not change reference section spacing');
   // Test the real host's light-mode cascade, not just alternate color tokens.
@@ -284,7 +285,7 @@ try {
     await page.screenshot({animations:'disabled',path:base+`/activity-${mode}-desktop.png`,fullPage:true});
     const correctionRow=page.locator('.knowledge-feed-item[data-change=corrected]');
     await correctionRow.locator('.knowledge-activity-summary').click();
-    await correctionRow.getByText('A corrected version is now used instead. The earlier version is kept in history.',{exact:true}).waitFor();
+    await correctionRow.getByText('This replaced an earlier version. Search and answers now use the current version.',{exact:true}).waitFor();
     assert.equal(await correctionRow.getByText('The delivery date was corrected in chat.',{exact:true}).isVisible(),false,'Raw audit reasons are not the human-facing explanation');
     await correctionRow.getByText('Recorded reason',{exact:true}).click();
     await correctionRow.getByText('The delivery date was corrected in chat.',{exact:true}).waitFor();
@@ -315,7 +316,7 @@ try {
     assert.ok(quoteLayout.panelBottom<quoteLayout.actionsTop,'Actions sit below the evidence inset');
     assert.equal(quoteLayout.sameRow,true,'Original and correction actions share a row');
     assert.equal(quoteLayout.heading,undefined,'No file-inspector heading in the reading path');
-    assert.ok(quoteLayout.height<240,'Expanded evidence keeps reference density');
+    assert.ok(quoteLayout.height<620,'V4 details grid and excerpt remain bounded on desktop');
     await expanded.locator('.knowledge-retained svg').waitFor({state:'visible'});
     await page.mouse.move(0,0); await page.evaluate(()=>window.scrollTo(0,0));
     await page.screenshot({animations:'disabled',path:base+`/entity-evidence-${mode}.png`,fullPage:true});
@@ -341,8 +342,8 @@ try {
     assert.equal(await correct.evaluate(n=>getComputedStyle(n).backgroundColor),'rgba(0, 0, 0, 0)','Light mode does not fill ghost actions');
   }
   await page.getByRole('button',{name:'Correct in chat',exact:true}).click();
-  assert.match(await page.getByLabel('Chat request').inputValue(),/Observed SHA-256: [a-f0-9]{64}/);
-  await page.getByRole('button',{name:'Dismiss',exact:true}).click();
+  assert.match(await page.getByLabel('Chat request').inputValue(),/Hash: [a-f0-9]{64}/);
+  await page.getByRole('button',{name:'Cancel',exact:true}).click();
   await page.locator('.knowledge-file-details > summary').click();
   await page.getByRole('button',{name:'History',exact:true}).click();
   await page.locator('.knowledge-history-list').waitFor();
@@ -354,9 +355,9 @@ try {
   await page.setViewportSize({width:1182,height:900});
   await page.getByRole('button',{name:'Recent',exact:true}).click();
   await page.locator('.knowledge-feed-item[data-change=withdrawn] .knowledge-activity-summary').click();
-  await page.locator('.knowledge-feed-item[data-change=withdrawn]').getByRole('button',{name:'View history'}).click();
+  await page.locator('.knowledge-feed-item[data-change=withdrawn]').getByRole('button',{name:'View in history'}).click();
   await page.getByText('The readiness inference was withdrawn in chat.',{exact:true}).waitFor();
-  await page.getByText(/withdrawn — historical knowledge/).waitFor();
+  await page.getByText(/Viewing history · Withdrawn/).waitFor();
   await page.getByRole('button',{name:'Vocabulary',exact:true}).click();
   await page.locator('.knowledge-ontology-layout').waitFor();
   await page.evaluate(()=>window.remount());
@@ -382,8 +383,52 @@ try {
   await page.locator('.knowledge-markdown').getByRole('link',{name:'Transcript · lines 1–2',exact:true}).click();
   assert.equal(await page.locator('.knowledge-file-details[open] .knowledge-retained-originals[open]').count(),1,'Self source citation reveals retained originals');
   await page.screenshot({animations:'disabled',path:base+'/source-links.png',fullPage:true});
+  // V4: new saves never move the current feed until explicitly revealed.
+  await page.getByRole('button',{name:'Recent',exact:true}).click();
+  await page.locator('.knowledge-feed').waitFor();
+  await page.evaluate(()=>{window.v4Feed=document.querySelector('.knowledge-feed')});
+  const v4Source=await service.save_page({requestId:randomUUID(),title:'V4 source — verbatim title',type:'meeting',body:'An isolated design acceptance meeting.',fields:{occurred_at:'2026-09-24T01:30:00Z'},source:{text:'kestrel will investigate.\nThe earlier plan is reaffirmed.',attribution:'Meeting recorder'}},context);
+  await page.clock.runFor(30001);
+  await page.locator('.knowledge-new-saves:not([hidden])').waitFor();
+  assert.equal(await page.evaluate(()=>window.v4Feed===document.querySelector('.knowledge-feed')),true,'A genuine Recent update preserves the actual DOM until Show');
+  await page.locator('.knowledge-new-saves').click();
+  await page.locator('.knowledge-feed-title').filter({hasText:'V4 source — verbatim title'}).waitFor();
+  const v4Evidence=(await service.record({id:v4Source.id,includeMetadata:true},context)).record.metadata.evidence;
+  const v4Person=await service.save_page({requestId:randomUUID(),title:'kestrel',type:'person',body:'Known from this source only.',identity:{status:'partial',context:'Recorder handle'}},context);
+  await service.create_relationship({requestId:randomUUID(),expectedOntologyFingerprint:fingerprint,title:'kestrel attended',body:'The recorder includes kestrel.',from:v4Person.id,to:v4Source.id,label:'attended',evidence:v4Evidence,attribution:'Recorder',source_page:v4Source.id},context);
+  const v4Claim=await service.create_claim({requestId:randomUUID(),expectedOntologyFingerprint:fingerprint,title:'Investigate',body:'kestrel will investigate.',claim_kind:'commitment',assertion_origin:'source',attribution:'Recorder',evidence:v4Evidence,source_page:v4Source.id,entities:[v4Person.id]},context);
+  await page.clock.runFor(30001);
+  await page.locator('.knowledge-new-saves:not([hidden])').waitFor();
+  await page.locator('.knowledge-new-saves').click();
+  await page.locator('.knowledge-attendance-group').first().waitFor({state:'attached'});
+  const sourceGroup=page.locator('.knowledge-activity-details').filter({has:page.locator('.knowledge-feed-title').filter({hasText:'V4 source — verbatim title'})});
+  if(!await sourceGroup.getAttribute('open')) await sourceGroup.locator(':scope > summary').click();
+  await sourceGroup.locator('.knowledge-attendance-group > summary').click();
+  await sourceGroup.getByText('Confidence not recorded',{exact:true}).waitFor();
+  await sourceGroup.getByText('Identity unresolved',{exact:true}).waitFor();
+  await sourceGroup.getByRole('button',{name:'kestrel will investigate.',exact:true}).click();
+  await page.getByText('No deadline recorded',{exact:true}).waitFor();
+  assert.equal(await page.getByText('Owner not identified',{exact:true}).count(),2);
+  await page.getByRole('button',{name:'Ask Molty',exact:true}).click();
+  await page.getByRole('dialog',{name:'Ask Molty',exact:true}).waitFor();
+  await page.keyboard.press('Escape');
+  assert.equal(await page.getByRole('dialog').count(),0,'Escape closes the handoff modal');
+  await page.getByRole('button',{name:'Browse',exact:true}).click();
+  await page.getByRole('button',{name:'Claims',exact:true}).click();
+  await page.getByLabel('Filter claim text').fill('kestrel will investigate');
+  await page.getByLabel('Filter claim text').press('Enter');
+  await page.waitForFunction(()=>document.querySelectorAll('.knowledge-claim').length===1);
+  await page.screenshot({animations:'disabled',path:base+'/v4-claim-filter.png',fullPage:true});
+  await page.getByRole('button',{name:'Recent',exact:true}).click();
+  await page.locator('.knowledge-feed').waitFor();
+  await page.evaluate(()=>{window.v4Feed=document.querySelector('.knowledge-feed');window.connect(false)});
+  await page.getByText('Reconnecting…',{exact:true}).waitFor();
+  assert.equal(await page.evaluate(()=>window.v4Feed===document.querySelector('.knowledge-feed')),true,'Disconnect leaves the last readable feed in place');
+  await page.getByText(/Can’t reach the vault/).waitFor();
+  await page.evaluate(()=>window.connect(true));
+  await page.screenshot({animations:'disabled',path:base+'/v4-source-groups.png',fullPage:true});
   assert.deepEqual(errors,[]);
-  console.log(JSON.stringify({passed:['wikilink navigation, reverse backlinks, code exclusion, missing targets and source originals','quote-first evidence, compact attribution and icon action row in dark/light','standalone claim details, scoped correction actions, and about links','grouped file details, history and hash-checked Markdown in light mode','light/dark text-tab styling under the production host cascade','reference layout measurements and type icons','search keyboard shortcut','read-only browser contract','agent correction live refresh and historical linkage','one logical lifecycle event, redacted historical assertions and explicit history navigation','search offset cap','design-token dark screenshots','recent default and observed history','ontology-derived browse','native commitment/event/inference cards','attribution and retained inference premise evidence','byte-exact evidence download','revision/hash chat request and no autosend','handoff preserved across periodic refresh','exact name suggestions','ranked search','disconnect and reconnect','subscription cleanup','mobile overflow','no page errors'],artifacts:base},null,2));
+  console.log(JSON.stringify({passed:['V4 source groups and relationship-only attendance','V4 deferred Show updates and disconnect DOM preservation','V4 server-side claim filtering and explicit unknown commitment details','V4 modal Escape and exact record reference','wikilink navigation, reverse backlinks, code exclusion, missing targets and source originals','quote-first evidence, compact attribution and icon action row in dark/light','standalone claim details, scoped correction actions, and about links','grouped file details, history and hash-checked Markdown in light mode','light/dark text-tab styling under the production host cascade','reference layout measurements and type icons','search keyboard shortcut','read-only browser contract','agent correction live refresh and historical linkage','one logical lifecycle event, redacted historical assertions and explicit history navigation','search offset cap','design-token dark screenshots','recent default and observed history','ontology-derived browse','native commitment/event/inference cards','attribution and retained inference premise evidence','byte-exact evidence download','revision/hash chat request and no autosend','handoff preserved across periodic refresh','exact name suggestions','ranked search','disconnect and reconnect','subscription cleanup','mobile overflow','no page errors'],artifacts:base},null,2));
 } catch (error) {
   console.error(JSON.stringify({errors,page:await page?.locator('main').innerText()},null,2));throw error;
 } finally {services.forEach(s=>s.stop());await browser.close();}

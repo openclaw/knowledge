@@ -107,9 +107,10 @@ export const contract = defineFeatureContract({
         offset: Type.Optional(Type.Integer({ minimum: 0, maximum: 500 })), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
         kind: Type.Optional(Type.Union([Type.Literal("page"), Type.Literal("claim"), Type.Literal("relationship")])),
         includeCards: Type.Optional(Type.Boolean()),
+        assertionOrigin: Type.Optional(text(30)),
         type: Type.Optional(text(64)), query: Type.Optional(text(200)), lifecycle: Type.Optional(Type.Union([Type.Literal("active"), Type.Literal("all")])),
       }, { additionalProperties: false }),
-      output: Type.Object({ records: Type.Array(record, { maxItems: 100 }), total: Type.Integer(), offset: Type.Integer(), nextOffset: Type.Union([Type.Integer(), Type.Null()]), checkedAt: text(40) }),
+      output: Type.Object({ records: Type.Array(record, { maxItems: 100 }), total: Type.Integer(), offset: Type.Integer(), nextOffset: Type.Union([Type.Integer(), Type.Null()]), checkedAt: text(40), facets: Type.Optional(Type.Object({ kinds: Type.Record(Type.String(), Type.Integer()), origins: Type.Record(Type.String(), Type.Integer()) })) }),
       tool: { name: "knowledge_records", label: "Browse knowledge" },
     },
     record: {

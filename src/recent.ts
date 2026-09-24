@@ -1,13 +1,15 @@
 import { Type, type Static } from "typebox";
 import type { DatabaseSync } from "node:sqlite";
 import type { LoadedRecord } from "./model.js";
-import { Summary } from "./inspection-contract.js";
+import { claimCard } from "./claim-card.js";
+import { Summary, CardSummary } from "./inspection-contract.js";
 import { recordSummary } from "./record-summary.js";
 import { text } from "./model.js";
 
 const sequence = Type.Integer({ minimum: 0 });
 export const RecentInput = Type.Object({
   groupBySource: Type.Optional(Type.Boolean()),
+  sourceId: Type.Optional(text(96)), recordOffset: Type.Optional(Type.Integer({ minimum: 0 })),
   limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50 })),
   upperSequence: Type.Optional(sequence), beforeSequence: Type.Optional(sequence),
 }, { additionalProperties: false });
@@ -15,10 +17,10 @@ export const RecentOutput = Type.Object({
   upperSequence: sequence,
   nextBefore: Type.Union([sequence, Type.Null()]),
   items: Type.Array(Type.Object({
-    group: Type.Optional(Type.Object({ source: Summary, total: Type.Integer(), counts: Type.Record(Type.String(), Type.Integer()), records: Type.Array(Summary, {maxItems:20}), truncated: Type.Boolean() })),
+    group: Type.Optional(Type.Object({ source: Summary, total: Type.Integer(), counts: Type.Record(Type.String(), Type.Integer()), records: Type.Array(Type.Object({ ...CardSummary.properties, change: Type.Optional(text(20)) }), {maxItems:20}), truncated: Type.Boolean(), nextRecordOffset: Type.Optional(Type.Union([Type.Integer(), Type.Null()])), firstSaved: Type.Optional(text(40)), lastSaved: Type.Optional(text(40)) })),
     sequence, id: text(96), at: text(40), kind: text(40), type: text(64),
     change: Type.Union([Type.Literal("created"), Type.Literal("updated"), Type.Literal("observed"), Type.Literal("external"), Type.Literal("corrected"), Type.Literal("withdrawn")]),
-    title: Type.Optional(text(200)), reason: Type.Optional(text(2000)),
+    title: Type.Optional(text(200)), identityStatus: Type.Optional(text(20)), reason: Type.Optional(text(2000)),
     replacementId: Type.Optional(text(96)), replacementActive: Type.Optional(Type.Boolean()),
   }, { additionalProperties: false }), { maxItems: 50 }),
 }, { additionalProperties: false });
@@ -65,11 +67,11 @@ export function recentActivity(db: DatabaseSync, scope: string, active: LoadedRe
     ${input.groupBySource ? `, ranked AS (
       SELECT *, ROW_NUMBER() OVER (PARTITION BY CASE WHEN change IN ('corrected','withdrawn') THEN 'event:'||sequence ELSE 'record:'||id END ORDER BY sequence DESC) AS rank FROM visible
     ), keyed AS (
-      SELECT *, CASE WHEN change IN ('corrected','withdrawn') THEN 'event:'||sequence ELSE COALESCE('source:'||json_extract(?, '$.'||id), 'record:'||id) END AS group_key FROM ranked WHERE rank=1
+      SELECT *, CASE WHEN change IN ('corrected','withdrawn') THEN 'event:'||sequence WHEN change='external' THEN 'external:'||id ELSE COALESCE('source:'||json_extract(?, '$.'||id), 'record:'||id) END AS group_key FROM ranked WHERE rank=1
     ), grouped AS (
-      SELECT MAX(sequence) AS sequence, json_group_array(json_object('sequence',sequence,'id',id,'at',at,'change',change,'kind',kind,'type',type,'reason',reason,'replacementId',replacementId,'title',title)) AS members FROM keyed GROUP BY group_key
+      SELECT MAX(sequence) AS sequence, json_group_array(json_object('sequence',sequence,'id',id,'at',at,'change',change,'kind',kind,'type',type,'reason',reason,'replacementId',replacementId,'title',title)) AS members FROM keyed WHERE (? IS NULL OR group_key='source:'||?) GROUP BY group_key
     ) SELECT * FROM grouped WHERE sequence<? ORDER BY sequence DESC LIMIT ?` : 'SELECT * FROM visible WHERE sequence<? ORDER BY sequence DESC LIMIT ?'}
-  `).all(scope, scope, JSON.stringify(active.map(r => r.id)), upperSequence, JSON.stringify(fixtureIds), ...(input.groupBySource ? [JSON.stringify(sourceIds)] : []), input.beforeSequence ?? upperSequence + 1, (input.limit ?? 20) + 1);
+  `).all(scope, scope, JSON.stringify(active.map(r => r.id)), upperSequence, JSON.stringify(fixtureIds), ...(input.groupBySource ? [JSON.stringify(sourceIds), input.sourceId ?? null, input.sourceId ?? null] : []), input.beforeSequence ?? upperSequence + 1, (input.limit ?? 20) + 1);
   const items = rows.slice(0, input.limit ?? 20).map(raw => {
     const members = raw.members ? JSON.parse(String(raw.members)) as Array<Record<string, string | number | null>> : undefined;
     const row = members ? members.sort((a,b) => Number(b.sequence)-Number(a.sequence))[0] : raw;
@@ -81,19 +83,19 @@ export function recentActivity(db: DatabaseSync, scope: string, active: LoadedRe
       // resurfacing its body or evidence as current knowledge.
       if (row.title) item.title = String(row.title);
       if (row.reason) item.reason = String(row.reason);
-      if (row.replacementId) { item.replacementId = String(row.replacementId); item.replacementActive = byId.has(item.replacementId); }
-    } else if (current) item.title = current.title;
+      if (row.replacementId) { item.replacementId = String(row.replacementId); item.replacementActive = byId.has(item.replacementId); const replacement = byId.get(item.replacementId); if (replacement) item.title = replacement.title; }
+    } else if (current) { item.title = current.title; if (current.metadata.identity) item.identityStatus = current.metadata.identity.status; }
     const sourceId = sourceIds[item.id], source = sourceId ? byId.get(sourceId) : undefined;
-    if (members && source && !['corrected','withdrawn'].includes(item.change)) {
+    if (members && source && !['corrected','withdrawn','external'].includes(item.change)) {
       const records = members.map(m => byId.get(String(m.id))).filter((r): r is LoadedRecord => Boolean(r));
       const counts: Record<string, number> = {};
       const attendees = new Set<string>();
       for (const record of records) {
-        if (record.metadata.label === 'attended') attendees.add(record.metadata.from!);
-        else if (record.kind === 'claim' && !record.metadata.source_event) counts[record.type] = (counts[record.type] ?? 0) + 1;
+        if (record.metadata.label === 'attended' && record.metadata.to === source.id) attendees.add(record.metadata.from!);
+        else { const kind = record.metadata.source_event ? 'sourceEvent' : record.kind === 'page' ? 'page' : record.type; counts[kind] = (counts[kind] ?? 0) + 1; }
       }
       if (attendees.size) counts.attendees = attendees.size;
-      item.group = { source: recordSummary(source), total: records.length, counts, records: records.slice(0,20).map(recordSummary), truncated: records.length > 20 };
+      item.group = { source: recordSummary(source), total: records.length, counts, records: records.slice(input.recordOffset ?? 0, (input.recordOffset ?? 0) + 20).map(r => ({ ...recordSummary(r), change: String(members.find(member => member.id === r.id)?.change ?? "observed"), ...(r.kind === "claim" ? { card: claimCard(r, active) } : {}) })), truncated: records.length > (input.recordOffset ?? 0) + 20, nextRecordOffset: records.length > (input.recordOffset ?? 0) + 20 ? (input.recordOffset ?? 0) + 20 : null, firstSaved: String(members.at(-1)!.at), lastSaved: String(members[0].at) };
     }
     return item;
   });

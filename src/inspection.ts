@@ -12,10 +12,11 @@ export async function inspectRecord(vault: SampleVault, input: RecordInput): Pro
   const detail = await vault.detail(input.id, input.evidenceOffset ?? 0, input.evidenceLimit ?? 20), r = detail.record;
   const result: RecordOutput = { view, record: null, content: { offset, totalChars: 0, nextOffset: null }, issues: detail.issues };
   if (!r) return result;
+  result.relatedStatements = detail.relatedStatements ?? [];
   const { body, raw, metadata: serialized, ...base } = r, metadata = JSON.parse(serialized);
   const value = view === "content" ? body : view === "raw" ? raw : "";
   const chunk = value.slice(offset, offset + maxChars);
-  result.record = { ...base,
+  result.record = { ...base, about: detail.references.filter(r => metadata.entities?.includes(r.id)).slice(0, 2),
     ...(view === "content" ? { body: chunk } : view === "raw" ? { raw: chunk } : {}),
     ...(metadata.attribution ? { attribution: metadata.attribution } : {}),
     ...(metadata.assertion_origin ? { assertionOrigin: metadata.assertion_origin } : {}),
@@ -33,10 +34,15 @@ export async function inspectRecord(vault: SampleVault, input: RecordInput): Pro
     result.nextReferenceOffset = next(start, result.references.length, detail.references.length);
   }
   if (input.includeEvidence ?? view === "content") {
+    result.sourceFiles = detail.sourceFiles ?? []; result.sourceFilesTotal = detail.sourceFilesTotal ?? 0;
+    result.identityEvidence = detail.identityEvidence ?? [];
     result.evidenceTotal = detail.evidenceTotal ?? 0;
     result.evidenceSourceTotal = detail.evidenceSourceTotal ?? 0;
     result.nextEvidenceOffset = next(input.evidenceOffset ?? 0, detail.evidence.length, result.evidenceTotal);
     let remaining = input.maxEvidenceChars ?? 4000;
+    const preview = <T extends { excerpt: string; excerptTruncated: boolean }>(e: T): T => { const excerpt = e.excerpt.slice(0, remaining); remaining -= excerpt.length; return { ...e, excerpt, excerptTruncated: e.excerptTruncated || excerpt.length < e.excerpt.length }; };
+    result.identityEvidence = result.identityEvidence.map(candidate => ({ ...candidate, evidence: candidate.evidence.map(preview) }));
+    result.sourceFiles = result.sourceFiles.map(file => ({ ...file, evidence: { ...file.evidence, excerpt: "", excerptTruncated: file.evidence.excerpt.length > 0 } }));
     result.evidence = detail.evidence.map(e => {
       const excerpt = e.excerpt.slice(0, remaining); remaining -= excerpt.length;
       return { ...e, excerpt, excerptTruncated: excerpt.length < e.excerpt.length || e.excerptTruncated };
