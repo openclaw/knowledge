@@ -1,4 +1,7 @@
+import { recordPath } from "./record-path.js";
+import { existsSync } from "node:fs";
 import { connections } from "./connections.js";
+import { annotationEvidence, annotationProblems } from "./annotations.js";
 import { recentActivity, type RecentInput } from "./recent.js";
 import type { ConnectionsInput } from "./connections-contract.js";
 import type { Static } from "typebox";
@@ -14,12 +17,13 @@ import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { Check } from "typebox/value";
 import { parseDocument, stringify } from "yaml";
+import { parseYaml } from "./files.js";
 import { Manifest, RealVault, type VaultConfig } from "./real-vault.js";
 import { SqliteIdentityStore } from "./identity-store.js";
 import { PublicationFiles, type FileChange } from "./publication-files.js";
-import { SavePage, ClaimInput, RelationshipInput, CorrectInput, WithdrawInput, type WriteInput, type WriteKind, type Receipt } from "./mutation-contract.js";
+import { AnnotateInput, SavePage, ClaimInput, RelationshipInput, CorrectInput, WithdrawInput, type WriteInput, type WriteKind, type Receipt } from "./mutation-contract.js";
 import { digest } from "./vault.js";
-import { Envelope, type LoadedRecord, type Scope } from "./model.js";
+import { Envelope, RecordAnnotations, type LoadedRecord, type Scope } from "./model.js";
 import { lifecycleRecord, lifecycleImpact, assertLifecycleTarget, applyLifecycleGuards } from "./lifecycle.js";
 import type { VaultAccess } from "./access.js";
 
@@ -27,7 +31,7 @@ const canonical = (x: unknown): string => JSON.stringify(x, (_, v) => v && typeo
 export const scopeKey = (scope: Scope) => scope.visibility === "conversation" ? `conversations/${scope.sessionId}` : "private";
 const blocked = () => Error("Knowledge publication pending or conflicted; inspect mutation history and retry the original request. No partial catalog returned.");
 type Plan = { rootIdentity: string; before: Manifest; after: Manifest; changes: FileChange[]; actor: string; scope: string; record: LoadedRecord; records?: LoadedRecord[] };
-type Prepared = { record: LoadedRecord; artifacts: Record<string, string>; previous?: LoadedRecord; data: Awaited<ReturnType<SampleVault["scan"]>>; snapshot: string; additional?: { before: LoadedRecord; after: LoadedRecord }[]; lifecycle?: CorrectInput | WithdrawInput };
+type Prepared = { record: LoadedRecord; artifacts: Record<string, string>; previous?: LoadedRecord; data: Awaited<ReturnType<SampleVault["scan"]>>; snapshot: string; additional?: { before: LoadedRecord; after: LoadedRecord }[]; lifecycle?: CorrectInput | WithdrawInput; annotation?: boolean; annotationEvidence?: import("./model.js").Evidence[] };
 type Row = { scope: string; request: string; intent: string; state: Receipt["state"]; plan: string; receipt: string };
 export type PublicationHook = (stage: string) => void;
 
@@ -70,7 +74,7 @@ export class KnowledgeStorage {
       const data = await vault.scan();
       access.assertCurrent();
       return this.store.withDatabase(db => {
-        const result = recentActivity(db, scopeKey(access.scope), eligible(data, withdrawnIds(db, this.retrievalBinding(access)), false), input);
+        const result = recentActivity(db, scopeKey(access.scope), eligible(data, withdrawnIds(db, this.retrievalBinding(access)), false), input, data.records.filter(r => r.metadata.record_class === "fixture").map(r => r.id));
         access.assertCurrent(); return result;
       });
     });
@@ -112,6 +116,40 @@ export class KnowledgeStorage {
   save(input: SavePage, access: VaultAccess, actor: string) { return this.publish(input, "page", access, actor); }
   createClaim(input: ClaimInput, access: VaultAccess, actor: string) { return this.publish(input, "claim", access, actor); }
   createRelationship(input: RelationshipInput, access: VaultAccess, actor: string) { return this.publish(input, "relationship", access, actor); }
+  async annotate(input: AnnotateInput, access: VaultAccess, actor: string): Promise<Receipt> {
+    if (!Check(AnnotateInput, input) || !input.reason.trim() || (!Object.keys(input.annotations).length && !input.addEvidence?.length)) throw Error("Invalid annotation input.");
+    access.assertCurrent();
+    if (!this.config.writesEnabled) throw Error("Knowledge writes are disabled.");
+    if (input.expectedVaultId && input.expectedVaultId !== this.config.vaultId) throw Error("Connected vault changed; no publication accepted.");
+    await this.initialize(access);
+    const scope = scopeKey(access.scope), intent = digest(canonical({ operation: "annotate", input }));
+    const prior = this.store.withDatabase(db => this.row(db, scope, input.requestId));
+    if (prior) { this.checkReplay(prior, intent); return this.resume(access, input.requestId); }
+    this.assertReadable();
+    const prepared = await this.real.run(access, async vault => {
+      const snapshot = new PublicationFiles(this.config.root).snapshot(scope), data = await vault.scan();
+      const matches = data.records.filter(r => r.id === input.id), previous = matches.length === 1 ? matches[0] : undefined;
+      if (!previous || previous.hash !== input.expectedHash || previous.revision !== input.expectedRevision) throw Error("Annotation conflict: target unavailable or changed.");
+      if (previous.lifecycle !== "active" && (Object.keys(input.annotations).some(k => k !== "record_class") || input.addEvidence?.length)) throw Error("Only fixture classification may annotate historical records.");
+      const metadata: Envelope = { ...previous.metadata, ...input.annotations, revision: previous.revision + 1, updated_at: new Date().toISOString() };
+      const extra = [...(input.addEvidence ?? []), ...annotationEvidence(metadata)];
+      for (const evidence of extra) inspectEvidence(path.join(this.config.root, scope), evidence);
+      if (extra.length) metadata.evidence = [...new Map([...(metadata.evidence ?? []), ...extra].map(e => [canonical(e), e])).values()];
+      const problems = annotationProblems(metadata, data.records);
+      if (problems.length) throw Error(problems.join("; "));
+      const match = /^(?:\uFEFF)?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(previous.raw)!;
+      const doc = parseDocument(match[1]);
+      for (const key of ["revision", "updated_at", ...Object.keys(input.annotations), ...(extra.length ? ["evidence"] : [])]) doc.set(key, doc.createNode((metadata as Record<string, unknown>)[key], { aliasDuplicateObjects: false }));
+      doc.set("annotation_change", { reason: input.reason, actor, request_id: input.requestId, at: metadata.updated_at });
+      parseYaml(doc.toString());
+      const raw = `---\n${doc.toString()}---\n${previous.body}`;
+      if (Buffer.byteLength(raw) > 65536 || !Check(Envelope, metadata)) throw Error("Annotation exceeds record limits.");
+      const record = { ...previous, metadata, raw, hash: digest(raw), revision: metadata.revision };
+      if (new PublicationFiles(this.config.root).snapshot(scope) !== snapshot) throw Error("Edit conflict: vault changed during validation.");
+      return { previous, record, data, snapshot, artifacts: {}, annotation: true, annotationEvidence: extra };
+    });
+    return this.accept(input.requestId, intent, prepared, access, actor);
+  }
   async correct(input: CorrectInput, access: VaultAccess, actor: string): Promise<Receipt> {
     if (!Check(CorrectInput, input) || !input.reason.trim()) throw Error("Invalid correction input.");
     const { kind, ...replacement } = input.replacement;
@@ -180,7 +218,7 @@ export class KnowledgeStorage {
       if (kind !== "claim" && !definition) throw Error("Choose a valid type from the current ontology.");
       if (previous && type !== previous.type) throw Error("Type changes are not supported by this page editor.");
       const now = new Date().toISOString(), id = previous?.id ?? randomUUID();
-      const relative = previous?.path ?? `${kind === "claim" ? "claims/" : definition!.directory}${id}.md`;
+      const relative = previous?.path ?? recordPath(kind === "claim" ? "claims/" : definition!.directory, input.title, id, candidate => existsSync(path.join(this.config.root, scope, candidate)));
       const revision = (previous?.revision ?? 0) + 1;
       const metadata: Envelope = previous ? { ...previous.metadata, title: input.title, revision, updated_at: now } : {
         format: "knowledge-record-v1", id, revision, kind, title: input.title, scope: access.scope,
@@ -192,7 +230,7 @@ export class KnowledgeStorage {
       }
       // Legacy approval metadata has no meaning; remove it on the next journaled save.
       delete (metadata as Record<string, unknown>).acceptance;
-      const portable = ["aliases", "tags", "dependencies", ...(kind === "page" ? [] : ["attribution", "evidence", "valid_from", "valid_until", "expires_at"]),
+      const portable = [...Object.keys(RecordAnnotations.properties), "aliases", "tags", "dependencies", ...(kind === "page" ? [] : ["attribution", "evidence", "valid_from", "valid_until", "expires_at"]),
         ...(kind === "claim" ? ["claim_kind", "assertion_origin", "entities", "occurred_at", "owner", "due_at"] : kind === "relationship" ? ["from", "to", "label"] : [])];
       for (const key of portable) if ((input as Record<string, unknown>)[key] !== undefined) (metadata as Record<string, unknown>)[key] = (input as Record<string, unknown>)[key];
       if (kind !== "page" && !input.attribution.trim()) throw Error("Attribution must not be blank.");
@@ -213,15 +251,20 @@ export class KnowledgeStorage {
         // Attribution travels with the portable page, not only in the receipt.
         metadata.attribution = input.source.attribution;
       }
+      const extra = annotationEvidence(metadata);
+      if (extra.length) metadata.evidence = [...new Map([...(metadata.evidence ?? []), ...extra].map(e => [canonical(e), e])).values()];
       let yaml: string;
       if (previous) {
         const match = /^(?:\uFEFF)?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(previous.raw)!;
         const doc = parseDocument(match[1]);
         doc.delete("acceptance");
-        for (const key of ["title", "revision", "updated_at", ...portable.filter(key => (input as Record<string, unknown>)[key] !== undefined), ...(input.fields !== undefined ? ["fields"] : []), ...(input.source ? ["evidence", "attribution"] : input.attachments?.length ? ["evidence"] : [])]) doc.set(key, (metadata as Record<string, unknown>)[key]);
+        for (const key of ["title", "revision", "updated_at", ...portable.filter(key => (input as Record<string, unknown>)[key] !== undefined), ...(input.fields !== undefined ? ["fields"] : []), ...(input.source ? ["evidence", "attribution"] : input.attachments?.length || extra.length ? ["evidence"] : [])]) doc.set(key, doc.createNode((metadata as Record<string, unknown>)[key], { aliasDuplicateObjects: false }));
         yaml = doc.toString();
-      } else yaml = stringify(metadata);
+      } else yaml = stringify(metadata, { aliasDuplicateObjects: false });
       const raw = `---\n${yaml}---\n${input.body}`;
+      // Validate the serialized representation too: annotation support may reuse
+      // evidence objects, but the portable reader deliberately rejects aliases.
+      parseYaml(yaml);
       if (Buffer.byteLength(raw) > 65536 || !Check(Envelope, metadata)) throw Error("Record exceeds limits or has invalid metadata.");
       const record: LoadedRecord = { id, title: input.title, kind, type: type!, path: relative, revision, lifecycle: metadata.lifecycle, metadata, raw, body: input.body, hash: digest(raw), valid: true };
       const preview = await vault.scan({ record, artifacts });
@@ -247,11 +290,12 @@ export class KnowledgeStorage {
       for (const source of prepared.data.sources.filter(s => !s.path.startsWith("bundled:"))) {
         if (files.read(`${scope}/${source.path}`) !== source.raw) throw Error("Ontology changed during validation.");
       }
-      for (const evidence of prepared.lifecycle && !("replacement" in prepared.lifecycle) ? [] : prepared.record.metadata.evidence ?? []) if (!(evidence.path in prepared.artifacts)) inspectEvidence(path.join(this.config.root, scope), evidence);
+      for (const evidence of prepared.annotation || (prepared.lifecycle && !("replacement" in prepared.lifecycle)) ? [] : prepared.record.metadata.evidence ?? []) if (!(evidence.path in prepared.artifacts)) inspectEvidence(path.join(this.config.root, scope), evidence);
+      for (const evidence of prepared.annotationEvidence ?? []) inspectEvidence(path.join(this.config.root, scope), evidence);
       const stillActive = eligible(prepared.data, withdrawnIds(db, this.retrievalBinding(access)), false);
       const m = prepared.record.metadata;
       const references = [...(m.dependencies ?? []), ...(m.entities ?? []), ...[m.from, m.to, m.owner].filter((id): id is string => Boolean(id))];
-      if ((!prepared.lifecycle || "replacement" in prepared.lifecycle) && references.some(id => !stillActive.some(r => r.id === id))) throw Error("Reference unavailable or inactive in this scope.");
+      if (!prepared.annotation && (!prepared.lifecycle || "replacement" in prepared.lifecycle) && references.some(id => !stillActive.some(r => r.id === id))) throw Error("Reference unavailable or inactive in this scope.");
       const after = { ...before, generation: before.generation + 1, publicationId: randomUUID() };
       const changes: FileChange[] = [];
       const add = (target: string, old: string | null, raw: string) => {

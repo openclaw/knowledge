@@ -1,3 +1,26 @@
+# Ingestion skill alignment: post-refresh verification — 2026-09-23
+
+- The preceding implementation pass completed six focused workflow/packaging
+  checks, TypeScript checking, build, plugin validation, and validation of the
+  three upgraded skill entrypoints. These completed checks were not repeated
+  after the runtime refresh.
+- Host skill discovery for agent `main` reports all six Knowledge skills eligible
+  and model-visible. All **17 materialized skill/reference files** byte-match
+  their repository sources, including the upgraded document, meeting and entity
+  workflows. This verifies deployed bundle contents, not autonomous execution
+  of each workflow.
+- A fresh live `knowledge_status` invocation succeeds: backend
+  `recent-activity-2`, private non-sample vault, writes enabled, **3 valid records,
+  38 definitions, zero findings**. The response reports the watcher as stopped;
+  this check does not establish live-watching behavior.
+- `git diff --check` passes. This continuation made no vault writes, configuration
+  changes, additional reloads, or gateway restarts.
+- Real-content agent workflow trials remain outstanding. Isolated authored-output
+  contract checks establish structured publication, retry/reconciliation and
+  shared event support, not agent reasoning or end-to-end ingestion acceptance.
+
+---
+
 # Agent-driven correction/withdrawal and UI redesign — 2026-09-23
 
 - Integrated the independent lifecycle and UI branches with

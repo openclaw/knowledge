@@ -159,3 +159,95 @@ test('meeting port: ambiguous identity, contradictory accounts, attributed corre
   assert.equal(found.hits[0].citation.hash, current.record.hash);
   assert.equal((await f.call('diagnostics')).total, 0);
 });
+
+for (const mode of ['document', 'meeting']) test(`${mode} structured workflow: source-dependent outputs, shared entity context and interrupted continuation`, async t => {
+  const f = await fixture(t);
+  const filename = mode === 'document' ? 'project-brief.txt' : 'meeting-transcript.txt';
+  const evidence = await f.attach(await source(filename), filename);
+  const fingerprint = (await f.call('ontology')).fingerprint;
+  const person = (await f.save('Morgan Hale', 'person',
+    `Morgan is identified in ${filename}. [Source: ${filename}]`, [evidence])).receipt;
+  const project = (await f.save('Orchid', 'project',
+    `Orchid pilot context. [Source: ${filename}]`, [evidence])).receipt;
+  const saved = (await f.save(mode === 'meeting' ? 'Orchid review' : 'Orchid brief',
+    mode === 'meeting' ? 'meeting' : 'note',
+    `Source record. [Morgan](../${person.path}); [Orchid](../${project.path}).`, [evidence])).receipt;
+  const common = { expectedVaultId: f.vaultId, expectedOntologyFingerprint: fingerprint,
+    dependencies: [saved.id], attribution: `Synthetic trial, ${filename}` };
+  const locator = (start, end = start) => ({ ...evidence, start_line: start, end_line: end });
+  const claim = {
+    ...common, requestId: randomUUID(),
+    title: mode === 'meeting' ? 'Conditional November target' : 'Provisional October target',
+    body: mode === 'meeting' ? 'Morgan reports a November 3 target, subject to reliability review; not a launch commitment.'
+      : 'The October 15 target is provisional until reliability review.',
+    claim_kind: mode === 'meeting' ? 'decision' : 'fact', assertion_origin: 'source',
+    entities: [project.id], evidence: [mode === 'meeting' ? locator(4, 6) : locator(3, 4)],
+  };
+  const first = await f.call('create_claim', claim);
+  f.restart(); // Lost response / interrupted workflow after only one assertion.
+  const recovered = await f.call('mutation', { requestId: claim.requestId });
+  assert.equal(recovered.receipt.id, first.id);
+  assert.deepEqual(await f.call('create_claim', claim), first);
+  // Authoritative reverse-dependency inspection accounts for completed work.
+  const before = await f.call('connections', { id: saved.id, direction: 'dependents' });
+  assert.deepEqual(before.connections.map(c => c.record.id), [first.id]);
+
+  const edgeInput = { ...common, requestId: randomUUID(),
+    title: mode === 'meeting' ? 'Morgan attended review' : 'Morgan leads Orchid',
+    body: mode === 'meeting' ? 'Morgan self-identifies on the review recording.' : 'Morgan is the project lead.',
+    from: person.id, to: mode === 'meeting' ? saved.id : project.id,
+    label: mode === 'meeting' ? 'attended' : 'leads',
+    evidence: [mode === 'meeting' ? locator(3) : locator(2)],
+  };
+  const edge = await f.call('create_relationship', edgeInput);
+  const expectedIds = [first.id, edge.id];
+  if (mode === 'meeting') {
+    const commitment = await f.call('create_claim', { ...common, requestId: randomUUID(),
+      title: 'Send failure report', body: 'Unresolved Speaker 2 offered to send the report Friday.',
+      claim_kind: 'commitment', assertion_origin: 'source', attribution: 'Unresolved Speaker 2, line 5',
+      entities: [project.id], evidence: [locator(5)] });
+    const read = await f.call('record', { id: commitment.id, includeMetadata: true });
+    assert.equal(read.record.metadata.owner, undefined, 'Roster is not a voice mapping');
+    assert.equal(read.record.metadata.due_at, undefined, 'This trial retains the relative deadline in prose');
+    const event = await f.call('create_claim', { ...common, requestId: randomUUID(),
+      title: 'Orchid reliability review', body: 'Morgan discussed Orchid reliability at the review.',
+      claim_kind: 'event', assertion_origin: 'source', occurred_at: '2026-09-23',
+      entities: [person.id, project.id], evidence: [locator(1, 4)] });
+    for (const id of [person.id, project.id]) {
+      const connected = await f.call('connections', { id, direction: 'claims' });
+      assert.ok(connected.connections.some(c => c.record.id === event.id), 'One shared event serves both entities');
+    }
+    expectedIds.push(commitment.id, event.id);
+  }
+  // Profile content back-links are explicit revision-fenced edits, not auto-links.
+  for (const id of [person.id, project.id]) {
+    const current = (await f.call('record', { id })).record;
+    await f.call('save_page', { requestId: randomUUID(), expectedVaultId: f.vaultId,
+      id, expectedRevision: current.revision, expectedHash: current.hash,
+      title: current.title, body: current.body + `\n## Timeline\n- ${mode === 'meeting' ? '2026-09-23' : '2026-09-20'} | Referenced in [${mode}](../${saved.path}). [Source: ${filename}]` });
+  }
+  f.restart(); // A later rerun reconciles completed outputs; no new IDs needed.
+  const observed = [];
+  let offset = 0, snapshot;
+  do {
+    const page = await f.call('connections', { id: saved.id, direction: 'dependents', limit: 1, offset });
+    if (snapshot) assert.equal(page.snapshot, snapshot);
+    snapshot = page.snapshot;
+    observed.push(...page.connections.map(c => c.record.id));
+    offset = page.nextOffset;
+  } while (offset !== null);
+  assert.deepEqual(observed.sort(), expectedIds.sort());
+  assert.deepEqual(await f.call('create_relationship', edgeInput), edge);
+  const out = await f.call('connections', { id: person.id, direction: 'outgoing' });
+  const incoming = await f.call('connections', { id: edgeInput.to, direction: 'incoming' });
+  assert.ok(out.connections.some(c => c.record.id === edge.id));
+  assert.ok(incoming.connections.some(c => c.record.id === edge.id));
+  for (const id of expectedIds) {
+    const read = await f.call('record', { id, includeMetadata: true });
+    assert.ok(read.evidence.every(e => e.verified));
+    assert.deepEqual(read.record.metadata.dependencies, [saved.id]);
+    assert.equal((await f.call('lookup', { query: id })).outcome, 'found');
+  }
+  assert.equal((await f.call('records')).total, 3 + expectedIds.length);
+  assert.equal((await f.call('diagnostics')).total, 0);
+});

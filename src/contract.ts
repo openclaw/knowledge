@@ -5,17 +5,22 @@ import { SearchInput, SearchOutput, LookupInput, LookupOutput } from "./retrieva
 import { Type } from "typebox";
 import { defineFeatureContract } from "openclaw/plugin-sdk/feature-contract";
 import { text } from "./model.js";
-import { RecordInput, RecordOutput, OntologyInput, OntologyOutput, Summary } from "./inspection-contract.js";
+import { RecordInput, RecordOutput, OntologyInput, OntologyOutput, CardSummary } from "./inspection-contract.js";
 
-import { SavePage, ClaimInput, RelationshipInput, CorrectInput, WithdrawInput, Receipt, HistoryEntry, GitStatus, requestId } from "./mutation-contract.js";
+import { AnnotateInput, SavePage, ClaimInput, RelationshipInput, CorrectInput, WithdrawInput, Receipt, HistoryEntry, GitStatus, requestId } from "./mutation-contract.js";
 
 const empty = Type.Object({}, { additionalProperties: false });
 const issue = Type.Object({ path: text(500), code: text(80), message: text(1000) });
-const record = Summary;
+const record = CardSummary;
 const issues = Type.Array(issue, { maxItems: 1000 });
 export const contract = defineFeatureContract({
   pluginId: "knowledge",
   operations: {
+    annotate: {
+      kind: "action", description: "Revision-fenced, evidence-backed metadata annotation without changing assertion text or lifecycle. Set source-page association, identity uncertainty/candidates, speaker-attribution confidence, continuity links, or explicit fixture classification; append retained evidence to an unchanged assertion. Omitted fields are preserved; supplied arrays replace. Only fixture classification may change historical records. Similarity is not supersession, candidate identity is not a merge, and source grouping is not an ingestion batch. Inspect the target and evidence first; a reason and exact revision/hash are required.",
+      input: AnnotateInput, output: Receipt,
+      tool: { name: "knowledge_annotate", label: "Annotate knowledge context" },
+    },
     recent: {
       kind: "query", description: "Read scoped activity with one item per published correction/withdrawal. Cursor paging pins an upper history sequence; current eligibility is rechecked on every read. Inactive assertion content stays in explicit history. Imports are observations, not inferred creations.",
       input: RecentInput, output: RecentOutput,
@@ -81,6 +86,7 @@ export const contract = defineFeatureContract({
       output: Type.Object({
         service: Type.Literal("knowledge"), phase: Type.Union([Type.Literal("read-only-explorer"), Type.Literal("page-editor"), Type.Literal("structured-writes")]),
         backendRevision: text(80), instanceId: text(80), startedAt: text(40), checkedAt: text(40),
+        snapshot: Type.Optional(text(64)),
         vault: text(80), agent: text(80), scope: text(80), sample: Type.Boolean(), writesEnabled: Type.Boolean(),
         live: Type.Union([Type.Literal("stopped"), Type.Literal("watching"), Type.Literal("unavailable")]),
         records: Type.Integer(), validRecords: Type.Integer(), definitions: Type.Integer(), ontologyAvailable: Type.Boolean(), ontologyFingerprint: text(64), issues: Type.Integer(),
@@ -96,10 +102,11 @@ export const contract = defineFeatureContract({
       input: LookupInput, output: LookupOutput, tool: { name: "knowledge_lookup", label: "Resolve knowledge identity" },
     },
     records: {
-      kind: "query", description: "List current eligible authorized records exhaustively using pagination, with optional kind, ontology type/alias, or ID/title/alias filtering. lifecycle=all is an explicit historical inventory including inactive/invalid records; originals remain available by exact record/history inspection.",
+      kind: "query", description: "List current eligible authorized records exhaustively using pagination, with optional kind, ontology type/alias, or ID/title/alias filtering. lifecycle=all is an explicit historical inventory including inactive/invalid records; originals remain available by exact record/history inspection. includeCards adds bounded claim text and card metadata from the same scan, without evidence excerpts.",
       input: Type.Object({
         offset: Type.Optional(Type.Integer({ minimum: 0, maximum: 500 })), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
         kind: Type.Optional(Type.Union([Type.Literal("page"), Type.Literal("claim"), Type.Literal("relationship")])),
+        includeCards: Type.Optional(Type.Boolean()),
         type: Type.Optional(text(64)), query: Type.Optional(text(200)), lifecycle: Type.Optional(Type.Union([Type.Literal("active"), Type.Literal("all")])),
       }, { additionalProperties: false }),
       output: Type.Object({ records: Type.Array(record, { maxItems: 100 }), total: Type.Integer(), offset: Type.Integer(), nextOffset: Type.Union([Type.Integer(), Type.Null()]), checkedAt: text(40) }),

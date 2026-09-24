@@ -1,7 +1,7 @@
 # Knowledge: v1 Scope
 
 **Date:** 2026-09-18
-**Updated:** 2026-09-22
+**Updated:** 2026-09-23
 **Status:** V1 scope baseline; not implemented. Follow-ups are candidates, not release commitments.
 
 ## Product direction update — 2026-09-23
@@ -53,7 +53,7 @@ In particular:
 | Relationships | Explicit typed relationships, Markdown-derived backlinks, direct neighbor lookup | No multi-hop answer engine, graph-assisted ranking, or inferred relationships |
 | Uncertain extraction | Preserve unresolved identities and source attribution without a record-approval workflow | No specialized review queue or elaborate promotion-policy engine |
 | Retrieval | Exact ID/name/alias lookup, keyword search, filters, useful snippets, citations, and separate exhaustive listing | No required embedding provider, reranker, or query expansion |
-| Ingestion | Complete text/document and meeting-transcript workflows, duplicate checks, resumable progress, and honest partial outcomes | Use host capabilities for acquisition and extraction; no new connector or transcription stack |
+| Ingestion | Complete text/document and meeting-transcript workflows, duplicate checks, agent-managed continuation, and honest partial outcomes | Use host capabilities for acquisition and extraction; no new connector or transcription stack |
 | Reliability | Revision checks, retry safety, interrupted-write recovery, backup/restore procedure | No distributed writers or sophisticated automatic merge system |
 | Evaluation and diagnostics | Focused acceptance suite; native activity/issues view for incomplete ingestion, conflicts, missing artifacts, and index failures | No benchmark platform or generalized monitoring dashboard |
 
@@ -73,7 +73,7 @@ Backlinks and direct neighbors are useful immediately. Graph-aware search and mu
 
 ### 3.3 Complete workflows, bounded acquisition
 
-The OpenClaw agent executes ingestion skills using deterministic Knowledge operations. The plugin owns storage guarantees and durable checkpoints; the host owns model execution and available acquisition tools.
+The OpenClaw agent executes ingestion skills using deterministic Knowledge operations. The plugin owns storage guarantees, individual-write receipts and interrupted-write recovery; the host owns model execution, workflow progress and available acquisition tools. Do not build a separate ingestion system, job API or mandatory manifest. Skills reconcile ordinary agent work logs against receipts and existing records.
 
 A meeting workflow must retain its source, resolve or flag participants, capture supported decisions and commitments, link relevant records, and verify its outputs. Saving only a meeting summary is not equivalent to completing ingestion.
 
@@ -89,7 +89,7 @@ Capturing a commitment does not schedule a reminder or execute a task. Requested
 | Type and filing definitions | Versioned, human-readable ontology definitions |
 | Retained originals and derived source artifacts | Durable artifact files, with provenance and integrity metadata |
 | Search indexes, backlinks, and other derived views | Rebuildable SQLite projections |
-| Receipts, checkpoints, publication recovery, mutation history, withdrawal safeguards | SQLite operational state |
+| Receipts, individual-write recovery checkpoints, mutation history, withdrawal safeguards | SQLite operational state |
 
 Structured claims and relationships need a documented representation that can be reconstructed without an LLM. Stable identities must survive file renames. Start with one independently addressable page, claim, or relationship per Markdown file; entity profiles are typed pages, not duplicate records. Exact field syntax remains implementation design work. Keep the portable record envelope, configurable domain ontology, and operational database schema distinct.
 
@@ -135,7 +135,7 @@ The page must identify the active agent/vault and distinguish loading, empty, di
 
 ## 6. Follow-ups
 
-### Bundled skills baseline and next backend milestone
+### Bundled skills and workflow validation
 
 After file-evidence activation and verification, port the originally scoped
 workflows into repository-owned skills shipped with this plugin. Use semantic
@@ -151,26 +151,25 @@ license attribution, and explicitly map unsupported operations before authoring.
 Do not advertise claim/relationship mutation, correction, media extraction, or
 resumable multi-record ingestion until its required backend/host support exists.
 
-After the backend dependencies below and skill upgrades, exercise the shipped
-discovery/routing and capture-to-retrieval loop on a small
-representative document and meeting transcript: retain originals, resolve existing
-entities, distinguish statements from interpretation, verify citations by readback,
-and repeat/interrupt/resume without duplicate outputs or false completion. Include
-ambiguous speakers, corrections, and contradictory evidence as realistic cases.
-Use findings to refine the workflows before bundling the remaining workflows.
-The first five page-based workflows are now bundled: recall, capture, document
-ingestion, meeting ingestion, and entity handling. See [WORKFLOWS.md](WORKFLOWS.md)
-for the supported operation map and deliberate departures. Shared conventions,
-source retention and individual-publication recovery are exercised in isolated
-contract trials. Structured claim/relationship writes and entity metadata edits
-are now implemented as a backend/UI milestone. A correction skill and correction/withdrawal mechanics are now implemented. Dedicated media/curation
-skills and multi-record ingestion checkpoints remain missing.
+Six workflows are bundled: recall, capture, document ingestion, meeting ingestion,
+entity handling, and correction. Structured writes, entity metadata and
+correction/withdrawal are implemented. The document/meeting/entity skills now
+follow gbrain's workflows using the current tools, including claims, relationships,
+entity propagation, timeline context, repeat reconciliation and completion checks.
+See [WORKFLOWS.md](WORKFLOWS.md) for upstream references and concrete departures.
 
-After the implemented [structured-write foundation](STRUCTURED_WRITES.md), the
-next milestones are correction/withdrawal, durable ingestion checkpoints, and
-upgrades to the bundled skills. Full real-content document/meeting agent trials follow those dependencies;
-small deterministic fixtures validate each backend slice during implementation.
-Media and curation follow, then the remaining recovery/reliability acceptance.
+Exercise discovery/routing and the capture-to-retrieval loop on a representative
+document and meeting transcript: retain originals, resolve existing entities,
+distinguish statements from interpretation, verify citations by readback, and
+repeat/interrupt/continue without duplicate outputs or false completion. Include
+ambiguous speakers, explicit corrections and contradictory sources. Isolated
+contract trials cover backend support; they are not a claim of real-content agent
+acceptance. No new ingestion API or durable multi-record checkpoint is a
+prerequisite. Use existing host task context/work logs and per-write recovery.
+
+Dedicated media/curation skills and remaining recovery/reliability acceptance
+remain follow-ups. Refine workflows from actual trial findings before adding new
+infrastructure.
 
 ### Next: improve finding and using knowledge
 
@@ -211,7 +210,7 @@ V1 is complete when the following work end to end, with focused executable check
 3. **Retrieve:** Find records by exact identity, alias, and keywords; return inspectable citations; distinguish ranked results from complete listings.
 4. **Edit:** Create/edit a basic page in Control UI and through an agent operation using the same write contract. Reconcile external edits throughout authoritative documents, including user-authored metadata, and a rename while preserving identity; preserve and report a concurrent edit conflict without relying on designated human-note blocks.
 5. **Correct:** Supersede or withdraw a claim while preserving its history and evidence; exclude withdrawn claims from active retrieval, including after a stale-file import.
-6. **Resume:** Interrupt and retry a multi-record ingestion without duplicate outputs or a false completion report.
+6. **Resume:** Interrupt and continue an agent-led multi-record ingestion using its work log, existing records and individual-write receipts, without duplicate outputs or a false completion report. No plugin-owned ingestion job is required.
 7. **Recover:** Rebuild derived indexes from the vault and restore a full backup with operational state and artifacts intact. Reject incompatible newer indexes and stale publishers after an older-vault restore or vault replacement, including reuse of the same path.
 8. **Diagnose:** Distinguish “no matching knowledge” from failed indexing, missing evidence, and incomplete ingestion. Report malformed frontmatter, duplicate IDs, and broken references without silently losing content.
 9. **Respect access:** Verify that inaccessible records do not leak through results, counts, backlinks, history, or artifacts.

@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import type { FeatureHandlers, FeatureEventEmitter, FeatureInvocationContext } from "openclaw/plugin-sdk/feature-plugin";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 import { contract } from "./contract.js";
-import { SampleVault } from "./vault.js";
+import { SampleVault, digest } from "./vault.js";
 import { authorizeVault } from "./access.js";
 import { parseVaultConfig } from "./real-vault.js";
 
@@ -41,6 +41,11 @@ export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureE
     return accessFor(context, write);
   };
   return {
+    annotate: async (input, context) => {
+      if (context.source !== "tool") throw Error("Knowledge changes must be requested through chat and agent tools.");
+      const access = authority(context, true);
+      try { return await storage!.annotate(input, access, "agent"); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); }
+    },
     recent: async (input, context) => storage ? storage.recent(input, authority(context)) : { items: [], upperSequence: 0, nextBefore: null },
     attach: async (input, context) => { const access = authority(context, true); return storage!.attach(input, access); },
     attachment: (input, context) => run(context, vault => vault.attachment(input)),
@@ -70,11 +75,15 @@ export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureE
     status: (_, context) => run(context, async (vault, scope) => {
       if (scope === "agent-private") live?.ensureWatching();
       const data = await vault.scan();
+      const active = eligible(data, undefined, false);
       return {
-        service: "knowledge", phase: config?.writesEnabled ? "structured-writes" : "read-only-explorer", backendRevision: "recent-activity-2", instanceId, startedAt,
+        service: "knowledge", phase: config?.writesEnabled ? "structured-writes" : "read-only-explorer", backendRevision: "markdown-links-1", instanceId, startedAt,
         checkedAt: data.checkedAt, vault: config?.vaultId ?? "bundled-sample", agent: config?.agentId ?? "none — synthetic sample", scope, sample: !config, writesEnabled: Boolean(config?.writesEnabled && (() => { try { authority(context, true); return true; } catch { return false; } })()),
         live: scope === "agent-private" ? live?.state ?? "stopped" : "stopped",
-        records: eligible(data, undefined, false).length, validRecords: eligible(data, undefined, false).length,
+        // Content, evidence validation, ontology and time-based eligibility can
+        // change without changing the record count. checkedAt is not a revision.
+        snapshot: digest(JSON.stringify([data.records.map(r => [r.id, r.path, r.hash, r.valid]), active.map(r => r.id), data.ontology?.fingerprint, data.issues])),
+        records: active.length, validRecords: active.length,
         definitions: data.ontology?.definitions.length ?? 0, ontologyAvailable: Boolean(data.ontology), ontologyFingerprint: data.ontology?.fingerprint ?? "", issues: data.issues.length,
       } as const;
     }),

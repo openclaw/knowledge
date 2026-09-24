@@ -28,7 +28,7 @@ export function withdrawnIds(db: DatabaseSync, binding: string): Set<string> {
 export function eligible(data: Snapshot, withdrawn = new Set<string>(), historical = true) {
   const counts = new Map<string, number>();
   for (const r of data.records) counts.set(r.id, (counts.get(r.id) ?? 0) + 1);
-  const allowed = new Map(data.records.filter(r => r.valid && counts.get(r.id) === 1 && r.lifecycle !== "withdrawn" && !withdrawn.has(r.id) && (historical || activeNow(r.metadata))).map(r => [r.id, r]));
+  const allowed = new Map(data.records.filter(r => r.metadata.record_class !== "fixture" && r.valid && counts.get(r.id) === 1 && r.lifecycle !== "withdrawn" && !withdrawn.has(r.id) && (historical || activeNow(r.metadata))).map(r => [r.id, r]));
   let changed = true;
   while (changed) {
     changed = false;

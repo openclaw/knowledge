@@ -1,16 +1,8 @@
-import { Marked } from "marked";
+import { markdown, type LinkResolution } from "./markdown-links.js";
 import DOMPurify from "dompurify";
 
-const escape = (text: string) => text.replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
-const markdown = new Marked({ gfm: true, async: false, renderer: {
-  // Imported HTML is source text, never privileged UI. Images must not trigger
-  // remote requests simply because someone opens a saved page.
-  html: ({ text }) => escape(text),
-  image: ({ text }) => escape(text),
-} });
-
 /** Render portable page content without granting it native-plugin privileges. */
-export function markdownView(source: string, openRecord: (id: string) => void): HTMLElement {
+export function markdownView(source: string, openRecord: (id: string) => void, links: LinkResolution[] = []): HTMLElement {
   const root = document.createElement("div"); root.className = "knowledge-markdown";
   root.append(DOMPurify.sanitize(markdown.parse(source) as string, {
     RETURN_DOM_FRAGMENT: true,
@@ -28,12 +20,14 @@ export function markdownView(source: string, openRecord: (id: string) => void): 
       link.href = href; link.target = "_blank"; link.rel = "noopener noreferrer";
       continue;
     }
-    // Published Knowledge pages use stable UUID filenames. Route these through
-    // the scoped record API, never to a raw file or an arbitrary host route.
-    const match = /^(?:(?:\.\.?|[a-zA-Z0-9_-]+)\/)*([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\.md(?:#[^\s]*)?$/.exec(href);
-    if (match) {
+    const resolved = links.find(link => link.href === href);
+    if (resolved?.status === "resolved" && resolved.id) {
       link.href = "#";
-      link.onclick = event => { event.preventDefault(); openRecord(match[1]); };
+      link.onclick = event => { event.preventDefault(); openRecord(resolved.id!); };
+    } else if (resolved) {
+      link.className = "knowledge-unresolved-link";
+      link.title = resolved.status === "ambiguous" ? "Ambiguous page link" : "Page unavailable";
+      link.setAttribute("aria-disabled", "true");
     }
   }
   for (const table of root.querySelectorAll("table")) {

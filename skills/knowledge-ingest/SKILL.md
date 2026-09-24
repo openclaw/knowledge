@@ -1,51 +1,113 @@
 ---
 name: knowledge-ingest
-description: Ingest a document, article, or supplied text into sourced Knowledge pages, retaining originals, resolving relevant entities, and verifying retrieval. Routes meetings to meeting ingestion; extraction uses available host tools and may be partial.
+description: Ingest documents, articles, or supplied text into Knowledge with retained originals, sourced claims, entity updates, timelines, and cross-links. Routes meetings to knowledge-meeting-ingest and short thoughts to knowledge-capture.
 ---
 
-# Ingest documents
+# Ingest Skill
 
+Ingest documents and articles into Knowledge. Follow gbrain's ingest workflow;
+Knowledge's tools replace its storage, filing, linking, and sync operations.
 Read [shared conventions](references/conventions.md) and
-[publication](references/publication.md). Use
-`knowledge-entities` for relevant names.
+[publication](references/publication.md). Use `knowledge-entities` for resolution
+and enrichment and `knowledge-meeting-ingest` for meeting transcripts.
+
+## Contract
+
+- Apply the shared reconciliation rules across sources, not just duplicate files.
+  Populate supported structured fields, source associations and uncertainty when
+  grounded. Check substantive entity synthesis on 3–5 outputs before scaling.
+
+- Every fact written to a page carries an inline source citation with date and
+  provenance; unknown dates stay unknown.
+- Every identified entity mentioned with a Knowledge page gets a back-link from
+  its page to the page mentioning it, within the authorized ingestion scope.
+- Raw sources are preserved for provenance with `knowledge_attach`.
+- State sections are rewritten with current best understanding, never appended
+  to. Preserve unrelated content, user assessments and contradictory evidence.
+- File by PRIMARY SUBJECT, not by format. Inspect `knowledge_ontology`; the
+  backend assigns the record ID/path. Do not copy gbrain slugs or directories.
 
 ## Route and acquire
 
-- Short thoughts/snippets: `knowledge-capture`.
-- Meeting notes/transcripts: `knowledge-meeting-ingest`.
-- Documents/articles: continue below. Use available host fetch/file/extraction
-  tools for the source the user selected. Acquisition is not a Knowledge tool.
-- Audio/video/images requiring transcription/OCR: use a host capability only if
-  available and authorized. Otherwise retain the available source, report the
-  missing extraction and mark the result partial. Do not invent a media tool,
-  subscribe to a service, or claim that file retention proves content was read.
+- Short thoughts/snippets: `knowledge-capture`. Preserve the user's exact wording;
+  their language is the insight.
+- Meetings: `knowledge-meeting-ingest`; source-specific handling ends at
+  normalization, not a separate pipeline for each recorder.
+- Articles/web content: use available host fetch tools; extract title, author,
+  publication, date and full available text. Summarize executive takeaways and
+  key arguments, not a rehash. Explain what is interesting given existing
+  Knowledge; flag connections and contradictions as analysis, not source facts.
+- PDFs/documents: use available host extraction/OCR; summarize executive
+  takeaways, key sections and notable data. Keep the original and extracted text
+  separately identified.
+- Audio/video/images: use authorized host transcription/OCR when available.
+  Retain transcripts (including diarization/timing when supplied) and link them
+  from the page. Without extraction, report partial source retention, not completed
+  ingestion. Do not invent a Knowledge media tool or add a connector/service.
+- Social posts: retain available thread/context and a direct original URL in
+  citations. Do not invent inaccessible replies or context.
 
-## Source-to-page loop
+## Phases
 
-1. Identify title, author, date, URL/provider ID and complete available content.
-   Disclose paywalls, missing sections or truncated fetches. Preserve original
-   bytes before synthesis; retain extracted text separately with provenance.
-2. Search existing pages by title and distinctive source identifiers. Inspect
-   matching evidence hashes/content. Reuse an unchanged source/page; for an
-   updated source, attach the new version to a reconciled edit with both versions
-   identified. Similar titles alone do not establish a duplicate.
-3. Read the full available source in manageable sections. Summarize the primary
-   subject, material findings, numbers/dates, stated decisions and open questions.
-   Separate source assertions from interpretation. Select exact passages for
-   citations, preserving line/section locations; don't cite unread portions.
-4. Resolve relevant entities, preserving uncertainty. Create/update entity pages
-   only for material, supported context within the request. Choose types from
-   the current ontology, not from upstream hard-coded directories.
-5. Publish the source summary with original evidence and inline citations. If
-   entity updates depend on this page's ID/path, publish it first, then reconcile
-   entity pages and, if needed, update its links using fresh edit preconditions.
-   Maintain the per-page work log; do not imply an atomic multi-page ingestion.
-6. Verify the published body, each cited locator and the original reference.
-   Resolve all authored page links against actual records, then test retrieval
-   with a distinctive term. If the complete original is needed for verification,
-   download all chunks; bounded excerpts are not enough to claim full readback.
+1. **Parse the source.** Read the complete available content in manageable
+   sections; extract people, companies, concepts, dates and events. Disclose
+   paywalls/truncation. Select exact passages for citations before summarizing.
+2. **Check for an existing source and page.** Search source identifiers, title,
+   date and content; inspect hashes/evidence. An unchanged source reuses its
+   page. New coverage is reconciled into the existing page with retained versions,
+   not automatically a duplicate or a correction of every old claim.
+3. **For each entity mentioned:** read its page, or apply the notability gate in
+   `knowledge-entities`. Resolve spelling variants before creating. Update State
+   only where material new evidence changes the picture. Leave uncertain
+   identities explicit; do not create a guessed profile.
+4. **Preserve raw source and publish.** Retain original bytes, extracted text
+   and provenance. Publish the source/subject page with analysis and inline
+   citations. When new page IDs are needed, save those pages first, then add
+   links using fresh edit preconditions. Follow the publication work log.
+5. **Capture independently useful assertions.** Follow the structured-assertion
+   guidance in publication: save supported facts, decisions, commitments,
+   preferences/beliefs and events as appropriate, with source-page dependencies
+   and exact evidence. Do not turn every summary sentence into a claim or promote
+   the agent's analysis to source fact. Keep the source's qualifications.
+6. **Append to timeline.** Create/reuse a dated event claim for each material
+   event, with all resolved relevant entity IDs, source dependency and citation.
+   Add a reverse-chronological dated entry on each entity page linking to the
+   source. One shared event claim can serve all participants; no copy per entity.
+7. **Create cross-reference links.** Use `knowledge_create_relationship` for
+   evidenced relationships with labels/endpoints from the current ontology.
+   Co-mention supports a prose reference, not an invented employment/ownership
+   edge. There is no auto-link post-hook in Knowledge.
+8. **Back-link all entities.** Update each identified mentioned entity's page
+   with a contextual link back to the source page. Check existing entries first;
+   reruns do not append duplicates. Make the source page link to those entities.
 
-Report the saved/reused pages, retained originals, citation/readback checks and
-any extraction, identity or publication gaps. For a batch, verify one representative
-item before scaling. If interrupted, reconcile the work log against receipts and
-existing pages; only individual uploads/publications have backend resume support.
+## Test Before Bulk
+
+Test on 3–5 items first (or the whole batch if smaller). Read the actual outputs:
+substantive titles/analysis, entity context, citations, timelines and back-links.
+Fix the approach before scaling. Use host throttling where needed. Knowledge
+publishes/indexes and handles local Git history; do not run gbrain sync or commit
+private vault files yourself.
+
+## Verify before declaring done
+
+Read every changed page/claim/relationship back, including metadata and all
+cited evidence. Verify exact quotes/locators, actual link destinations, entity
+back-links and connected claims/edges. Test lookup and distinctive-keyword
+retrieval. Follow pagination; a preview is not full readback. For complete-source
+verification, download all original chunks.
+Use the shared resolved-link and derived-backlink checks, including expected
+stable IDs, not just link labels. Keep citations readable and inline, originals
+attached, and artifact/hash inventories out of the page body.
+
+On interruption or repeat ingestion, reconcile the itemized work log, receipts,
+source evidence and existing connections before creating anything. Use
+`knowledge-correct` for an explicit correction, not automatic conflict resolution.
+A saved summary alone is not a completed multi-record ingestion.
+
+## Output Format
+
+Report title, page ID/path/type, sources retained, entities created/updated/reused,
+claims/relationships and timeline/back-links created/reused, verification actually
+performed, and any unresolved identity, conflict or incomplete work. Use partial
+when required outputs/checks are missing. No separate ingestion job is created.

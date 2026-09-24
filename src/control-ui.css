@@ -276,3 +276,8 @@
 @media (min-width: 1200px) { .knowledge-type-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 950px) { .knowledge-ontology-layout { grid-template-columns: 1fr; } .knowledge-category-nav { position: static; display: flex; flex-wrap: wrap; } .knowledge-category-nav button { padding: 8px 10px; } .knowledge-category-count { margin-left: 4px; } }
 @media (max-width: 650px) { .knowledge-ontology-controls { align-items: stretch; flex-direction: column; gap: 12px; } .knowledge-ontology-switch button { flex: 1; } .knowledge-type-grid { grid-template-columns: 1fr; } .knowledge-type-card .knowledge-type-description { min-height: 0; } .knowledge-ontology-notice { align-items: start; flex-direction: column; } }
+
+/* A retained file can have several citations; keep those passages together. */
+.knowledge-source-group { min-width: 0; }
+.knowledge-source-group > summary { padding: 8px 0; color: var(--muted); font-size: 12px; cursor: pointer; overflow-wrap: anywhere; }
+.knowledge-source-group > .knowledge-evidence-item + .knowledge-evidence-item { margin-top: 12px; }

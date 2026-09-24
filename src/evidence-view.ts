@@ -10,7 +10,21 @@ export function evidenceView(feature: FeatureClient<typeof contract>, result: De
   const root = el("section"), id = result.record!.id, hash = result.record!.hash;
   root.className = "knowledge-evidence-list";
   root.setAttribute("aria-label", "Source evidence");
+  const sources = new Map<string, { node: HTMLDetailsElement; label: HTMLElement; count: number }>();
+  const seen = new Set<string>();
   const append = (e: FileEvidence) => {
+    const citationKey = JSON.stringify([e.path, e.sha256, e.start_line, e.end_line, e.quote, e.attribution]);
+    if (seen.has(citationKey)) return;
+    seen.add(citationKey);
+    const sourceKey = `${e.path}:${e.sha256}`;
+    let group = sources.get(sourceKey);
+    if (!group) {
+      const node = el("details"), label = el("summary"); node.open = true; node.className = "knowledge-source-group";
+      node.dataset.readingKey = `${id}:file:${sourceKey}`;
+      node.append(label); root.append(node); group = { node, label, count: 0 }; sources.set(sourceKey, group);
+    }
+    group.count++;
+    group.label.textContent = `${e.filename ?? e.path.split("/").at(-1)} · ${group.count} ${group.count === 1 ? "citation" : "citations"}`;
     const article = el("article"), quote = el("figure"), metadata = el("figcaption"), actions = el("div");
     article.className = "knowledge-evidence-item"; quote.className = "knowledge-evidence";
     metadata.className = "knowledge-evidence-meta"; actions.className = "knowledge-evidence-actions";
@@ -22,6 +36,7 @@ export function evidenceView(feature: FeatureClient<typeof contract>, result: De
     // The filename is the disclosure: hashes and other file mechanics stay out
     // of the quote-first reading path without losing inspection access.
     const details = el("details"), sourceName = el("summary", e.filename ?? e.path.split("/").at(-1)!);
+    details.dataset.readingKey = `${id}:source:${e.path}:${e.sha256}:${e.start_line ?? ""}:${e.end_line ?? ""}`;
     details.className = "knowledge-source-reference";
     if (e.start_line !== undefined) sourceName.append(document.createTextNode(` · ${e.start_line === e.end_line ? `line ${e.start_line}` : `lines ${e.start_line}–${e.end_line ?? e.start_line}`}`));
     sourceName.title = "Source file details";
@@ -67,7 +82,7 @@ export function evidenceView(feature: FeatureClient<typeof contract>, result: De
     };
     actions.append(download);
     if (correction && !correction.parentElement) actions.append(correction);
-    article.append(quote, actions, status); root.append(article);
+    article.append(quote, actions, status); group.node.append(article);
   };
   result.evidence?.forEach(append);
   let offset = result.nextEvidenceOffset;

@@ -200,7 +200,7 @@ test('build metadata retains the real-vault configuration contract', async () =>
   const { getToolPluginMetadata } = await import('openclaw/plugin-sdk/tool-plugin');
   assert.ok(entry.configSchema.jsonSchema.properties.vault.properties.statePath);
   assert.deepEqual(getToolPluginMetadata(entry).configSchema, entry.configSchema.jsonSchema);
-  assert.equal(getToolPluginMetadata(entry).tools.length, 19);
+  assert.equal(getToolPluginMetadata(entry).tools.length, 20);
 });
 
 

@@ -13,6 +13,28 @@ export const Evidence = Type.Object({
   quote: Type.Optional(text(4000)),
 }, { additionalProperties: false });
 export type Evidence = Static<typeof Evidence>;
+const supportedBasis = {
+  basis: Type.String({ minLength: 1, maxLength: 1000 }),
+  evidence: Type.Array(Evidence, { minItems: 1, maxItems: 20 }),
+};
+export const RecordAnnotations = Type.Object({
+  record_class: Type.Optional(Type.Union([Type.Literal("production"), Type.Literal("fixture")])),
+  source_page: Type.Optional(id),
+  source_event: Type.Optional(Type.Boolean()),
+  identity: Type.Optional(Type.Object({
+    status: Type.Union([Type.Literal("partial"), Type.Literal("resolved")]),
+    context: text(1000),
+    candidates: Type.Optional(Type.Array(Type.Object({ id, ...supportedBasis }, { additionalProperties: false }), { maxItems: 10 })),
+  }, { additionalProperties: false })),
+  attribution_confidence: Type.Optional(Type.Object({
+    level: Type.Union([Type.Literal("high"), Type.Literal("medium"), Type.Literal("low")]),
+    ...supportedBasis,
+  }, { additionalProperties: false })),
+  continuity: Type.Optional(Type.Array(Type.Object({
+    id, relation: Type.Union([Type.Literal("reaffirms"), Type.Literal("updates"), Type.Literal("contradicts")]),
+    ...supportedBasis,
+  }, { additionalProperties: false }), { maxItems: 50 })),
+}, { additionalProperties: false });
 export const Scope = Type.Union([
   Type.Object({ visibility: Type.Literal("sample") }, { additionalProperties: false }),
   Type.Object({ visibility: Type.Literal("agent-private"), agentId: name }, { additionalProperties: false }),
@@ -20,6 +42,7 @@ export const Scope = Type.Union([
 ]);
 export type Scope = Static<typeof Scope>;
 export const Envelope = Type.Object({
+  ...RecordAnnotations.properties,
   format: Type.Literal("knowledge-record-v1"), id, revision: Type.Integer({ minimum: 1 }),
   kind: Type.Union([Type.Literal("page"), Type.Literal("claim"), Type.Literal("relationship")]),
   title: Type.String({ minLength: 1, maxLength: 200 }),

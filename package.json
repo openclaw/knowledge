@@ -30,7 +30,8 @@
     "docs/WORKFLOWS.md",
     "scripts/sync-skill-references.mjs",
     "docs/STRUCTURED_WRITES.md",
-    "docs/CORRECTIONS.md"
+    "docs/CORRECTIONS.md",
+    "docs/MARKDOWN_LINKS.md"
   ],
   "peerDependencies": {
     "openclaw": ">=2026.9.5"

@@ -9,7 +9,22 @@ const nullableOffset = Type.Union([Type.Integer(), Type.Null()]);
 export const Summary = Type.Object({
   id: text(96), title: text(200), kind: text(30), type: text(64), path: text(500),
   lifecycle: text(20), revision: Type.Integer(), valid: Type.Boolean(),
+  recordedAt: Type.Optional(text(40)), updatedAt: Type.Optional(text(40)), occurredAt: Type.Optional(text(40)),
+  identityStatus: Type.Optional(text(20)), identityContext: Type.Optional(text(1000)), sourceEvent: Type.Optional(Type.Boolean()),
 });
+// Bounded card data, projected from the same authorized scan as the list.
+// Evidence files and full metadata are deliberately loaded only on disclosure.
+export const ClaimCard = Type.Object({
+  hash: text(64), body: text(4000), truncated: Type.Boolean(), evidenceTotal: Type.Integer(),
+  evidenceSourceTotal: Type.Optional(Type.Integer()), owner: Type.Optional(Summary), source: Type.Optional(Summary),
+  attribution: Type.Optional(text(1000)), assertionOrigin: Type.Optional(text(30)), claimKind: Type.Optional(text(30)),
+  metadata: Type.Object({
+    entities: Envelope.properties.entities, owner: Envelope.properties.owner,
+    due_at: Envelope.properties.due_at, occurred_at: Envelope.properties.occurred_at,
+    source_event: Envelope.properties.source_event,
+  }, { additionalProperties: false }),
+}, { additionalProperties: false });
+export const CardSummary = Type.Object({ ...Summary.properties, card: Type.Optional(ClaimCard) });
 const Issue = Type.Object({ path: text(500), code: text(80), message: text(1000) });
 export const RecordInput = Type.Object({
   id: text(96),
@@ -27,13 +42,16 @@ export const RecordOutput = Type.Object({
     hash: text(64), body: Type.Optional(text(65536)), raw: Type.Optional(text(65536)),
     metadata: Type.Optional(Envelope), attribution: Type.Optional(text(1000)),
     assertionOrigin: Type.Optional(text(30)), claimKind: Type.Optional(text(30)),
+    owner: Type.Optional(Summary), source: Type.Optional(Summary),
   })]), Type.Null()]),
   content: Type.Object({ offset: Type.Integer(), totalChars: Type.Integer(), nextOffset: nullableOffset }),
   issues: Type.Array(Issue, { maxItems: 1000 }),
   references: Type.Optional(Type.Array(Summary, { maxItems: 100 })),
   referenceTotal: Type.Optional(Type.Integer()), nextReferenceOffset: Type.Optional(nullableOffset),
   evidence: Type.Optional(Type.Array(Type.Object({ ...Evidence.properties, excerpt: text(20000), verified: Type.Boolean(), excerptTruncated: Type.Boolean() }), { maxItems: 100 })),
-  evidenceTotal: Type.Optional(Type.Integer()), nextEvidenceOffset: Type.Optional(nullableOffset),
+  links: Type.Optional(Type.Array(Type.Object({ href: text(200000), status: Type.Union([Type.Literal("resolved"), Type.Literal("missing"), Type.Literal("ambiguous")]), id: Type.Optional(text(96)) }), { maxItems: 1000 })),
+  linksTruncated: Type.Optional(Type.Boolean()),
+  evidenceTotal: Type.Optional(Type.Integer()), evidenceSourceTotal: Type.Optional(Type.Integer()), nextEvidenceOffset: Type.Optional(nullableOffset),
 }, { additionalProperties: false });
 export type RecordOutput = Static<typeof RecordOutput>;
 

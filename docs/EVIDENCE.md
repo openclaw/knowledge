@@ -35,7 +35,9 @@ catalog's 8 MiB scan budget. Record/ontology catalog bounds remain separate.
 `knowledge_record` paginates references (20 by default; up to 100 per response).
 Bounded text previews disclose truncation. PDFs/media are downloadable originals,
 not claims of extraction/OCR/transcription. `knowledge_attachment` returns original
-bytes in chunks; clients follow nextOffset. The browser offers a file picker for
+bytes in at most 32 KiB decoded chunks; clients follow nextOffset (not the upload
+chunk size). Base64 plus JSON metadata and tool framing stays below the dynamic
+transport's 64,000-character response budget. The browser offers a file picker for
 uploads and downloads; where supported it streams downloads to a chosen local
 file, otherwise it uses a browser Blob download. Source HTML/SVG is never rendered
 as trusted app content.

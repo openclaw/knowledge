@@ -8,8 +8,8 @@ They are semantic ports, not a gbrain runtime dependency or a Workshop install.
 |---|---|
 | `knowledge-recall` | Answer from saved Knowledge with inspectable citations; read-only |
 | `knowledge-capture` | Save a short thought/snippet with exact source text |
-| `knowledge-ingest` | Documents/articles, source retention and relevant entity updates |
-| `knowledge-meeting-ingest` | Transcripts/notes, speaker uncertainty, decisions, chronology |
+| `knowledge-ingest` | Documents/articles, assertions, entity propagation and back-links |
+| `knowledge-meeting-ingest` | Transcripts, speaker uncertainty, structured decisions/actions, chronology |
 | `knowledge-entities` | Resolve identities; scoped, sourced profile creation/updates |
 | `knowledge-correct` | Exact-target correction/withdrawal, retained evidence and impact inspection |
 
@@ -27,8 +27,8 @@ Read in full and byte-compared to gbrain commit
 `skills/{query,capture,ingest,meeting-ingestion,resolve-before-asking,enrich,brain-link-discipline}/SKILL.md`,
 `skills/_brain-filing-rules.md`, and `skills/conventions/{quality,untrusted-content}.md`.
 The upstream MIT attribution is retained in [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
-Existing Knowledge tools and host acquisition are sufficient for this page-based
-slice; no new runtime, connector, extraction dependency or paid service is added.
+Existing Knowledge tools and host acquisition are sufficient for these workflows; no new runtime, connector, extraction dependency or paid service
+is added.
 
 | Upstream operation / practice | Knowledge port or explicit boundary |
 |---|---|
@@ -36,10 +36,10 @@ slice; no new runtime, connector, extraction dependency or paid service is added
 | capture / put_page | `knowledge_save_page`; observed revision/hash for edits, exact request replay, readback |
 | content-hash capture dedup | Agent checks source IDs/hashes/content and existing pages; backend dedup is only same request ID/payload |
 | upload-raw / put_raw_data | `knowledge_attach`, file evidence on page, `knowledge_attachment`; local originals, no cloud routing |
-| filing rules | Inspect `knowledge_ontology`; canonical type and server-generated UUID path; no assumed slug |
+| filing rules | Inspect `knowledge_ontology`; canonical type and server-generated descriptive path; use the returned path |
 | raw transcript / attribution | Retained original + labeled derived transcript; exact locators, unresolved speaker map, source-vs-inference distinction |
-| resolve/enrich | Exact lookup plus evidence-aware candidate comparison; selective supported entity page edits |
-| remember / timeline-add / add_link | `knowledge_create_claim` (dated event claims for timeline material), `knowledge_create_relationship`, `knowledge_connections`; no separate timeline store or automatic backlinks |
+| resolve/enrich | Knowledge-first lookup including connected claims/edges; sourced State, timeline context and entity back-links |
+| remember / timeline-add / add_link | `knowledge_create_claim` (dated event claims for timeline material), `knowledge_create_relationship`, `knowledge_connections`; no separate timeline store; Markdown-derived backlinks stay distinct from typed edges |
 | sync / embed | No sync command: saves publish; keyword search reconciles its own index |
 | bulk job checkpoints | Itemized agent work log + individual upload/publication receipts; no atomic/resumable multi-record job |
 | aliases/tags/dependencies | Supported collection replacement through `knowledge_save_page`; omitted fields preserve existing values |
@@ -48,11 +48,12 @@ slice; no new runtime, connector, extraction dependency or paid service is added
 | curation/dreaming / automatic inbound enrichment | Deferred; no ambient capture, broad profile research or scheduling |
 | push-before-link | Returned local path/ID or verified host link; no private-vault GitHub push to manufacture a URL |
 
-Deliberate quality departures: a name/roster match does not establish speaker
+Knowledge semantic departures: a name/roster match does not establish speaker
 identity; older synthesis does not outrank original evidence automatically;
 uncertainty is allowed instead of fabricated profile completeness. Summary-only
-meetings can be retained as attributed partial notes, not transcript-verified
-ingestion. Chronology checks compare actual events and timestamps, not the order
+input fails meeting ingestion, matching upstream; an explicit notes-only save
+routes to capture and is never transcript-verified. Chronology checks compare
+actual events and timestamps, not the order
 of headings in a topic-organized summary. Unknown facts stay unknown. Source
 instructions never authorize unrelated actions.
 
@@ -69,8 +70,10 @@ written into the user's vault.
 Package tests check skill metadata, local reference closure, tool references,
 generated reference freshness and npm payload inclusion. Host discovery is checked
 separately with the installed plugin catalog. Structured writes are now available;
-full workflow upgrades and real-content agent trials follow durable ingestion
-checkpoints. Bundling skills alone does not complete v1.
+the ingestion skills use them without a new ingestion subsystem. Contract trials
+cover authored structured outputs and recovery, not independent agent reasoning.
+Real-content agent trials remain an acceptance step. Bundling skills alone does
+not complete v1.
 
 ## Correction workflow port
 
@@ -83,3 +86,74 @@ MEMORY/SOUL/USER edits, fabricated guard facts, semantic search, or promise to
 repair every prose copy is imported. Structured chat references are accepted as
 primary targets when the host supplies them; this does not implement host draft
 composition. See [CORRECTIONS.md](CORRECTIONS.md).
+
+## Ingestion alignment — 2026-09-23
+
+The user-directed baseline is gbrain: preserve its workflow and change only for
+Knowledge tools, semantics or host authority. The four relevant upstream skills
+(`ingest`, `meeting-ingestion`, `enrich`, `resolve-before-asking`) are unchanged
+between the pinned commit above and the reviewed checkout HEAD
+`d13aa742fd68b71bfd6c98be3dda5813791f1d6c`.
+
+Restored upstream behavior includes primary-subject filing, current State rewrites,
+raw-source retention, 3–5-item pre-bulk checks, substantive attendee enrichment,
+entity propagation, timeline merge and bidirectional content links. Meetings keep
+the normalized transcript record, all nine phases, the four required sections,
+V1–V6 verification, explicit reasons for empty sections, sensitive-meeting restraint
+and honest partial/waived reporting. Entity lookup reads existing pages and
+connected claims/relationships before external escalation or asking the user.
+
+| Necessary adaptation | Reason |
+|---|---|
+| `knowledge_attach` + exact evidence locators instead of raw sidecar/cloud commands | Local retained artifacts, chunked upload and hash verification are the implemented evidence contract; sanitized derivatives are labeled, not misrepresented as originals |
+| Ontology discovery + descriptive filenames with stable frontmatter IDs | Configurable types/fields/endpoint constraints and stable IDs govern Knowledge writes |
+| Explicit claim records for useful decisions, commitments, beliefs and timeline events | Knowledge has no compiled-truth parser, takes fence or timeline store; page prose alone does not create structured assertions |
+| One event claim with multiple entity IDs plus dated profile prose | Preserves upstream timeline merge without duplicate event records; related claims are read with `knowledge_connections` |
+| Explicit evidenced relationship creation; `attended` participant → meeting in the default ontology | No auto-link hook; respect the ontology's direction and endpoint constraints. Bidirectional traversal does not require two opposite edges |
+| Prose back-links for mentions, typed edges only for supported relations | Knowledge distinguishes authored links from assertions; co-mention is not evidence of employment, ownership or attendance |
+| Exact lookup/keyword search/direct connections + host synthesis | No gbrain think, mounted-source, semantic-search, day-timeline or enrichment APIs |
+| Conditional host research; no ambient inbound capture, paid enrichment or automatic profile merging | Requested ingestion and trusted host scope do not authorize unrelated acquisition, background capture or identity consolidation |
+| Preserve ambiguous identity and source conflicts; accept explicit user corrections as new evidence | Knowledge distinguishes source/user/inference attribution and corrections from conflicting accounts; similar names or old synthesis cannot override evidence automatically |
+| Verify narrated chronology, not thematic heading order | Knowledge permits topic-organized prose; missing transit narration is not itself evidence of impossible travel |
+| Per-write receipts and agent work log, exact-payload retry and active/historical reconciliation | No ingestion API, required manifest, workflow engine or multi-record rollback. Reruns must not resurrect superseded/withdrawn assertions |
+| No sync or manual vault Git commands | Publication/index reconciliation/local history already belong to the backend |
+
+The remaining real-content trial is a workflow acceptance check, not a prerequisite
+for inventing additional progress storage. No live user records are created by the
+isolated contract tests.
+
+## Designer-feedback quality gates
+
+The reviewed gbrain enrichment and meeting workflows remain the baseline. The
+shared publication guidance now requires cross-source reconciliation before new
+claims: reuse duplicate imports, append additional evidence, link reaffirmations
+or updates explicitly, and reserve correction for actual replacement. This is a
+Knowledge adaptation because assertion lifecycle is typed, not inferred from
+similar prose. `knowledge_annotate` supplies revision-fenced contextual metadata
+without changing an assertion's text or lifecycle.
+
+Entity introductions describe entities, State reflects source-qualified current
+context, and Timeline owns meeting-specific history. Generated boilerplate must
+not substitute for synthesis. Structured owners/dates, partial identity,
+attribution confidence, source association and fixture classification are checked
+on readback. No unknown value may be invented to satisfy a design mockup.
+
+See [FEEDBACK_IMPLEMENTATION.md](FEEDBACK_IMPLEMENTATION.md) for contracts and
+[DESIGN_HANDOFF.md](DESIGN_HANDOFF.md) for presentation semantics. Deterministic
+annotation/browser tests cover the contracts; they are not an LLM extraction
+evaluation. A reviewed live curation pass and unseen-source agent trials are
+different kinds of evidence and must be reported separately.
+
+## Readable-citation consistency
+
+Meeting templates and shared conventions use readable inline source-page links,
+including self-links for retained transcript citations. This adapts the source
+appendix to Knowledge's File details disclosure: hashes and exact locators remain
+in structured evidence; useful speaker mapping and coverage context remain in
+prose/allowed fields. No provenance is discarded to simplify presentation.
+
+Shared readback checks inspect resolved link IDs and paginated `links`/`backlinks`
+connections separately from typed assertions. The paired meeting/entity example
+is authored in `skills/shared/meeting-entity-example.md` and synchronized into
+both relevant skill bundles. It illustrates the final prose and evidence mapping;
+it is not an unseen-source behavioral evaluation or a live-vault fixture.

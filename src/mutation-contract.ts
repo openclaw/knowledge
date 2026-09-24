@@ -1,7 +1,8 @@
 import { Type, type Static } from "typebox";
-import { text, name, Evidence, Envelope, id, strings } from "./model.js";
+import { text, name, Evidence, Envelope, id, strings, RecordAnnotations } from "./model.js";
 export const requestId = Type.String({ pattern: "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$" });
 export const SavePage = Type.Object({
+  ...RecordAnnotations.properties,
   requestId, title: Type.String({ minLength: 1, maxLength: 200 }), body: text(48000),
   type: Type.Optional(name), fields: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
   id: Type.Optional(Type.String({ pattern: "^[a-zA-Z0-9][a-zA-Z0-9_-]{7,95}$" })),
@@ -15,6 +16,7 @@ export const SavePage = Type.Object({
 }, { additionalProperties: false });
 export type SavePage = Static<typeof SavePage>;
 const common = {
+  ...RecordAnnotations.properties,
   requestId, expectedVaultId: Type.Optional(requestId),
   expectedOntologyFingerprint: Type.String({ pattern: "^[a-f0-9]{64}$" }),
   title: Type.String({ minLength: 1, maxLength: 200 }), body: text(48000),
@@ -44,6 +46,11 @@ const target = {
   expectedHash: Type.String({ pattern: "^[a-f0-9]{64}$" }),
   expectedVaultId: Type.Optional(requestId), reason: Type.String({ minLength: 1, maxLength: 2000 }),
 };
+export const AnnotateInput = Type.Object({
+  ...target, annotations: RecordAnnotations,
+  addEvidence: Type.Optional(Type.Array(Evidence, { minItems: 1, maxItems: 100 })),
+}, { additionalProperties: false });
+export type AnnotateInput = Static<typeof AnnotateInput>;
 export const WithdrawInput = Type.Object(target, { additionalProperties: false });
 export type WithdrawInput = Static<typeof WithdrawInput>;
 export const CorrectInput = Type.Object({

@@ -94,3 +94,10 @@ explicit lifecycle change. These fields are written by `knowledge_correct` and
 `knowledge_withdraw`, not supplied as arbitrary metadata on create/page save.
 Reasons and originals remain inspectable; durable operational guards prevent stale
 active Markdown from clearing supersession/withdrawal. See [CORRECTIONS.md](CORRECTIONS.md).
+
+## Markdown navigation and filenames
+
+Current real-vault writes use descriptive title-based filenames while keeping
+stable IDs in frontmatter. Wikilinks and relative Markdown links have shared UI
+and backend resolution; derived backlinks remain separate from evidenced edges.
+See [Markdown links](MARKDOWN_LINKS.md) for ambiguity, renames and source display.

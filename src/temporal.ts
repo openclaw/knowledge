@@ -25,3 +25,12 @@ export function activeNow(m: Envelope, now = Date.now()): boolean {
   return m.lifecycle === "active" && (!m.valid_from || Date.parse(m.valid_from) <= now) &&
     (!m.valid_until || Date.parse(m.valid_until) > now) && (!m.expires_at || Date.parse(m.expires_at) > now);
 }
+
+
+/** Date-only values are calendar dates, not UTC instants to shift into yesterday. */
+export function formatSourceDate(value: string): string {
+  if (!validSourceDate(value)) return value;
+  return /^\d{4}-\d{2}-\d{2}$/.test(value)
+    ? new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" }).format(new Date(value))
+    : new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" }).format(new Date(value));
+}

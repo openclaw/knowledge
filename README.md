@@ -15,10 +15,10 @@ Evidence-backed knowledge vault and native explorer for OpenClaw.
 | Read-only Control UI | Recent/Browse, entity-linked claims and evidence, typed connections, file/history inspection, and copy-request/open-chat handoff; no direct Knowledge write controls |
 | Keyword retrieval and exact identity | Scoped SQLite FTS5, filters, bounded citations and native Search; [retrieval guide](docs/RETRIEVAL.md) |
 | Embeddings | Not implemented or required |
-| Document/meeting ingestion | Six bundled agent workflow skills over supported page/file tools; [workflow guide](docs/WORKFLOWS.md) |
+| Document/meeting ingestion | Gbrain-aligned agent workflows over page, evidence, claim and relationship tools; [workflow guide](docs/WORKFLOWS.md) |
 | Structured claims, relationships and entity metadata | Implemented through agent tools, with evidence, temporal validation and retry recovery; inspected in native UI |
 | Correction/withdrawal | Agent-only exact-target operations, recoverable two-record correction, durable lifecycle safeguards and dependency impact; [contract](docs/CORRECTIONS.md) |
-| Durable ingestion checkpoints | Not implemented |
+| Ingestion continuation | Agent work log plus existing records and individual-write receipts; no separate ingestion system |
 | Live refresh | Private-vault filesystem invalidations, authorized snapshot refresh, reconnect and 30-second visible-page fallback; retired services are fenced |
 | Full backup/restore | Not implemented |
 
@@ -28,7 +28,7 @@ See [setup and authority](docs/REAL_VAULT.md), [model-facing API](docs/MODEL_API
 
 `knowledge-recall`, `knowledge-capture`, `knowledge-ingest`,
 `knowledge-meeting-ingest`, `knowledge-entities`, and `knowledge-correct` ship with the plugin. They
-retain sources, resolve identities conservatively, and verify published pages.
+retain sources, resolve identities conservatively, and verify published pages, claims, relationships and entity propagation.
 They are agent workflows, not an autonomous ingestion engine; host extraction
 and structured claim/relationship mutation have explicit limits. See the
 [upstream operation map and verification boundaries](docs/WORKFLOWS.md).
@@ -111,7 +111,7 @@ The page identifies sample versus real-vault mode and remains a read-only inspec
 
 Real-vault operations enforce the [authority and identity contract](docs/REAL_VAULT.md). A published receipt means files were published, not keyword-indexed (`indexed: false`). Exact reads and history support read-after-write. Precondition rejection does not save a server draft; accepted publication conflicts retain recovery material and block unsafe publication. No automatic conflict merge is provided.
 
-Page disposal cancels pending UI updates and releases subscriptions; reconnect requests fresh state. The redesigned UI does not mount or restore legacy editing drafts; existing browser draft storage is left untouched. Chat handoffs preserve the exact observed ID/revision/hash and do not send automatically. The bundled page-ingestion workflows do not complete the structured v1 ingestion contract; full backup/restore and the remaining v1 workflows are not claimed complete. Preserve the operational database and evidence alongside the vault; a Markdown-only copy is not a complete application backup.
+Page disposal cancels pending UI updates and releases subscriptions; reconnect requests fresh state. The redesigned UI does not mount or restore legacy editing drafts; existing browser draft storage is left untouched. Chat handoffs preserve the exact observed ID/revision/hash and do not send automatically. The upgraded ingestion skills still require real-content agent acceptance; full backup/restore and the remaining v1 workflows are not claimed complete. Preserve the operational database and evidence alongside the vault; a Markdown-only copy is not a complete application backup.
 
 ### Source file attachments
 

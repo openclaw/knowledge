@@ -1,42 +1,138 @@
 ---
 name: knowledge-entities
-description: Resolve people, companies, and projects against the Knowledge vault, and create or update sourced entity pages when requested or needed for an authorized ingestion. Keeps ambiguous names unresolved; not automatic contact enrichment.
+description: Resolve and enrich Knowledge people, companies, projects, and concepts during an authorized ingestion or entity update, with sourced State, timelines, and back-links. Read-only identity questions do not authorize writes.
 ---
 
-# Resolve and maintain entity pages
+# Resolve and Enrich Entities
 
-Read [shared conventions](references/conventions.md). Before any write, read
-[publication](references/publication.md).
+Follow gbrain's resolve-before-asking and enrich workflows using Knowledge's
+available tools. Read [shared conventions](references/conventions.md) and, before
+writes, [publication](references/publication.md).
 
-## Resolve before creating or asking
+## Contract
 
-1. Look up the full name or known ID with `knowledge_lookup`; inspect matches.
-   For a near-miss, search plausible spellings and related organization/project
-   terms. Read existing role/context and its evidence, not just result titles.
-2. Compare independent identifiers actually provided: source-confirmed identity,
-   organization, role, known interactions. Shared names, similar spellings, email
-   domains and repeated copies of one assertion are not conclusive. Keep
-   candidates separate and uncertainty explicit; do not auto-merge or add aliases.
-3. If uncertainty matters to the requested write, ask a specific question grounded
-   in the candidates. Otherwise leave the mention unresolved on its source page
-   and continue independent work. An attendee roster alone does not map a voice.
-   External research is optional and task-scoped, not a required escalation chain;
-   do not send private transcript context to public search or paid enrichment APIs.
+- Check Knowledge BEFORE asking the user or reaching for external lookups.
+- Every enriched page has substantive current State with inline citations,
+  dated source context where known, and bidirectional content back-links.
+- Scale effort to importance. No empty stubs, invented roles or boilerplate.
+- Preserve user-written assessments; flag contradictions with both citations.
 
-## Create or update within scope
+## Resolve before asking
 
-- Prefer existing pages. Create only a relevant, sufficiently identified entity
-  with substantive source-supported context, not a stub for each name encountered.
-- Inspect the canonical ontology type and allowed fields. Put known role/context
-  in prose or supported fields, with dates and citations. Do not infer contact
-  details, motivations, ownership or employment from co-occurrence.
-- Preserve user-authored assessments. Integrate material supported changes into
-  current context without erasing history; list contrary evidence with citations.
-  A provisional claim stays on the source page until identity/support is adequate.
-- Add a dated prose reference back to a source page when it contributes meaningful
-  context. Derive relative links from observed paths, retain stable IDs, and attach
-  the relevant evidence to the entity edit. Avoid duplicate entries on reruns.
-  This is an ordinary page edit, not a graph edge or structured timeline operation.
-- Read back each changed page. Return resolved IDs, changed/reused pages and
-  unresolved candidates to the calling ingestion. Read-only identity questions
-  do not authorize writes; profile consolidation/merging is not implemented.
+Run this chain in order, stopping at the first evidence-supported resolution:
+
+1. **Search + full page read.** Use `knowledge_lookup` for exact names/aliases/IDs,
+   then `knowledge_grep` for spelling variants and relevant context. Read the
+   complete candidate pages and metadata, including role/relationship fields.
+2. **Existing sources.** Inspect relevant retained meetings, documents and
+   imported context. Knowledge has no mounted-source or synthesis API; use
+   available authorized host sources only when needed within the task.
+3. **Timeline + connections.** Inspect `knowledge_connections` with directions
+   `claims`, `incoming`, `outgoing` and `dependents`, following pagination.
+   Read connected records and event dates. These are direct connections, not
+   semantic search or a multi-hop graph service. Synthesize from the evidence.
+4. **External escalation.** If needed, use available host web research with
+   public name/company hints. Do not send private transcript/context to public
+   search or buy enrichment access. Stop when sufficient evidence is available.
+5. **Ask with a hypothesis.** If ambiguity materially blocks the write, state
+   what was searched, what was found and the specific candidate/contradiction.
+   Otherwise leave the mention unresolved on the source and continue.
+
+A name, email domain, filled role field or repeated copies of one assertion are
+not independent identity proof. Keep ambiguous candidates separate. An attendee
+roster is evidence of possible presence, not a mapping to a voice. Add spelling
+variants as aliases only after identity is established; aliases do not merge IDs.
+
+## Enrichment tiers
+
+| Tier | Who | Effort |
+|---|---|---|
+| Key | Close collaborators, key contacts | Full relevant source context; task-scoped external research when needed |
+| Notable | Occasional interactions, relevant industry entities | Source extraction plus Knowledge cross-reference; targeted research if needed |
+| Minor | Worth tracking, limited relevance | Source and Knowledge cross-reference; no broad enrichment sweep |
+
+Actual, sufficiently identified meeting attendees get pages even with limited
+context: their sourced participation and contribution are meaningful content.
+For other mentions, apply notability: likely future interaction, work/interest
+relevance, or a reusable concept. Skip incidental names, spam and non-participants.
+Do not repeat recent enrichment absent new signal. Unknown facts remain absent.
+
+## Enrichment protocol
+
+1. **Identify entities.** Extract people, companies, projects and concepts from
+   the source. Distinguish actual participants from third-party mentions.
+2. **Check Knowledge state.** Read before create/update. Reuse existing IDs.
+3. **Extract signal.** Capture supported roles, projects, beliefs, open threads
+   and relationship context—not just a bio scrape. Attribute beliefs to the
+   speaker; an agent's assessment is not the person's belief. Do not infer
+   motivations from sparse context or propagate uncertain meeting claims.
+4. **Look up missing material context.** Follow the resolution chain above and
+   stop at the entity's appropriate tier. Unavailable APIs are not requirements.
+5. **Save raw data.** Retain used source/API responses with attribution and
+   acquisition date via `knowledge_attach`; preserve exact cited evidence.
+6. **Write the page.** Inspect the canonical ontology type and fields. Use
+   supported aliases/tags/fields; omitted metadata is preserved, supplied
+   collections/fields replace the whole value. Never invent frontmatter fields.
+   - CREATE: substantive cited summary and State, known relationship/context,
+     first dated source reference; omit unsupported template sections.
+   - UPDATE: rewrite State only where new evidence materially changes it;
+     preserve history and user assessments. Add reverse-chronological Timeline
+     entries without duplicates. Flag conflicting accounts, don't silently choose.
+7. **Cross-reference.** Link the source to the entity and the entity back to the
+   source. Update related company/project pages when relevant evidence surfaced.
+   Use actual returned paths for links. Create/reuse event claims connected to
+   all relevant entities, with source dependencies; inspect existing claims first.
+   Create explicit evidenced relationships only using inspected ontology labels
+   and directions. Markdown links alone do not create these edges.
+
+## Page structure
+
+### Entity-focused synthesis gate
+
+The opening answers “what do these sources establish about THIS entity?”, not
+“what happened in the last call?”. State synthesizes supported current context;
+Timeline records dated developments. Do not copy the same meeting summary into
+all three. If only one source is known, explicitly limit the summary to that
+context without fabricating a biography or adding stock disclaimers.
+
+Populate supported ontology fields such as `role` when the source establishes
+them, and create evidenced relationships separately. Unknown role, employer and
+surname remain absent. Canonicalize generated names using resolved entity names;
+never rewrite the retained original or “correct” a verbatim quote.
+
+For partial identity, record structured `identity.status` and context instead of
+relying solely on parenthetical title text. Candidates require their own evidence
+and remain distinct pages. Identity consolidation is still not implemented.
+
+Before scaling, compare 3–5 saved profiles with their cited passages. Check that
+the introduction, State and Timeline serve different purposes and known fields
+were not lost in prose. Schema validity alone does not pass this quality gate.
+
+Keep gbrain's useful structure, scaled to available evidence:
+
+- Person: executive summary (who/how known/why relevant), State, What They Believe,
+  What They're Building, What Motivates Them, Hobby Horses, Assessment, Trajectory,
+  Relationship, Contact, Network, Open Threads, Timeline.
+- Company: executive summary, State, Open Threads, Timeline.
+
+Do not fill headings with speculation or placeholder promises. Unknown data is
+not a reason to invent profile completeness. Every factual statement and timeline
+entry carries an inline citation; dates refer to the event, not ingestion time.
+One event claim can reference several entity IDs; per-page timeline prose remains
+useful for human reading. Different companies' feedback needs separate context,
+not a copied blob about the entire meeting.
+
+For a worked source-to-profile example with distinct introduction, State and
+Timeline, read [meeting and entity example](references/meeting-entity-example.md).
+
+## Verify and report
+
+Read every changed page and assertion back. Verify sources, State, dated entries,
+back-links and connections, following the shared `links` resolution and
+`links`/`backlinks` connection checks.
+Verify contextual source links in the body separately from derived navigation.
+Return resolved IDs, created/updated/reused records, sources used and unresolved
+candidates to the calling ingestion. Inspect uncertain
+receipts before reruns; never duplicate an unknown prior outcome. Route explicit
+corrections through `knowledge-correct`; identity consolidation is not implemented.
+For bulk work, inspect 3–5 outputs before scaling and report failures/partial work.

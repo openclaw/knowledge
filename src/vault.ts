@@ -1,3 +1,7 @@
+import { resolveLinks } from "./markdown-links.js";
+import { claimCard } from "./claim-card.js";
+import { annotationEvidence, annotationProblems } from "./annotations.js";
+import { recordSummary as summary, sourceCount } from "./record-summary.js";
 import { eligible } from "./retrieval.js";
 import { temporalProblems } from "./temporal.js";
 import * as fs from "node:fs";
@@ -21,7 +25,6 @@ export function sameScope(a: unknown, b: Scope): boolean {
     (b.visibility !== "sample" && scope.agentId === b.agentId &&
       (scope.visibility !== "conversation" || (b.visibility === "conversation" && scope.sessionId === b.sessionId))));
 }
-const summary = ({ metadata, body, raw, hash, ...rest }: LoadedRecord) => rest;
 
 // Scope is selected by the service from trusted authority, never from operation inputs.
 export class SampleVault {
@@ -110,10 +113,11 @@ export class SampleVault {
         }
       }
       for (const message of temporalProblems(m)) problem("invalid-temporal", message);
+      for (const message of annotationProblems(m, records)) problem("invalid-annotation", message);
       if (m.owner) resolve(m.owner, true);
       for (const reference of m.entities ?? []) resolve(reference, true);
       for (const reference of m.dependencies ?? []) resolve(reference);
-      for (const e of m.evidence ?? []) {
+      for (const e of [...(m.evidence ?? []), ...annotationEvidence(m)]) {
         try {
           if (!e.path.startsWith("artifacts/")) throw Error("Evidence must be within artifacts/");
           const content = overlay?.artifacts[e.path];
@@ -128,16 +132,19 @@ export class SampleVault {
     }
     if (bytes > 8 * 1024 * 1024) throw Error("Vault exceeds scan budget; no partial catalog returned.");
     if (!overlay) this.observe?.(records, this.scope);
+    const navigable = eligible({ records, ontology, sources, issues, checkedAt: "" }, undefined, false);
+    for (const r of navigable) for (const link of resolveLinks(r, navigable)) if (link.status !== "resolved") add(r.path, `${link.status}-link`, `Document link is ${link.status}: ${link.href}`);
     records.sort((a,b) => a.path.localeCompare(b.path));
     return { records, ontology, sources, issues, checkedAt: new Date().toISOString() };
   }
-  async list(input: { offset?: number; limit?: number; kind?: string; type?: string; query?: string; lifecycle?: "active" | "all" }) {
+  async list(input: { includeCards?: boolean; offset?: number; limit?: number; kind?: string; type?: string; query?: string; lifecycle?: "active" | "all" }) {
     const data = await this.scan();
     const query = input.query?.toLowerCase().trim();
     const types = input.type ? expandTypes(data.ontology, input.type) : null;
-    const matched = (input.lifecycle === "all" ? data.records : eligible(data, undefined, false)).filter(r => (!input.kind || r.kind === input.kind) && (!types || (r.kind === "page" ? types.has(r.type) : r.type === input.type)) && (!query || [r.id, r.title, ...(r.metadata.aliases ?? [])].some(v => v.toLowerCase().includes(query))));
+    const current = eligible(data, undefined, false);
+    const matched = (input.lifecycle === "all" ? data.records : current).filter(r => (!input.kind || r.kind === input.kind) && (!types || (r.kind === "page" ? types.has(r.type) : r.type === input.type)) && (!query || [r.id, r.title, ...(r.metadata.aliases ?? [])].some(v => v.toLowerCase().includes(query))));
     const offset = input.offset ?? 0, limit = input.limit ?? 50;
-    return { records: matched.slice(offset, offset + limit).map(summary), total: matched.length, offset, nextOffset: offset + limit < matched.length ? offset + limit : null, checkedAt: data.checkedAt };
+    return { records: matched.slice(offset, offset + limit).map(r => ({ ...summary(r), ...(input.includeCards && r.kind === "claim" ? { card: claimCard(r, current) } : {}) })), total: matched.length, offset, nextOffset: offset + limit < matched.length ? offset + limit : null, checkedAt: data.checkedAt };
   }
   async inspectOntology() {
     const data = await this.scan(), o = data.ontology;
@@ -158,7 +165,7 @@ export class SampleVault {
   async detail(id: string, evidenceOffset = 0, evidenceLimit = 20) {
     const data = await this.scan(), matches = data.records.filter(r => r.id === id);
     if (matches.length !== 1) return { record: null, issues: [], references: [], evidence: [] };
-    const r = matches[0], refs = new Set([...(r.metadata.entities ?? []), ...(r.metadata.dependencies ?? []), ...[r.metadata.from, r.metadata.to, r.metadata.owner].filter((x): x is string => Boolean(x))]);
+    const r = matches[0], refs = new Set([...(r.metadata.entities ?? []), ...(r.metadata.dependencies ?? []), ...[r.metadata.from, r.metadata.to, r.metadata.owner, r.metadata.source_page, ...(r.metadata.continuity ?? []).map(c => c.id), ...(r.metadata.identity?.candidates ?? []).map(c => c.id)].filter((x): x is string => Boolean(x))]);
     const references = eligible(data, undefined, false).filter(other => refs.has(other.id) || other.metadata.from === id || other.metadata.to === id || other.metadata.entities?.includes(id) || other.metadata.dependencies?.includes(id) || other.metadata.owner === id).map(summary);
     const evidence = [];
     for (const e of (r.metadata.evidence ?? []).slice(evidenceOffset, evidenceOffset + evidenceLimit)) {
@@ -170,7 +177,7 @@ export class SampleVault {
       } catch { /* The diagnostic is attached to the record; no raw filesystem error escapes. */ }
       evidence.push({ ...e, excerpt: verified ? excerpt : "", verified, excerptTruncated });
     }
-    return { record: { ...summary(r), body: r.body, raw: r.raw, hash: r.hash, metadata: JSON.stringify(r.metadata, null, 2) }, issues: data.issues.filter(i => i.path === r.path), references, evidence, evidenceTotal: r.metadata.evidence?.length ?? 0 };
+    return { record: { ...summary(r), body: r.body, raw: r.raw, hash: r.hash, metadata: JSON.stringify(r.metadata, null, 2) }, issues: data.issues.filter(i => i.path === r.path), references, links: resolveLinks(r, eligible(data, undefined, false)), evidence, evidenceTotal: r.metadata.evidence?.length ?? 0, evidenceSourceTotal: sourceCount(r.metadata.evidence) };
   }
   async attachment(input: { id: string; path: string; sha256: string; offset?: number }) {
     const data = await this.scan(), records = data.records.filter(r => r.id === input.id);

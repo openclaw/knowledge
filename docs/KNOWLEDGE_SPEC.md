@@ -32,7 +32,7 @@ This document consolidates the revised proposal, including the deeper skills rev
 - Explicit remembering, correction, withdrawal, and requested ingestion.
 - Complete text/document and meeting-transcript workflows, using available host media extraction capabilities and reporting partial outcomes when unavailable.
 - Task-appropriate skills whose detailed instructions load on demand; the eight proposed entry points are not a release requirement.
-- Durable, resumable progress for multi-record ingestion.
+- Agent-managed continuation for multi-record ingestion using existing records and individual-write receipts (§6.5).
 - Coexistence with existing memory and the selected context engine.
 - One vault and one OpenClaw publishing instance per agent; external editors are supported, user-managed transport is allowed, and distributed autonomous publishing is not guaranteed.
 
@@ -63,12 +63,12 @@ This document consolidates the revised proposal, including the deeper skills rev
 
 ## 3. Core invariants
 
-1. **Success means published and receipted.** A successful mutation has durably published its authoritative record changes and committed its receipt, audit entry, and applicable ingestion associations. Accepted recovery work is not success; derived indexing may remain pending if disclosed. Files and SQLite do not share an atomic transaction (§7.2).
+1. **Success means published and receipted.** A successful mutation has durably published its authoritative record changes and committed its receipt, audit entry. Accepted recovery work is not success; derived indexing may remain pending if disclosed. Files and SQLite do not share an atomic transaction (§7.2).
 2. **Evidence remains inspectable.** Claims retain attribution and usable evidence references. Summaries and interpretations remain distinguishable from original material.
 3. **Resolve before creating.** Inspect existing identities and plausible duplicates. Similarity alone never silently merges entities or supersedes claims.
 4. **Corrections are explicit.** Preserve the old claim and its evidence; record why a replacement or withdrawal occurred.
 5. **Concurrent edits do not silently overwrite.** Existing-record mutations require revision and file-content checks; edits throughout authoritative documents and unknown user metadata are preserved or surfaced as conflicts (§7.3).
-6. **Retries do not duplicate work.** Request identities and ingestion progress survive interruption.
+6. **Retries do not duplicate work.** Accepted request identities survive interruption; the agent reconciles its work log and existing outputs before continuing.
 7. **Host context determines access.** A model-supplied agent ID, source selector, or session reference cannot grant authority.
 8. **Workflow completion is stronger than write completion.** A saved meeting page alone is not a completed ingestion.
 9. **Skills are procedures, not enforcement boundaries.** Storage, access control, revisions, and structural validation belong in code; semantic judgments remain agent responsibilities.
@@ -86,7 +86,6 @@ This document consolidates the revised proposal, including the deeper skills rev
 | Relationship | A directed labeled connection between pages/entities | Opaque edge ID, revision, endpoints, label, evidence, lifecycle state, optional validity dates |
 | Evidence artifact | Retained original or derived source material | Artifact ID, immutable content hash/version, media type, origin, byte length, access scope, retention mode |
 | History entry | Audit of a committed mutation | Mutation ID, action, affected ID/revision, timestamp, reason where applicable, host-attached origin |
-| Ingestion record | Durable progress for a multi-record workflow | Import key, revision, artifact references, planned items/checkpoints, committed outputs, verification findings, status |
 
 ### 4.1 Facts and temporal meaning
 
@@ -114,7 +113,7 @@ A project is an entity type encompassing ongoing initiatives and workstreams, no
 
 Aliases assist resolution but do not prove identity. Ambiguous names produce candidates; alias collisions must not silently reassign a name.
 
-Meeting pages additionally carry occurrence time/timezone when known, participant references, evidence artifacts and ranges, ingestion identity, and completeness metadata.
+Meeting pages additionally carry occurrence time/timezone when known, participant references, evidence artifacts and ranges, and source identity/coverage information.
 
 Entity timelines should be derived from linked meetings/events and temporal facts. Store a relationship once and expose incoming/outgoing views; do not duplicate the whole meeting across every entity page.
 
@@ -150,7 +149,7 @@ Markdown-derived links/backlinks are rebuildable navigation state, separate from
 
 The proposed boundary is agent-private knowledge by default, with explicitly conversation-scoped records for shared conversations. The host supplies trusted agent/conversation context. Exact mapping to SDK authority is an implementation prerequisite, not assumed proven here.
 
-Every read, historical read, write, artifact read, graph traversal, and ingestion query applies that boundary. Filtering occurs before ranking, counting, and response packing. Hidden records must not leak through suggestions, counts, backlinks, history, or different existence responses.
+Every read, historical read, write, artifact read, graph traversal, and progress inspection applies that boundary. Filtering occurs before ranking, counting, and response packing. Hidden records must not leak through suggestions, counts, backlinks, history, or different existence responses.
 
 The same enforcement applies to native UI queries/actions, status counts, diagnostics, subscriptions, and event payloads. Derive browser authority from the authenticated host invocation and validated target context; a selected agent/vault is a selector within authorized access, never an access grant. Do not invent conversation authority for operator-originated actions. Missing trusted context fails closed. Shared operations do not imply identical authority for an operator and an agent tool.
 
@@ -171,7 +170,7 @@ Default behavior:
 
 Implement Knowledge behavior once as typed feature operations backed by the shared service. Browser and agent adapters use that service and its validation, publication, and access rules. Expose selected operations as agent tools; UI-specific status/schema queries need not each become a tool. No second persistence API or browser-side file writer.
 
-The catalog proposes **14 tools**: six read-only tools, seven record/evidence mutations, and one mixed ingestion-state interface. This is a design inventory, not a v1 tool-count requirement. Final packaging must cover the scoped workflows; the dedicated ingestion tool is provisional, but durable progress is required.
+This historical catalog proposes read-only and record/evidence operations, not a v1 tool-count requirement. Actual implemented names/contracts are documented in MODEL_API.md. The earlier dedicated ingestion interface is dropped; progress is agent-owned (§6.5).
 
 Signatures below are compact design schemas, not final JSON Schema. `?` means optional. No tool takes a model-controlled agent or brain selector.
 
@@ -189,12 +188,11 @@ Signatures below are compact design schemas, not final JSON Schema. `?` means op
 |---|---|---|
 | `knowledge_recall` | `query?`, `entity_id?`, `kinds?`, `since?`, `limit?`, `budget_tokens?` | Ranked facts, page snippets, matched entities, evidence, and match reasons. Keyword retrieval in v1; no generated answer or query expansion. Semantic retrieval is deferred. |
 | `knowledge_get` | `id`, `revision?`, `offset?`, `max_chars?`, evidence locator where applicable | Exact record or historical revision; bounded page/artifact text and continuation. Binary artifacts use authorized host artifact access. |
-| `knowledge_list` | `record_type?`, `entity_type?`, `entity_id?`, `tags?`, lifecycle filters, `updated_since?`, occurrence-time filters, `session?`, origin/import filters, `sort?`, `limit?`, `cursor?` | Deterministic exhaustive enumeration across authorized records, evidence, and ingestion state, with explicit continuation and completion. Ranked recall does not establish completeness. |
+| `knowledge_list` | `record_type?`, `entity_type?`, `entity_id?`, `tags?`, lifecycle filters, `updated_since?`, occurrence-time filters, `session?`, origin/import filters, `sort?`, `limit?`, `cursor?` | Deterministic exhaustive enumeration across authorized records and evidence, with explicit continuation and completion. Ranked recall does not establish completeness. |
 | `knowledge_entity` | `name_or_id` | `found`, `ambiguous`, or `missing`; bounded entity card, aliases, facts, relationships, and dated views. A miss never creates a record. |
 | `knowledge_neighbors` | `id`, `direction?`, `relation?`, `occurred_since?`, `occurred_until?`, `limit?`, `cursor?` | One-hop visible neighborhood/backlinks, distinguishing derived links from evidenced edges, with continuation and truncation. |
-| `knowledge_history` | `id?`, `session?`, `since?`, `until?`, `action?`, `ingestion_id?`, `limit?`, `cursor?` | Mutation ledger answering questions such as “what was saved this session/today?” Not a transcript dump or ambient delta protocol. |
+| `knowledge_history` | `id?`, `session?`, `since?`, `until?`, `action?`, `limit?`, `cursor?` | Mutation ledger answering questions such as “what was saved this session/today?” Not a transcript dump or ambient delta protocol. |
 
-The mixed `knowledge_ingestion` interface also supports reading progress through `action=get`, as described below.
 
 For recall, the proposed `since` filter uses event time for event facts and update time for pages; the response must state the time basis. Exact treatment of undated facts and whether separate named filters would be clearer remain to be settled in final schemas. List and neighborhood queries expose explicit occurrence-time filters.
 
@@ -205,10 +203,9 @@ Keyword-only retrieval is the complete v1 baseline, not a degraded mode merely b
 - `request_id` identifies a retryable operation. Repeating an identical published request returns its original receipt; an interrupted request resumes or reports its existing recovery state rather than creating a new operation. Reusing the ID with different content is an error.
 - Existing-record changes require `expected_revision`, checked against reconciled state and the observed file hash. A conflict preserves both versions without overwriting.
 - Factual content includes attribution and `evidence[]`. Missing provenance is reported, not fabricated.
-- Optional `ingestion_id` connects a mutation to an ingestion workflow.
 - Host-attached origin includes actor, agent, conversation, session/run identity when available, and storage time. Distinguish these from model-supplied source assertions.
 - Return `mutation_id`, affected `id`, `revision`, operation status, `publication_state`, and `index_state`; distinguish record lifecycle from operation progress.
-- Use the recoverable publication protocol in §7.2. Commit receipt, audit entry, and ingestion association together in SQLite after durable file publication; never claim an atomic transaction spanning files and SQLite.
+- Use the recoverable publication protocol in §7.2. Commit receipt and audit entry together in SQLite after durable file publication; never claim an atomic transaction spanning files and SQLite.
 - Successful published writes are immediately available to authorized exact reads, listing, and history. Reconcile authoritative state or use a current overlay if projections lag; derived keyword indexing may be pending and must be reported as such.
 
 ### 6.4 Record and evidence mutations
@@ -225,22 +222,19 @@ Keyword-only retrieval is the complete v1 baseline, not a degraded mode merely b
 
 Withdrawal hides dependent references that would expose withdrawn content in active retrieval; it does not silently cascade-delete other records. History and originals may remain. Copying a claim into prose creates a correction/withdrawal dependency to inspect, not permission to promise automatic erasure everywhere.
 
-### 6.5 Ingestion-state interface — proposed
+### 6.5 Ingestion progress — agent-owned (updated 2026-09-23)
 
-`knowledge_ingestion` formalizes resumable progress:
+The earlier proposed ingestion-state API is not being implemented. Knowledge
+owns durable individual mutations, receipts, conflict detection and publication
+recovery. OpenClaw/the agent owns acquisition, extraction, sequencing, work logs,
+semantic verification and reporting partial/completed work.
 
-| Action | Proposed inputs | Result |
-|---|---|---|
-| `begin` | `import_key`, artifact IDs, common mutation fields | Create or return the ingestion identity and initial plan/state. |
-| `get` | `id` or authorized import key | Read checkpoints, committed outputs, findings, and remaining work. |
-| `update` | `id`, `expected_revision`, item/checkpoint changes, common mutation fields | Persist progress without claiming completion. |
-| `complete` | `id`, `expected_revision`, output references, quality findings, common mutation fields | Validate required structural outputs and return complete only when accounted for. |
-
-States include pending, partial, and complete. Record failures and unresolved issues without losing successful writes. The ledger records agent-reported semantic checks separately from code-validated structural checks; the tool cannot certify that an interpretation is true.
-
-An import key identifies the source item within authorized scope. Exact reimports resume or reuse it. Semantically similar inputs, such as two recorders at one meeting, require evidence-based reconciliation rather than hash-based equivalence.
-
-**Open implementation choice:** a skill-managed durable record/manifest may initially satisfy this contract instead of a dedicated tool. It must still support safe retries, concurrent-update protection, committed output references, and recovery from authoritative state. This is progress storage, not another scheduler.
+Skills retain source identities, exact mutation payloads/request IDs, returned
+record IDs, verification results and unfinished items in ordinary authorized task
+storage when continuation needs it. On retry they inspect receipts, source evidence
+and existing records/connections before creating more. An unknown prior outcome
+is unresolved work, not permission to generate a new request ID. No separate job,
+mandatory manifest, multi-record rollback or semantic deduplication is promised.
 
 ## 7. Persistence and evidence retention
 
@@ -267,7 +261,7 @@ Files and SQLite cannot share one atomic transaction. Implement a durable journa
 | State | Guarantee |
 |---|---|
 | Accepted for publication | Validated intent, retry identity, expected revisions/hashes, target changes, and recovery material are durable. This is not a successful save or an approval step. |
-| Published | Authoritative file changes are durable and verified; receipt, audit entry, and applicable ingestion associations are committed. Exact reads, listing, and history expose the completed mutation. |
+| Published | Authoritative file changes are durable and verified; receipt, audit entry are committed. Exact reads, listing, and history expose the completed mutation. |
 | Indexed | Derived projections reflect the published generation; the receipt/status exposes any remaining index lag or failure. |
 
 Before publication, record the expected vault identity/generation and sufficient before/after material to recover without discarding concurrent edits. Coordinate cooperating publishers across processes as well as serializing in-process mutations. Validate revisions and file hashes against reconciled state; never treat an in-process lock as protection against an external editor.
@@ -278,7 +272,7 @@ Multi-record corrections are one logical publication: while incomplete, plugin r
 
 A successful receipt guarantees publication, not merely queued work. Pending recovery and indexing failures remain inspectable. Exact reads/list/history provide read-your-writes after success even if keyword indexing lags; keyword results disclose lag and never silently imply completeness. Ingestion completion requires published outputs and verification/readback, not just asynchronous indexing submission.
 
-Operational-only mutations such as ingestion checkpoints commit their state and receipt in a SQLite transaction; they do not require a synthetic vault-file publication. Receipt guarantees apply to the authoritative state affected by each operation.
+Individual-write recovery and receipts use SQLite operational state; agent workflow progress does not require a new operational-mutation API or synthetic vault record.
 
 ### 7.3 External-edit reconciliation
 
@@ -306,7 +300,7 @@ GitHub and Git/cloud transport remain deferred/user-managed; never sync the live
 
 ### 7.5 Diagnostics
 
-Provide a concise status operation for publication/recovery conflicts, index lag/failures, incomplete ingestion, malformed frontmatter, duplicate IDs, broken references, missing artifacts, and integrity/snapshot mismatches. Distinguish unavailable or partial knowledge from a successful empty query. Diagnostics obey access filtering and preserve problematic source material. Surface them in the native Activity & issues view with affected authorized records, current state, and actionable explanations; a generalized monitoring dashboard is not required.
+Provide a concise status operation for publication/recovery conflicts, index lag/failures, incomplete publications, malformed frontmatter, duplicate IDs, broken references, missing artifacts, and integrity/snapshot mismatches. Distinguish unavailable or partial knowledge from a successful empty query. Diagnostics obey access filtering and preserve problematic source material. Surface them in the native Activity & issues view with affected authorized records, current state, and actionable explanations; a generalized monitoring dashboard is not required.
 
 ## 8. Skills as first-class product behavior
 
@@ -345,7 +339,7 @@ Do not duplicate OpenClaw's transcript store by default. Do not import gbrain's 
 3. **Resolve and deduplicate.** Check import identity, existing pages, aliases, and plausible matches. Read candidates before deciding to create, update, link, or skip.
 4. **Select a recipe.** Route meetings, media, articles/documents, ideas, or optional bulk/archive inputs appropriately.
 5. **Interpret with context.** Read existing relevant knowledge. Extract attributed claims, not merely topic labels; separate inference from source statements.
-6. **Write and connect.** Commit pages, facts, and supported relationships with evidence and ingestion references. Co-mention alone does not establish a substantive relationship.
+6. **Write and connect.** Commit pages, facts, and supported relationships with evidence and source dependencies. Co-mention alone does not establish a substantive relationship.
 7. **Verify.** Read back outputs, resolve missing links or failed writes, and check evidence grounding.
 8. **Report completion honestly.** Return concrete output references, omissions, uncertainty, and partial/complete status. Resume interrupted work from durable state.
 
@@ -400,7 +394,7 @@ Expose the meeting in derived entity timelines. Do not require external dossiers
 
 ### 10.7 Verify completion
 
-Read back pages, facts, and edges. Check quote spans against originals, artifact references for future access, speaker uncertainty, and temporal consistency. Account for planned outputs and unresolved issues in the ingestion record.
+Read back pages, facts, and edges. Check quote spans against originals, artifact references for future access, speaker uncertainty, and temporal consistency. Account for planned outputs and unresolved issues in the agent work log.
 
 If interrupted after the page write, that page remains durable while ingestion remains partial. Resume missing facts, links, and checks without duplicating completed work.
 
@@ -430,7 +424,7 @@ Start with one **Knowledge** destination:
 |---|---|
 | Records | Bounded list/filter and detail; rendered content, structured fields, raw Markdown, evidence references, and history as available; lifecycle filters; basic page create/edit once safe writes exist |
 | Schemas | Available domain types/relationships, fields/constraints, filing/display hints, effective versions, and invalid definitions or record-validation failures |
-| Activity & issues | Actual mutations and reconciled external edits, publication/index state, conflicts, recovery findings, and ingestion progress when implemented; link to inspectable authorized outputs |
+| Activity & issues | Actual mutations and reconciled external edits, publication/index state, conflicts, recovery findings, and individual-publication recovery; link to inspectable authorized outputs |
 
 Show the active agent/vault and distinguish loading, empty, disconnected, invalid, and unavailable states. Use human-readable status and progressive detail, not raw implementation fields as the only way to understand an outcome. A source link must distinguish retained evidence from a remote reference. Render authored/imported Markdown as content, not executable UI; raw HTML and unsafe links must not gain native-plugin privileges.
 
@@ -446,7 +440,7 @@ Native UI requires the host's custom-plugin UI setting and a compatible same-ori
 
 ### 11.3 Feature-by-feature inspection
 
-Each new capability adds an inspection path for its inputs, durable outputs, state, and failures. For example, ingestion adds a run detail with retained sources, completed outputs, checkpoints, omissions, and failures; retrieval exposes returned evidence and actual index lag; correction shows the old/new records, reason, and unresolved dependencies. These are incremental views over existing contracts, not a second agent workflow or a generalized observability platform.
+Each new capability adds an inspection path for its inputs, durable outputs, state, and failures. For example, ingestion outputs expose retained sources, claims, relationships and mutation receipts; the agent reports omissions and unfinished work. Retrieval exposes returned evidence and actual index lag; correction shows the old/new records, reason, and unresolved dependencies. These are incremental views over existing contracts, not a second agent workflow or a generalized observability platform.
 
 ## 12. Relationship to gbrain
 
@@ -465,12 +459,12 @@ Each new capability adds an inspection path for its inputs, durable outputs, sta
 | Open-loop/task engine | Capture commitments but leave task execution, reminders, and delivery to the host |
 | Connectors, archives, bulk ingestion, briefings | Optional integrations/packs reusing the core workflows |
 
-### 12.1 Corollaries for the two ingestion additions
+### 12.1 Evidence retention and workflow progress
 
 | Proposed interface | Gbrain corollary | Important difference |
 |---|---|---|
 | `knowledge_attach` | `gbrain files upload-raw`; `put_raw_data` / `get_raw_data` for raw API responses | Consolidates evidence retention under stable artifact identities and citation locators. The preservation capability has a direct precedent. |
-| `knowledge_ingestion` | `log_ingest` / `get_ingest_log`; durable manifests in the bulk-ingestion skill | Gbrain's log records source identity, changed pages, and summary; the skill manifest carries progress/recovery. A dedicated structured tool combining these responsibilities is our proposal, not a direct port. |
+| Agent-owned work log (no new interface) | Workflow-managed progress in gbrain ingestion skills | Keep progress with the host agent; reconcile existing Knowledge records and mutation receipts. No mandatory manifest or plugin-owned ingestion job. |
 
 The adaptation retains evidence discipline, deduplication, entity connections, and readback checks. It does not copy mandatory broad enrichment, every fixed recorder heuristic, or a rule that old stored prose automatically outranks new evidence.
 
@@ -589,10 +583,10 @@ governing; the plan now records delivered contracts and remaining boundaries.
 Structured writes are implemented locally; activation/check results are recorded
 in VERIFICATION.md. Background extraction is explicitly deferred.
 
-Following structured writes, implement correction/withdrawal and durable ingestion
-checkpoints, before upgrading the skills and running full real-content agent
-workflow trials. Validate each foundation with small deterministic fixtures along
-the way; page-only trials do not establish complete ingestion readiness.
+Structured writes and correction/withdrawal are implemented. The ingestion skills
+now use those tools; real-content agent workflow trials are the next acceptance
+step, with no separate ingestion system or multi-record checkpoint prerequisite.
+Isolated structured-output trials validate backend support, not agent reasoning.
 
 ## 15. Design references
 

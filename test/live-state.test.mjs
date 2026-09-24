@@ -98,3 +98,18 @@ test('sample retrieval also respects retired service lifecycle',async()=>{
   services[0].start(); services[0].stop();
   for (const operation of ['grep','lookup']) await assert.rejects(service[operation]({query:'fictional'},{}),/reloaded/);
 });
+
+
+test('status snapshot is stable for unchanged reads and detects equal-count edits and source corruption', async t => {
+  const f = await fixture(t);
+  const record = await f.service.save_page({requestId:randomUUID(),title:'Snapshot',type:'note',body:'Original',source:{text:'Retained source',attribution:'test'}},f.context);
+  const before = await f.service.status({},f.context);
+  assert.equal((await f.service.status({},f.context)).snapshot,before.snapshot);
+  const changed = await f.service.save_page({requestId:randomUUID(),id:record.id,expectedRevision:record.revision,expectedHash:record.hash,title:'Snapshot',body:'Changed'},f.context);
+  const after = await f.service.status({},f.context);
+  assert.equal(after.records,before.records);
+  assert.notEqual(after.snapshot,before.snapshot);
+  const detail = await f.service.record({id:changed.id,includeMetadata:true},f.context);
+  await writeFile(f.root+'/private/'+detail.record.metadata.evidence[0].path,'Corrupted source');
+  assert.notEqual((await f.service.status({},f.context)).snapshot,after.snapshot);
+});

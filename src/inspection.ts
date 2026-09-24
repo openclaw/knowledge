@@ -20,8 +20,11 @@ export async function inspectRecord(vault: SampleVault, input: RecordInput): Pro
     ...(metadata.attribution ? { attribution: metadata.attribution } : {}),
     ...(metadata.assertion_origin ? { assertionOrigin: metadata.assertion_origin } : {}),
     ...(metadata.claim_kind ? { claimKind: metadata.claim_kind } : {}),
+    ...(detail.references.find(r => r.id === metadata.owner) ? { owner: detail.references.find(r => r.id === metadata.owner) } : {}),
+    ...(detail.references.find(r => r.id === metadata.source_page) ? { source: detail.references.find(r => r.id === metadata.source_page) } : {}),
     ...(input.includeMetadata ? { metadata } : {}),
   };
+  if (view === "content") { result.links = (detail.links ?? []).slice(0, 1000); result.linksTruncated = (detail.links?.length ?? 0) > 1000; }
   result.content = { offset, totalChars: value.length, nextOffset: next(offset, chunk.length, value.length) };
   if (input.includeReferences) {
     const start = input.referenceOffset ?? 0, limit = input.referenceLimit ?? 20;
@@ -31,6 +34,7 @@ export async function inspectRecord(vault: SampleVault, input: RecordInput): Pro
   }
   if (input.includeEvidence ?? view === "content") {
     result.evidenceTotal = detail.evidenceTotal ?? 0;
+    result.evidenceSourceTotal = detail.evidenceSourceTotal ?? 0;
     result.nextEvidenceOffset = next(input.evidenceOffset ?? 0, detail.evidence.length, result.evidenceTotal);
     let remaining = input.maxEvidenceChars ?? 4000;
     result.evidence = detail.evidence.map(e => {
