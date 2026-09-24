@@ -5,7 +5,7 @@ import { evidenceView } from "./evidence-view.js";
 import { loadVocabulary } from "./inspection-client.js";
 import { ontologyView } from "./ontology-view.js";
 import { icon, type IconName } from "./ui-icons.js";
-import { confidenceView, identityTag, assertionOrigin as origin } from "./knowledge-presentation.js";
+import { confidenceView, identityTag, assertionOrigin as origin, agentDisplayName } from "./knowledge-presentation.js";
 import { formatSourceDate, sourceDateNote } from "./temporal.js";
 import { captureReadingState } from "./reading-state.js";
 import { markdownView } from "./markdown-view.js";
@@ -60,6 +60,8 @@ export default defineControlUiPlugin({
       const recentBack: RecentCursor[] = [];
       const recentExpanded = new Set<number | string>();
       let generation = 0, statusGeneration = 0, disposed = false, identity = "", vaultChanged = false, agentId = "";
+      const agentName = (id = agentId) => agentDisplayName(id, context.host.agents.rows);
+      const askLabel = () => `Ask ${agentName() ?? "your agent"}`;
       let searchSnapshot: string | null | undefined;
       let displayGeneration = 0, viewReady = false, snapshot: string | undefined;
       let staging: HTMLElement | undefined;
@@ -79,7 +81,7 @@ export default defineControlUiPlugin({
         root.querySelector(".knowledge-chat-handoff")?.remove();
         const previousFocus = document.activeElement as HTMLElement | null;
         const panel = el("dialog", undefined, "knowledge-chat-handoff knowledge-surface");
-        panel.setAttribute("aria-label", candidate ? "Ask Molty to check this match" : correct ? "Ask Molty to correct this" : "Ask Molty");
+        panel.setAttribute("aria-label", candidate ? `${askLabel()} to check this match` : correct ? `${askLabel()} to correct this` : askLabel());
         panel.append(el("h3", panel.getAttribute("aria-label")!), el("p", "Copy the request, open chat, paste it, then review and send. Nothing is sent or changed from here."));
         const prompt = el("textarea"); prompt.readOnly = true; prompt.rows = 9; prompt.setAttribute("aria-label", "Chat request");
         const request = candidate ? `Is "${record.title}" the same person as "${candidate.title}"? Check the evidence on both pages. Link them only if it supports that; don't merge on the handle alone.` : correct ? "Please check this saved claim against its evidence and correct or withdraw it if the evidence supports that.\n\nWhat I think is wrong: " : `What do you know about "${record.title}", and where did it come from?`;
@@ -94,7 +96,7 @@ export default defineControlUiPlugin({
         const dismiss = () => { panel.close(); panel.remove(); previousFocus?.focus(); };
         panel.oncancel = event => { event.preventDefault(); dismiss(); };
         const footer = el("div", undefined, "knowledge-actions"); footer.append(button("Cancel", dismiss, "knowledge-quiet"), copy, chat);
-        panel.append(prompt, el("p", "The ID, revision and hash let Molty confirm it's looking at the same version you are.", "knowledge-muted"), footer, feedback); root.append(panel); panel.showModal(); prompt.focus();
+        panel.append(prompt, el("p", `The ID, revision and hash let ${agentName() ?? "your agent"} confirm it’s looking at the same version you are.`, "knowledge-muted"), footer, feedback); root.append(panel); panel.showModal(); prompt.focus();
       }
       function renderToolbar() {
         recentTab.setAttribute("aria-pressed", String(!selectedId && tab === "recent")); browseTab.setAttribute("aria-pressed", String(!selectedId && tab === "browse"));
@@ -136,13 +138,13 @@ export default defineControlUiPlugin({
         const standalone = Boolean(detail);
         const record = result.record!, card = el("article", undefined, `knowledge-claim${standalone ? " knowledge-claim-standalone" : ""}`); card.dataset.kind = aboutId && !record.metadata?.entities?.includes(aboutId) && record.metadata?.owner === aboutId ? "Owned commitments" : record.claimKind ?? record.kind;
         card.dataset.readingKey = `claim:${record.id}`;
-        card.dataset.preserveSignature = JSON.stringify([record.hash, record.valid, record.owner, record.source]);
+        card.dataset.preserveSignature = JSON.stringify([record.hash, record.valid, record.owner, record.source, record.writtenByAgentId ? agentName(record.writtenByAgentId) : undefined]);
         const row = el("div", undefined, "knowledge-claim-row"), copy = el("div", undefined, "knowledge-claim-copy");
         const statement = standalone ? markdownView(record.body || record.title, open, detail?.links) : undefined;
         if (statement) statement.classList.add("knowledge-claim-text");
         copy.append(statement ?? (record.metadata?.source_event && record.source ? button(`Meeting: ${record.source.title}`, () => open(record.source!.id), "knowledge-claim-text") : button(record.body || record.title, () => open(record.id), "knowledge-claim-text")));
         const metadata = el("div", undefined, "knowledge-claim-meta");
-        const assertionOrigin = el("span", origin(record.assertionOrigin, record.attribution), `knowledge-origin knowledge-origin-${record.assertionOrigin ?? "unknown"}`);
+        const assertionOrigin = el("span", origin(record.assertionOrigin, record.attribution, record.writtenByAgentId ? agentName(record.writtenByAgentId) : undefined), `knowledge-origin knowledge-origin-${record.assertionOrigin ?? "unknown"}`);
         assertionOrigin.prepend(icon(record.assertionOrigin === "source" ? "paperclip" : record.assertionOrigin === "user_belief" ? "circleUser" : record.assertionOrigin === "agent_inference" ? "brain" : "info", 12));
         if (record.metadata?.supersedes) metadata.append(chip("Corrected"));
         if (record.metadata?.continuity?.length) metadata.append(el("span", record.metadata.continuity.some(link => link.relation === "contradicts") ? "Conflicting account" : "Reaffirmed"));
@@ -179,7 +181,7 @@ export default defineControlUiPlugin({
           }
           if (loaded.relatedStatements?.length) {
             const related = el("section", undefined, "knowledge-related"); related.append(el("h4", "Related statements"));
-            for (const link of loaded.relatedStatements) { const row = el("div", undefined, "knowledge-related-row"); const verb = link.relation === "contradicts" ? "Conflicts with" : link.relation === "updates" ? link.incoming ? "Updated by" : "Updates" : link.incoming ? "Reaffirmed by" : "Reaffirms"; row.append(el("strong", verb), button(link.text || link.record.title, () => open(link.record.id), "knowledge-quiet"), el("small", origin(link.assertionOrigin, link.attribution)), el("p", `${link.basis}${link.source ? ` From ${link.source.title}.` : ""}`)); related.append(row); } evidenceBody.append(related);
+            for (const link of loaded.relatedStatements) { const row = el("div", undefined, "knowledge-related-row"); const verb = link.relation === "contradicts" ? "Conflicts with" : link.relation === "updates" ? link.incoming ? "Updated by" : "Updates" : link.incoming ? "Reaffirmed by" : "Reaffirms"; row.append(el("strong", verb), button(link.text || link.record.title, () => open(link.record.id), "knowledge-quiet"), el("small", origin(link.assertionOrigin, link.attribution, link.record.writtenByAgentId ? agentName(link.record.writtenByAgentId) : undefined)), el("p", `${link.basis}${link.source ? ` From ${link.source.title}.` : ""}`)); related.append(row); } evidenceBody.append(related);
           }
           if (!standalone) evidenceBody.append(button("Open claim", () => open(record.id), "knowledge-quiet"));
         };
@@ -219,7 +221,7 @@ export default defineControlUiPlugin({
         const fieldNodes = new Map<string, HTMLElement>();
         for (const [name, value] of Object.entries(meta?.fields ?? {})) { if (name === "occurred_at" || value === "" || value == null) continue; const node = el("span", `${human(name)}: ${name === "occurred_at" && typeof value === "string" ? formatSourceDate(value) : typeof value === "object" ? JSON.stringify(value) : value}`); fieldNodes.set(name, node); facts.append(node); }
         if (fieldNodes.size) pending.push(feature.invoke("ontology", { view: "definitions", name: r.type, limit: 1 }).then(schema => { if (!live(n)) return; for (const field of schema.definitions?.[0]?.fields ?? []) { const node = fieldNodes.get(field.name), value = meta?.fields?.[field.name]; if (node) node.textContent = `${field.label}: ${field.name === "occurred_at" && typeof value === "string" ? formatSourceDate(value) : typeof value === "object" ? JSON.stringify(value) : value}`; } }).catch(() => {}));
-        const askButton = button("Ask Molty", () => ask(r)); askButton.prepend(icon("messageSquare", 14));
+        const askButton = button(askLabel(), () => ask(r)); askButton.prepend(icon("messageSquare", 14));
         heading.append(facts); if (r.type === "person" && meta?.identity?.context) heading.append(el("p", `“${meta.identity.context}” is how the source describes them. It isn’t recorded as a role or employer.`, "knowledge-muted")); const entityTile = tile(r.type, 48, r.kind); entityTile.classList.remove("knowledge-tile-plain"); head.append(entityTile, heading, askButton);
         const back = button("← Knowledge", () => { selectedId = ""; renderToolbar(); void load(); }, "knowledge-back"); back.setAttribute("aria-label", "← Knowledge"); back.replaceChildren(icon("arrowLeft", 14), el("span", "Knowledge"));
         const breadcrumb = el("nav", undefined, "knowledge-breadcrumb"); breadcrumb.setAttribute("aria-label", "Breadcrumb"); breadcrumb.append(back, icon("chevronRight", 12), el("span", label(r.type)));
@@ -242,7 +244,7 @@ export default defineControlUiPlugin({
           const originals = files.querySelector<HTMLDetailsElement>(".knowledge-retained-originals");
           if (originals) { originals.open = true; originals.scrollIntoView({ block: "nearest" }); }
         }, result.links));
-        body.append(el("span", `Written by Molty · revision ${r.revision}${meta?.updated_at ? ` · updated ${date(meta.updated_at)}` : ""}`, "knowledge-summary-meta"));
+        body.append(el("span", `${r.writtenByAgentId ? `Saved by ${agentName(r.writtenByAgentId)}` : "Author not recorded"} · revision ${r.revision}${meta?.updated_at ? ` · updated ${date(meta.updated_at)}` : ""}`, "knowledge-summary-meta"));
         if (meta?.attribution_confidence) {
           const confidence = meta.attribution_confidence;
           main.append(el("p", `Speaker attribution confidence: ${confidence.level}. ${confidence.basis}`, "knowledge-notice"));
@@ -251,7 +253,7 @@ export default defineControlUiPlugin({
           const candidates = el("section"); candidates.append(el("h3", "Possible identity matches"));
           for (const candidate of meta.identity.candidates) {
             const match = result.references?.find(ref => ref.id === candidate.id);
-            const card = el("section", undefined, "knowledge-candidate knowledge-surface"); card.append(button(`Possible match: ${match?.title ?? "Candidate identity"}`, () => open(candidate.id), "knowledge-quiet"), el("p", candidate.basis), el("p", "Both records stay separate unless Molty finds evidence they’re the same person.", "knowledge-muted"), button("Ask Molty to check", () => ask(r, false, { id: candidate.id, title: match?.title ?? candidate.id }), "knowledge-quiet"));
+            const card = el("section", undefined, "knowledge-candidate knowledge-surface"); card.append(button(`Possible match: ${match?.title ?? "Candidate identity"}`, () => open(candidate.id), "knowledge-quiet"), el("p", candidate.basis), el("p", `Both records stay separate unless ${agentName() ?? "your agent"} finds evidence they’re the same person.`, "knowledge-muted"), button(`${askLabel()} to check`, () => ask(r, false, { id: candidate.id, title: match?.title ?? candidate.id }), "knowledge-quiet"));
             for (const evidence of candidate.evidence) { const verified = result.identityEvidence?.find(item => item.id === candidate.id)?.evidence.find(e => e.path === evidence.path && e.sha256 === evidence.sha256 && e.start_line === evidence.start_line && e.end_line === evidence.end_line); if (verified) card.append(evidenceView(feature, { ...result, evidence: [verified], evidenceTotal: 1, evidenceSourceTotal: 1, nextEvidenceOffset: null }, () => live(n), errorText)); else card.append(el("p", `Evidence: ${evidence.filename ?? evidence.path}${evidence.start_line ? ` · lines ${evidence.start_line}–${evidence.end_line ?? evidence.start_line}` : ""}. Open the record to inspect this citation.`, "knowledge-muted")); } candidates.append(card);
           }
           main.append(candidates);
@@ -269,7 +271,7 @@ export default defineControlUiPlugin({
         const knownFrom = el("span"); if (r.type === "person") facts.append(knownFrom);
         const owned = el("section"); owned.append(el("h3", `Commitments owned · owner only, not about ${r.title}`));
         const claims = el("section"), connections = el("section"), learned = el("section");
-        if (r.kind === "page") { claims.append(el("h3", "What Molty knows")); main.append(claims, owned); owned.hidden = true; }
+        if (r.kind === "page") { claims.append(el("h3", "Saved claims")); main.append(claims, owned); owned.hidden = true; }
         connections.append(el("h3", "Connections")); learned.append(el("h3", "Learned in"), el("p", "Conversation not recorded.", "knowledge-muted")); aside.append(connections, learned);
         const files = el("details", undefined, "knowledge-file-details"); files.dataset.readingKey = `files:${id}`; files.dataset.preserveSignature = `${r.hash}:${r.valid}`; const fileSummary = el("summary", "File details"); fileSummary.append(icon("chevronDown", 12)); files.append(fileSummary);
         const filePanel = el("div", undefined, "knowledge-surface knowledge-file-panel"), fileActions = el("div", undefined, "knowledge-file-actions");
@@ -348,7 +350,7 @@ export default defineControlUiPlugin({
               destination.append(tile(target.type, 24, target.kind), copy); row.append(destination); if (endpoints[i]) copy.querySelector("small")!.append(confidenceView(link.record.attributionConfidence, true));
               if (endpoints[i]) { const detail = button("", () => open(link.record.id), "knowledge-connection-evidence"); detail.setAttribute("aria-label", "Relationship evidence"); detail.title = "Relationship evidence"; detail.append(icon("paperclip", 13)); row.append(detail); } refs.append(row); }
           }
-          if (r.kind === "page") { const count = claims.querySelectorAll(".knowledge-claim").length; const heading = claims.querySelector("h3")!; heading.replaceChildren(document.createTextNode("What Molty knows "), el("span", `${count} ${count === 1 ? "claim" : "claims"}${page.nextOffset !== null ? " shown" : ""}`, "knowledge-section-count")); }
+          if (r.kind === "page") { const count = claims.querySelectorAll(".knowledge-claim").length; const heading = claims.querySelector("h3")!; heading.replaceChildren(document.createTextNode("Saved claims "), el("span", `${count} ${count === 1 ? "claim" : "claims"}${page.nextOffset !== null ? " shown" : ""}`, "knowledge-section-count")); }
           loadMore.remove(); if (page.nextOffset !== null) { linkOffset = page.nextOffset; connections.append(loadMore); }
           else { if (!refs.children.length) { refs.remove(); connections.append(el("p", "No connections recorded.", "knowledge-muted")); } if (r.kind === "page" && !claimGroups.size) { claimSurface.remove(); claims.append(el("p", `No claims about ${r.title}.${r.type === "person" && attendanceIds.size ? " Only attendance is recorded." : ""}`)); } }
         }
@@ -591,7 +593,7 @@ export default defineControlUiPlugin({
           const report = await feature.invoke("status", {}); if (disposed || n !== statusGeneration || !context.host.connection.connected) return;
           const nextIdentity = JSON.stringify([report.agent, report.vault, report.scope]);
           if (identity && identity !== nextIdentity) { vaultChanged = true; ++generation; ++suggestGeneration; toolbar.replaceChildren(); root.querySelector(".knowledge-chat-handoff")?.remove(); status.textContent = "Vault changed"; status.dataset.live = "false"; content.replaceChildren(empty("Vault changed", "Reload this page to open the newly connected vault.")); return; }
-          identity = nextIdentity; agentId = report.agent;
+          identity = nextIdentity; agentId = report.sample ? "" : report.agent;
           lastChecked = new Date().toISOString(); status.title = `Checked ${time(lastChecked)}`;
           status.textContent = report.live === "watching" ? "Live" : "Periodic refresh"; status.dataset.live = String(report.live === "watching");
           sampleChip.hidden = !report.sample; banner.hidden = true; banner.textContent = "";
@@ -611,7 +613,13 @@ export default defineControlUiPlugin({
         finally { refreshing = false; if (refreshAgain) { refreshAgain = false; void refresh(); } }
       }
       let connected = context.host.connection.connected;
-      const unsubscribe = context.host.subscribe(() => { if (connected !== context.host.connection.connected) { connected = context.host.connection.connected; ++suggestGeneration; toolbar.querySelector(".knowledge-suggestions")?.replaceChildren(); void refresh(); } });
+      const rosterKey = () => JSON.stringify(context.host.agents.rows.map(agent => [agent.id, agent.name, agent.identity?.name]));
+      let names = rosterKey();
+      const unsubscribe = context.host.subscribe(() => {
+        const nextNames = rosterKey(), namesChanged = names !== nextNames; names = nextNames;
+        if (namesChanged && viewReady && connected && !vaultChanged) { root.querySelector(".knowledge-chat-handoff")?.remove(); void load(true); }
+        if (connected !== context.host.connection.connected) { connected = context.host.connection.connected; ++suggestGeneration; toolbar.querySelector(".knowledge-suggestions")?.replaceChildren(); void refresh(); }
+      });
       const unwatch = feature.on("changed", () => void refresh());
       const resync = setInterval(() => { if (context.host.connection.connected && !document.hidden) void refresh(); }, 30000);
       const focusSearch = (event: KeyboardEvent) => { if (event.key !== "/" || event.ctrlKey || event.metaKey || event.altKey || event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || (event.target instanceof HTMLElement && event.target.isContentEditable)) return; const input = root.querySelector<HTMLInputElement>("input[type=search]"); if (input) { event.preventDefault(); input.focus(); } };

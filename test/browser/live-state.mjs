@@ -36,8 +36,10 @@ const listeners=new Set(), events=new Map(); let mounted, controller;
 const host={pluginId:'knowledge',signal:new AbortController().signal,connection:{connected:true},redact:String,
  request:async(method,p)=>({ok:true,result:await window.invokeKnowledge(p.actionId,p.payload)}),
  onEvent:(name,fn)=>{events.set(name,fn);return()=>events.delete(name)},subscribe:fn=>{listeners.add(fn);return()=>listeners.delete(fn)},
+ agents:{rows:[{id:'main',name:'Configured name',identity:{name:'Atlas'}},{id:'other',name:'Other agent'}],selectedId:'other'},
  sessions:{create:async(params)=>{window.createdChat=params;return "new-chat"},open:params=>{window.openedChat=params}},
  ui:{registerNavigation:()=>()=>{},registerPage:view=>{window.mount=()=>{controller=new AbortController();mounted=view.mount(document.querySelector('main'),{host,signal:controller.signal});};return()=>{}}}};
+window.renameAgent=name=>{host.agents.rows[0].identity.name=name;for(const fn of listeners)fn()};
 window.unmount=()=>{controller.abort();mounted.dispose()};
 window.remount=()=>{window.unmount();window.mount()};
 window.connect=connected=>{host.connection.connected=connected;for(const fn of listeners)fn()};
@@ -70,14 +72,14 @@ try {
     held?.finished();
     return result;
   });
-  const project=await service.save_page({requestId:randomUUID(),title:'Northwind launch',type:'project',body:'A launch project for the **Northwind** team.\n\n## Summary\n\n- The agent maintains this summary.'},context);
+  const project=await service.save_page({requestId:randomUUID(),title:'Northwind launch',type:'project',body:'A launch project for the **Northwind** team.\n\n## Summary\n\n- The agent maintains this summary.'},agentContext);
   const person=await service.save_page({requestId:randomUUID(),title:'Alex Rivera',type:'person',body:'Alex leads Northwind.',aliases:['Alex']},context);
   const source=await service.save_page({requestId:randomUUID(),title:'Team standup',type:'meeting',body:'Launch planning',source:{text:'Alex will deliver on Friday.\nLaunch happened yesterday.',attribution:'Alex, team standup'}},context);
   const evidence=(await service.record({id:source.id,includeMetadata:true},context)).record.metadata.evidence;
   const fingerprint=(await service.ontology({},context)).fingerprint;
   const common={expectedOntologyFingerprint:fingerprint,evidence,attribution:'Alex, team standup',entities:[project.id]};
   const commitment=await service.create_claim({...common,requestId:randomUUID(),title:'Release commitment',body:'Alex will deliver on Friday.',claim_kind:'commitment',assertion_origin:'source',owner:person.id,due_at:'2026-09-25'},context);
-  const inference=await service.create_claim({...common,requestId:randomUUID(),title:'Readiness inference',body:'The launch appears ready.',claim_kind:'belief',assertion_origin:'agent_inference'},context);
+  const inference=await service.create_claim({...common,requestId:randomUUID(),title:'Readiness inference',body:'The launch appears ready.',claim_kind:'belief',assertion_origin:'agent_inference'},agentContext);
   await service.create_claim({...common,requestId:randomUUID(),title:'Launch event',body:'Launch happened yesterday.',claim_kind:'event',assertion_origin:'source',occurred_at:'2026-09-22'},context);
   const relationship=await service.create_relationship({requestId:randomUUID(),expectedOntologyFingerprint:fingerprint,evidence,attribution:'Alex, team standup',title:'Alex leads Northwind',body:'Alex leads the launch project.',from:person.id,to:project.id,label:'leads'},context);
   services[0].start();
@@ -192,7 +194,13 @@ try {
   assert.equal(await page.locator('.knowledge-summary strong').innerText(),'Northwind');
   assert.equal(await page.locator('.knowledge-summary h2').innerText(),'Summary');
   assert.equal(await page.locator('.knowledge-summary li').innerText(),'The agent maintains this summary.');
-  await page.getByText('Molty inferred',{exact:true}).waitFor();
+  await page.getByText('Atlas inferred',{exact:true}).waitFor();
+  await page.getByText(/^Saved by Atlas · revision 1/).waitFor();
+  await page.evaluate(()=>window.renameAgent('Rowan'));
+  await page.getByRole('button',{name:'Ask Rowan',exact:true}).waitFor();
+  await page.getByText('Rowan inferred',{exact:true}).waitFor();
+  await page.evaluate(()=>window.renameAgent('Atlas'));
+  await page.getByRole('button',{name:'Ask Atlas',exact:true}).waitFor();
   await page.locator('.knowledge-claim[data-kind=belief]').locator('summary').filter({hasText:'Evidence · 1 file · 1 citation'}).click();
   await page.getByText('No direct quote for this inference. Premises below.',{exact:true}).waitFor();
   await page.locator('.knowledge-claim[data-kind=commitment]').locator('summary').filter({hasText:'Evidence · 1 file · 1 citation'}).click();
@@ -507,8 +515,8 @@ try {
   await sourceGroup.getByRole('button',{name:'kestrel will investigate.',exact:true}).click();
   await page.getByText('No deadline recorded',{exact:true}).waitFor();
   assert.equal(await page.getByText('Owner not identified',{exact:true}).count(),2);
-  await page.getByRole('button',{name:'Ask Molty',exact:true}).click();
-  await page.getByRole('dialog',{name:'Ask Molty',exact:true}).waitFor();
+  await page.getByRole('button',{name:'Ask Atlas',exact:true}).click();
+  await page.getByRole('dialog',{name:'Ask Atlas',exact:true}).waitFor();
   await page.keyboard.press('Escape');
   assert.equal(await page.getByRole('dialog').count(),0,'Escape closes the handoff modal');
   await page.getByRole('button',{name:'Browse',exact:true}).click();

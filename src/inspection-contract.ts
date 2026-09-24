@@ -9,6 +9,7 @@ const nullableOffset = Type.Union([Type.Integer(), Type.Null()]);
 export const Summary = Type.Object({
   id: text(96), title: text(200), kind: text(30), type: text(64), path: text(500),
   lifecycle: text(20), revision: Type.Integer(), valid: Type.Boolean(),
+  writtenByAgentId: Type.Optional(text(64)),
   recordedAt: Type.Optional(text(40)), updatedAt: Type.Optional(text(40)), occurredAt: Type.Optional(text(40)),
   from: Envelope.properties.from, to: Envelope.properties.to, label: Envelope.properties.label,
   attributionConfidence: Envelope.properties.attribution_confidence,

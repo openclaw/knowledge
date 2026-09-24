@@ -101,3 +101,16 @@ Current real-vault writes use descriptive title-based filenames while keeping
 stable IDs in frontmatter. Wikilinks and relative Markdown links have shared UI
 and backend resolution; derived backlinks remain separate from evidenced edges.
 See [Markdown links](MARKDOWN_LINKS.md) for ambiguity, renames and source display.
+
+
+## Displayed agent attribution
+
+Agent names in Knowledge come from the host agent roster, not the design sample.
+Chat actions target the configured vault agent, regardless of the selected chat agent.
+Read responses may include `writtenByAgentId` when the current exact record hash
+has journaled `agent` provenance in the authorized vault partition. The UI resolves
+that ID to the agent identity name, then configured name, then ID. This is shown as
+“Saved by” because a journaled revision may update metadata rather than author all
+source text. Operator saves, external edits, imports without agent provenance, and
+sample records do not acquire an agent byline merely by belonging to its vault.
+Source/speaker attribution remains separate. This projection does not rewrite files.

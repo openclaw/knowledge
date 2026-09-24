@@ -499,6 +499,10 @@ export class KnowledgeStorage {
         if (prior && (prior.hash !== r.hash || prior.path !== r.path)) r.revision = Math.max(r.revision, Number(prior.revision) + 1);
         else if (prior) r.revision = Math.max(r.revision, Number(prior.revision));
         if (!prior || prior.hash !== r.hash || prior.path !== r.path) this.recordObservation(db, key, r, prior ? "external-edit" : "observed");
+        // Only journal-confirmed agent revisions may carry an agent byline.
+        // Scope ownership alone is not authorship (operator/import/external edits).
+        const writer = db.prepare("SELECT provenance FROM history WHERE scope=? AND id=? AND hash=? ORDER BY sequence DESC LIMIT 1").get(key, r.id, r.hash);
+        if (writer?.provenance === "agent") r.writtenByAgentId = access.scope.agentId;
       }
       for (const prior of db.prepare("SELECT * FROM observations WHERE scope=? AND hash!=''").all(key)) if (!records.some(r => r.id === prior.id)) {
         db.prepare("INSERT INTO history(scope,id,provenance,at,path,revision,hash,raw) VALUES (?,?,?,?,?,?,?,?)").run(key, prior.id!, "external-unavailable", new Date().toISOString(), prior.path!, Number(prior.revision) + 1, "", "");

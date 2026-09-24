@@ -113,3 +113,18 @@ test('status snapshot is stable for unchanged reads and detects equal-count edit
   await writeFile(f.root+'/private/'+detail.record.metadata.evidence[0].path,'Corrupted source');
   assert.notEqual((await f.service.status({},f.context)).snapshot,after.snapshot);
 });
+
+
+test('agent bylines follow exact journaled revisions, never scope ownership or source attribution', async t => {
+  const f = await fixture(t), sessionId = randomUUID();
+  f.context.api.runtime = {agent:{session:{getSessionEntry:()=>({sessionId,chatType:'direct'})}}};
+  const agent = {source:'tool', api:f.context.api, tool:{agentId:'main',sessionId,sessionKey:'agent:main:authorship',senderIsOwner:true,assertInvocationCurrent(){}}};
+  const saved = await f.service.save_page({requestId:randomUUID(),title:'Authored page',type:'note',body:'Agent text'},agent);
+  const record = (await f.service.record({id:saved.id,view:'raw'},f.context)).record;
+  assert.equal(record.writtenByAgentId,'main');
+  assert.equal((await f.service.records({},f.context)).records.find(r=>r.id===saved.id).writtenByAgentId,'main');
+  const operator = await f.service.save_page({requestId:randomUUID(),title:'Operator page',type:'note',body:'Operator text'},f.context);
+  assert.equal((await f.service.record({id:operator.id},f.context)).record.writtenByAgentId,undefined);
+  await writeFile(f.root+'/private/'+saved.path,record.raw.replace('Agent text','External text'));
+  assert.equal((await f.service.record({id:saved.id},f.context)).record.writtenByAgentId,undefined);
+});

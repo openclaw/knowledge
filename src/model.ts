@@ -88,5 +88,6 @@ export type Issue = { path: string; code: string; message: string };
 export type RecordSummary = {
   id: string; title: string; kind: string; type: string; path: string;
   lifecycle: string; revision: number; valid: boolean;
+  writtenByAgentId?: string;
 };
 export type LoadedRecord = RecordSummary & { metadata: Envelope; body: string; raw: string; hash: string };
