@@ -3,8 +3,8 @@ import { text, name, Evidence, Envelope, id, strings, RecordAnnotations } from "
 export const requestId = Type.String({ pattern: "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$" });
 export const SavePage = Type.Object({
   ...RecordAnnotations.properties,
-  requestId, title: Type.String({ minLength: 1, maxLength: 200 }), body: text(48000),
-  type: Type.Optional(name), fields: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+  requestId: Type.String({ ...requestId, description: "Generate a lowercase UUID per distinct mutation, not a source ID or slug. Reuse only with the identical payload after an uncertain response." }), title: Type.String({ minLength: 1, maxLength: 200 }), body: text(48000),
+  type: Type.Optional(name), fields: Type.Optional(Type.Record(Type.String(), Type.Unknown(), { description: "Only domain fields declared by knowledge_ontology view=definitions for this type. Replaces the entire fields object; omit to preserve." })),
   id: Type.Optional(Type.String({ pattern: "^[a-zA-Z0-9][a-zA-Z0-9_-]{7,95}$" })),
   expectedVaultId: Type.Optional(requestId),
   expectedRevision: Type.Optional(Type.Integer({ minimum: 1 })),
@@ -17,7 +17,7 @@ export const SavePage = Type.Object({
 export type SavePage = Static<typeof SavePage>;
 const common = {
   ...RecordAnnotations.properties,
-  requestId, expectedVaultId: Type.Optional(requestId),
+  requestId: SavePage.properties.requestId, expectedVaultId: Type.Optional(requestId),
   expectedOntologyFingerprint: Type.String({ pattern: "^[a-f0-9]{64}$" }),
   title: Type.String({ minLength: 1, maxLength: 200 }), body: text(48000),
   attribution: Type.String({ minLength: 1, maxLength: 1000 }),

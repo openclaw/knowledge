@@ -27,6 +27,9 @@ as base64 in sequential chunks of at most 49,152 decoded bytes, starting at
 unchanged; set `final: true` only on the last chunk (an empty file is one empty
 final chunk). Follow `receivedBytes`. Retry the identical chunk after a lost
 response; never guess a new offset or silently restart under a new request ID.
+Generate lowercase UUIDs with the host's UUID facility (for example,
+`crypto.randomUUID()`); filenames, provider note IDs and descriptive slugs are
+not request IDs. Different originals need different UUIDs, even in one meeting.
 
 Use available host file-reading/encoding facilities; do not manually invent
 base64 or pass a filesystem path to this tool. If those facilities are absent,
@@ -75,9 +78,17 @@ change; the observer may have advanced the revision.
 
 ## Retry and reconcile
 
+The shared service serializes vault operations, including reads, so simultaneous
+tool/UI calls cannot invalidate one another's publication snapshot. This is not
+a batch transaction or cross-process writer lock. Keep dependent calls sequential
+(create before linking; read current preconditions before editing).
+
 - Lost/uncertain save response: inspect `knowledge_mutation({requestId})`. Replay
   the exact payload with that ID, or use `knowledge_resume({requestId})` for a
   known accepted publication. Never replace an uncertain request with a new ID.
+  A null receipt is not proof of failure while a call is still in flight; wait
+  for it to settle and replay the original payload/ID. Uploads use their chunk
+  receipts instead of `knowledge_mutation`.
 - `state: accepted` is durable intent, not completion. `state: published` means
   the page was saved. `indexed: false` describes publication-time state; a fresh
   search reconciles indexing. A pending/unavailable Git checkpoint does not undo
@@ -88,6 +99,14 @@ change; the observer may have advanced the revision.
   report the conflict; resume does not resolve it. Do not overwrite, bypass
   preconditions, delete the journal or blindly loop. A repeated unchanged failure
   needs inspection, not more retries.
+- Invalid arguments/ontology fields: correct the payload against the actual
+  tool schema and `knowledge_ontology({view: "definitions", name: "<type>"})`.
+  Do not retry unchanged validation failures. Page evidence uses `attachments`;
+  claims/relationships use `evidence`; collection fields replace, not merge.
+- Vault identity/checkpoint/storage unavailable: this is not an API credential
+  error. Inspect the original mutation/history and availability. If availability
+  returns, retry the exact request; if it persists, report the blocker rather
+  than changing credentials, vault configuration or request IDs.
 - For several records, keep an itemized work log of source identity, upload request
   IDs/evidence, page/claim/relationship request IDs/exact payloads, returned record IDs and verified
   outcomes. Use authorized task storage if durable continuation is needed; this

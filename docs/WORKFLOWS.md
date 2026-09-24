@@ -59,6 +59,23 @@ instructions never authorize unrelated actions.
 
 ## Verification scope
 
+### Ingestion reliability follow-up — 2026-09-24
+
+Concurrent public service calls reproduced the live "vault identity or storage
+is unavailable" error: one publication advanced the manifest while another
+operation was still validating its snapshot. The shared tool/UI service now
+serializes real-vault operations, including reads, without removing filesystem,
+authority, revision or identity fences. Rejections release the lane; queued calls
+from a retired service epoch fail. This is not a distributed lock or batch job.
+
+One focused regression covers concurrent creates/readback, identical-request
+replay and continued service after a stale-edit rejection. Existing workflow,
+publication, authority and lifecycle checks cover the surrounding contracts.
+Acquisition guidance records endpoint-specific pagination and completeness;
+publication guidance distinguishes uncertain results, validation failures,
+conflicts and unavailable storage. No new connector, credential store, ingestion
+framework or live content remediation was introduced.
+
 `test/workflows.test.mjs` exercises the public feature adapter against isolated
 temporary vaults: original documents/transcripts, source locators, entity
 resolution, contradictory meeting evidence, explicit corrections, lost-response

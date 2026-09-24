@@ -296,3 +296,22 @@ Milestone: read-only synthetic vault explorer, not v1 completion or private-vaul
 Expected fixture snapshot: 11 envelope-valid records (7 fully valid), 8 effective schemas, 6 findings. The malformed record is preserved and diagnosed outside the typed catalog. The invalid schema is preserved outside the effective schema set.
 
 No external ingestion, journaled writes, production access enforcement, automatic file watching, durable activity log, ranked retrieval, or recovery guarantees are claimed.
+# Ingestion reliability — 2026-09-24
+
+- Reproduced the live concurrent-save failure through the public feature adapter
+  in an isolated vault: four calls failed with the same vault identity/storage
+  unavailable message. With shared service serialization, the regression passes.
+- Added one regression, covering parallel creates and reads, exact-request replay,
+  and continued operation after stale-edit rejection. Ran it with the existing
+  workflow, publication, live-state, real-vault and skill-packaging checks:
+  **51 passed, zero failures**. No expanded acceptance suite or live test records.
+- `npm run check`, `npm run build`, `npm run validate` and `git diff --check` passed.
+- Live pre-reload status: 147 active valid records, zero diagnostics. The first
+  hot-reload attempt was rejected during prepare because Knowledge had active
+  retained work; the gateway explicitly reported that replacement was not applied.
+  Build/validation success alone does not mean the running service was updated.
+- Saved meeting/person content, credentials and gateway configuration were not
+  changed. Granola acquisition guidance was checked against its official API
+  references; no fresh authenticated Granola fetch was needed or performed.
+
+---

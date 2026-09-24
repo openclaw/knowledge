@@ -8,7 +8,7 @@ export const ATTACHMENT_CHUNK_BYTES = 48 * 1024;
 // beneath the dynamic transport's 64,000-character response budget.
 export const ATTACHMENT_DOWNLOAD_CHUNK_BYTES = 32 * 1024;
 export const AttachInput = Type.Object({
-  requestId: uuid, expectedVaultId: Type.Optional(uuid),
+  requestId: Type.String({ ...uuid, description: "Generate a lowercase UUID per original file (not a title or source ID); reuse it for all chunks and exact retries of that file only." }), expectedVaultId: Type.Optional(uuid),
   filename: Type.String({ minLength: 1, maxLength: 200, pattern: "^[^/\\\\\\x00-\\x1f]+$" }),
   mediaType: Type.Optional(text(200)), attribution: Type.String({ minLength: 1, maxLength: 1000 }),
   offset: Type.Integer({ minimum: 0 }), data: text(65536), final: Type.Boolean(),

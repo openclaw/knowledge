@@ -52,6 +52,36 @@ async function fixture(t) {
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 const source = name => readFile(new URL(`fixtures/workflows/${name}`, import.meta.url));
 
+test('concurrent service calls publish once, allow reads, and recover after a rejected edit', async t => {
+  const f = await fixture(t);
+  await f.call('status');
+  const inputs = Array.from({ length: 4 }, (_, i) => ({ requestId: randomUUID(),
+    expectedVaultId: f.vaultId, title: `Concurrent person ${i}`, type: 'person', body: `Person ${i}` }));
+  const results = await Promise.allSettled([
+    ...inputs.map(input => f.call('save_page', input)),
+    f.call('records'),
+    f.call('save_page', inputs[0]),
+  ]);
+  assert.deepEqual(results.filter(r => r.status === 'rejected').map(r => r.reason.message), []);
+  const receipts = results.slice(0, 4).map(r => r.value);
+  assert.deepEqual(results[5].value, receipts[0]);
+  assert.equal((await f.call('records')).total, 4);
+  const current = receipts[0];
+  const edit = { ...inputs[0], requestId: randomUUID(), id: current.id,
+    expectedRevision: current.revision, expectedHash: current.hash, body: 'Updated person' };
+  await f.call('save_page', edit);
+  const afterConflict = await Promise.allSettled([
+    f.call('save_page', { ...edit, requestId: randomUUID(), body: 'Stale draft' }),
+    f.call('record', { id: current.id }),
+    f.call('save_page', inputs[1]),
+  ]);
+  assert.equal(afterConflict[0].status, 'rejected');
+  assert.match(afterConflict[0].reason.message, /Edit conflict/);
+  assert.equal(afterConflict[1].value.record.body, 'Updated person');
+  assert.deepEqual(afterConflict[2].value, receipts[1]);
+  assert.equal((await f.call('records')).total, 4);
+});
+
 test('document port: original retention, locators, entity reuse, readback and uncertain-save replay', async t => {
   const f = await fixture(t), bytes = await source('project-brief.txt');
   assert.equal((await f.call('status')).writesEnabled, true);

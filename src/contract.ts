@@ -26,7 +26,7 @@ export const contract = defineFeatureContract({
       input: RecentInput, output: RecentOutput,
     },
     attach: {
-      kind: "action", description: "Retain an original source file in the authorized vault scope. Send base64 chunks of up to 48 KiB decoded, sequential byte offsets, the same requestId/filename/attribution for all chunks, and final=true on the last chunk. Retry identical chunks after interruption. No total file-size or evidence-count cap. A complete receipt returns evidence to append via save_page.attachments. Uploading alone does not create a page. No local filesystem path is accepted.",
+      kind: "action", description: "Retain an original source file in the authorized vault scope. Generate a distinct lowercase UUID requestId per file, never a filename/source ID and never shared by different files. Send base64 chunks of up to 48 KiB decoded, sequential byte offsets, the same requestId/filename/attribution for all chunks, and final=true on the last chunk. Retry identical chunks after interruption. No total file-size or evidence-count cap. A complete receipt returns evidence to append via save_page.attachments. Uploading alone does not create a page. No local filesystem path is accepted.",
       input: AttachInput, output: AttachOutput, tool: { name: "knowledge_attach", label: "Attach knowledge source file" },
     },
     attachment: {
@@ -34,7 +34,7 @@ export const contract = defineFeatureContract({
       input: AttachmentInput, output: AttachmentOutput, tool: { name: "knowledge_attachment", label: "Read knowledge source file" },
     },
     save_page: {
-      kind: "action", description: "Create or edit a page in the authorized scope. Reuse requestId and identical payload for retries. Edits require observed revision and hash. Aliases, tags, dependencies and fields replace their collections when supplied (empty clears); omission preserves on edit. Optional expectedOntologyFingerprint fences the observed schema. Append file evidence returned by knowledge_attach using attachments (no count cap). Legacy source text remains supported; saved pages are immediately available with no approval step. A published receipt is a completed save; accepted publication conflicts retain recovery material and block publication. Requests rejected before acceptance are not saved.",
+      kind: "action", description: "Create or edit a page in the authorized scope. requestId must be a generated lowercase UUID, never a source ID or slug. Creates omit id/expectedRevision/expectedHash; edits require all three from knowledge_record. Reuse requestId and identical payload for retries; inspect knowledge_mutation after an uncertain result. Calls share a serialized service lane, not a multi-record transaction. Aliases, tags, dependencies and fields replace their collections when supplied (empty clears); omission preserves on edit. Optional expectedOntologyFingerprint fences the observed schema. Append file evidence returned by knowledge_attach using attachments (no count cap). Legacy source text remains supported; saved pages are immediately available with no approval step. A published receipt is a completed save; accepted publication conflicts retain recovery material and block publication. Requests rejected before acceptance are not saved.",
       input: SavePage, output: Receipt, tool: { name: "knowledge_save_page", label: "Save knowledge page" },
     },
     create_claim: {
@@ -69,7 +69,7 @@ export const contract = defineFeatureContract({
       tool: { name: "knowledge_revision", label: "Inspect knowledge revision" },
     },
     mutation: {
-      kind: "query", description: "Inspect a scoped receipt and retained before/proposed/displaced text for publication recovery. Does not resolve or overwrite a conflict.",
+      kind: "query", description: "Inspect a scoped receipt and retained before/proposed/displaced text for publication recovery. A null receipt means no accepted page/assertion mutation was found in this scope; it is not an upload receipt. After an uncertain result, replay the original payload/ID, not a replacement request. Does not resolve or overwrite a conflict.",
       input: Type.Object({ requestId }, { additionalProperties: false }),
       output: Type.Object({ receipt: Type.Union([Receipt, Type.Null()]), files: Type.Array(Type.Object({ path: text(500), before: Type.Union([text(65536), Type.Null()]), proposed: text(65536), displaced: Type.Union([text(65536), Type.Null()]) }), { maxItems: 3 }) }),
       tool: { name: "knowledge_mutation", label: "Inspect knowledge publication" },

@@ -40,7 +40,7 @@ export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureE
     if (write && !config.writesEnabled) throw Error("Knowledge writes are disabled.");
     return accessFor(context, write);
   };
-  return {
+  const handlers: FeatureHandlers<typeof contract> = {
     annotate: async (input, context) => {
       if (context.source !== "tool") throw Error("Knowledge changes must be requested through chat and agent tools.");
       const access = authority(context, true);
@@ -103,4 +103,24 @@ export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureE
       return { issues: data.issues.slice(0, 1000), total: data.issues.length, truncated: data.issues.length > 1000, checkedAt: data.checkedAt };
     }),
   };
+  // RealVault fences an operation's manifest/checkpoint snapshot. A sibling
+  // publication advances that snapshot, so reads as well as writes must share
+  // this lane. Otherwise ordinary parallel tool/UI calls look like an external
+  // vault replacement. Keep the filesystem and revision fences intact.
+  if (!storage) return handlers;
+  let pending: Promise<void> = Promise.resolve();
+  const serialize = <Input, Output>(handler: (input: Input, context: FeatureInvocationContext) => Output | Promise<Output>) =>
+    (input: Input, context: FeatureInvocationContext): Promise<Output> => {
+      const submittedEpoch = epoch;
+      const result = pending.then(() => {
+        assertCurrent();
+        if (submittedEpoch !== epoch) throw Error("Knowledge service was reloaded; retry the original request.");
+        return handler(input, context);
+      });
+      // A rejected operation must not poison later requests or recovery calls.
+      pending = result.then(() => undefined, () => undefined);
+      return result;
+    };
+  return Object.fromEntries(Object.entries(handlers).map(([name, handler]) =>
+    [name, serialize(handler as (input: never, context: FeatureInvocationContext) => unknown)])) as FeatureHandlers<typeof contract>;
 }

@@ -69,6 +69,9 @@ this phase. Report the missing source; do not create a completed meeting from a
 summary alone. If the user requested saving only notes, use `knowledge-capture`
 for attributed notes and explicitly state that meeting ingestion is not complete.
 Transcription is a host capability, not a Knowledge tool.
+For API acquisition, read [source acquisition](references/source-acquisition.md):
+verify date filters, follow every transcript cursor, and record coverage before
+normalizing. It includes the Granola endpoint/parameter reference.
 
 ### Phase 2: Split detection — one recording is not always one meeting
 

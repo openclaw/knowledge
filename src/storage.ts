@@ -181,7 +181,7 @@ export class KnowledgeStorage {
     access.assertCurrent();
     if (input.expectedVaultId && input.expectedVaultId !== this.config.vaultId) throw Error("Connected vault changed; this draft belongs to a different vault. No publication was accepted.");
     if (!this.config.writesEnabled) throw Error("Knowledge writes are disabled.");
-    if (Boolean(input.id) !== Boolean(input.expectedHash && input.expectedRevision) || (!input.id && (input.expectedHash || input.expectedRevision))) throw Error("Create requires no preconditions; edit requires ID, observed revision, and hash.");
+    if (Boolean(input.id) !== Boolean(input.expectedHash && input.expectedRevision) || (!input.id && (input.expectedHash || input.expectedRevision))) throw Error("Create must omit id, expectedRevision and expectedHash; the server assigns the record ID. Edit requires all three from knowledge_record. expectedVaultId and expectedOntologyFingerprint are allowed on both. No publication accepted.");
     const scope = scopeKey(access.scope), intent = digest(canonical(correction ? { operation: "correct", input: correction } : kind === "page" ? input : { operation: kind, input }));
     const prior = this.store.withDatabase(db => this.row(db, scope, input.requestId));
     if (prior) { this.checkReplay(prior, intent); return this.resume(access, input.requestId); }
