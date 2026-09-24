@@ -64,3 +64,25 @@ navigation, downloads, no browser knowledge writes, light/dark layouts, mobile
 bounds, handoff preservation, lifecycle/history, server filtering, and V4
 source-group/attendance/update/disconnect interactions. Artifacts are emitted to
 the suite's temporary directory, not the production vault.
+
+## Visual alignment follow-up — September 24
+
+The selected OpenClaw theme owns typography; a different font from the prototype
+is not a design-fidelity defect. This follow-up preserves the host font and color
+tokens while aligning Recent with `KnowledgeV4Screen.jsx`:
+
+- Full-width source groups without stacked outer/body/row padding; compact save,
+  attendance, and claim rows share one alignment and subtle separators.
+- Occurrence and saved-time metadata below the source title, with explicit
+  Collapse/Expand labels. The source opens from its normal save row.
+- Secondary icon/text save states and navigation chevrons instead of New/Updated
+  pills. Lifecycle correction/withdrawal labels remain distinct.
+- Styled Show all/Hide attendance disclosure with attribution/confidence retained
+  in an inset list. Native details retain keyboard interaction and reading state.
+- Group pagination keeps subsequent pages and claims in their respective sections.
+
+The browser integration check measures row alignment and compactness, exercises
+keyboard disclosure and attendance controls, verifies dynamic host-font inheritance
+and mobile bounds, and emits desktop/mobile/theme screenshots. Build, type checking,
+and plugin validation are required as usual. The design archive remains untouched
+and excluded from implementation commits.

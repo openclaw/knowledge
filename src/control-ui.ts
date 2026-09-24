@@ -420,31 +420,49 @@ export default defineControlUiPlugin({
           const description = entry.change === "corrected" ? `${kindLabel} · Corrected` : entry.change === "withdrawn" ? `${kindLabel} · Withdrawn` : entry.change === "external" ? `${kindLabel} · Edited outside OpenClaw` : kindLabel;
           copy.append(el("span", `${description} · Saved ${savedTime}`, "knowledge-feed-meta"));
           if (entry.group) {
+            row.classList.add("knowledge-source-activity");
             const source = entry.group.source, key = `source:${source.id}`;
             const disclosure = el("details", undefined, "knowledge-activity-details"); disclosure.dataset.readingKey = key; disclosure.open = recentExpanded.has(key) || (firstSource && !recentCursor && !recentExpanded.size); firstSource = false;
             disclosure.ontoggle = () => { if (disclosure.isConnected) { if (disclosure.open) recentExpanded.add(key); else recentExpanded.delete(key); } };
             const summary = el("summary", undefined, "knowledge-activity-summary"), text = el("span", undefined, "knowledge-feed-copy");
             text.append(el("span", source.title, "knowledge-feed-title"));
-            if (source.occurredAt) text.append(el("span", `Occurred ${formatSourceDate(source.occurredAt)}`, "knowledge-feed-meta"));
+            const metadata = el("span", undefined, "knowledge-source-meta");
+            if (source.occurredAt) { const occurred = el("span"); occurred.append(icon("calendarClock", 12), el("span", `Occurred ${formatSourceDate(source.occurredAt)}`)); metadata.append(occurred); }
+            metadata.append(el("span", `Saved ${entry.group.firstSaved && entry.group.lastSaved && time(entry.group.firstSaved) !== time(entry.group.lastSaved) ? `${time(entry.group.firstSaved)}–${time(entry.group.lastSaved)}` : savedTime} · ${entry.group.total} ${entry.group.total === 1 ? "record" : "records"}`));
+            text.append(metadata);
             const names: Record<string, string> = { attendees: "attended", decision: "decisions", commitment: "commitments", event: "events", belief: "beliefs", fact: "facts", preference: "preferences", page: "pages" };
             text.append(el("span", Object.keys(names).filter(kind => entry.group!.counts[kind]).map(kind => `${entry.group!.counts[kind]} ${entry.group!.counts[kind] === 1 && kind !== "attendees" ? names[kind].replace(/s$/, "") : names[kind]}`).concat(entry.group.counts.sourceEvent ? ["meeting event"] : []).join(" · "), "knowledge-feed-meta"));
-            summary.append(tile(source.type, 28), text, el("small", `Source group · Saved ${entry.group.firstSaved && entry.group.lastSaved && time(entry.group.firstSaved) !== time(entry.group.lastSaved) ? `${time(entry.group.firstSaved)}–${time(entry.group.lastSaved)}` : savedTime} · ${entry.group.total} ${entry.group.total === 1 ? "record" : "records"}`), icon("chevronDown", 14));
-            const detail = el("div", undefined, "knowledge-activity-body"); detail.append(button("Open source", () => open(source.id), "knowledge-quiet"));
+            const disclosureLabel = (closed: string, opened: string) => { const control = el("span", undefined, "knowledge-disclosure-label"); control.append(el("span", closed, "knowledge-when-closed"), el("span", opened, "knowledge-when-open"), icon("chevronDown", 14)); return control; };
+            summary.append(tile(source.type, 32), text, disclosureLabel("Expand", "Collapse"));
+            const detail = el("div", undefined, "knowledge-source-body");
+            const pages = el("div", undefined, "knowledge-source-pages"), claims = el("div", undefined, "knowledge-source-claims"); detail.append(pages, claims);
+            const saveRow = (record: Pick<Summary, "id" | "title" | "type" | "kind" | "identityStatus" | "occurredAt">, status?: string) => {
+              const row = button("", () => open(record.id), "knowledge-source-record"), copy = el("span", undefined, "knowledge-feed-copy"), title = el("span", undefined, "knowledge-source-title"), meta = el("span", undefined, "knowledge-source-meta");
+              title.append(el("span", record.title, "knowledge-feed-title"), identityTag(record.identityStatus));
+              if (status) { const change = el("span", undefined, "knowledge-save-status"); change.dataset.change = status; change.append(icon(status === "New" ? "plus" : status === "Updated" ? "pencil" : "eye", 12), el("span", status)); meta.append(change); }
+              meta.append(el("span", label(record.type)));
+              if (record.occurredAt) { const occurred = el("span"); occurred.append(icon("calendarClock", 12), el("span", `${formatSourceDate(record.occurredAt)}${/^\d{4}-\d{2}-\d{2}$/.test(record.occurredAt) ? " · date only" : ""}`)); meta.append(occurred); }
+              copy.append(title, meta); row.append(tile(record.type, 28, record.kind), copy, icon("chevronRight", 14)); return row;
+            };
+            // Keep the source reachable even when its save is outside this activity page.
+            const sourceRow = saveRow(source); pages.append(sourceRow);
             const attendance = el("details", undefined, "knowledge-attendance-group"); attendance.dataset.readingKey = `${key}:attendance`;
-            attendance.append(el("summary", `${entry.group.counts.attendees ?? 0} attended`), el("p", `${entry.group.counts.attendees ?? 0} attendance connections · each with its own attribution`, "knowledge-muted"));
+            const attendanceSummary = el("summary"), attendanceCopy = el("span", undefined, "knowledge-feed-copy"), attendanceTitle = el("span", `${entry.group.counts.attendees ?? 0} attended`, "knowledge-feed-title"), attendanceRows = el("div", undefined, "knowledge-attendance-rows knowledge-surface");
+            attendanceCopy.append(attendanceTitle, el("span", `${entry.group.counts.attendees ?? 0} attendance connections · each with its own attribution`, "knowledge-feed-meta"));
+            attendanceSummary.append(tile("attended", 28, "relationship"), attendanceCopy, disclosureLabel("Show all", "Hide")); attendance.append(attendanceSummary, attendanceRows);
             const namesSeen: string[] = []; let attendanceShown = false;
             const appendRecords = async (records: typeof entry.group.records) => {
               for (const record of [...records].sort((a, b) => ["page", "relationship", "claim"].indexOf(a.kind) - ["page", "relationship", "claim"].indexOf(b.kind))) {
                 if (record.sourceEvent) continue;
                 if (record.kind === "relationship" && record.label === "attended" && record.to === source.id) {
-                  if (!attendanceShown) { detail.append(attendance); attendanceShown = true; }
+                  if (!attendanceShown) { detail.insertBefore(attendance, claims); attendanceShown = true; }
                   const person = record.from ? (await feature.invoke("record", { id: record.from, view: "summary" })).record : null;
                   if (!live(n)) return;
                   const row = el("div", undefined, "knowledge-attendee"); if (person) { row.append(summaryLink(person)); namesSeen.push(person.title); } else row.append(el("span", "Person unavailable"));
-                  row.append(el("p", record.attributionConfidence?.basis ?? "No attribution basis recorded"), confidenceView(record.attributionConfidence, true)); attendance.append(row);
-                  attendance.querySelector("summary")!.textContent = `${namesSeen.slice(0, 3).join(", ")}${(entry.group!.counts.attendees ?? 0) > 3 ? ` and ${entry.group!.counts.attendees - 3} more` : ""} attended`;
-                } else if (record.kind === "claim") { const card = claimCard(record, n); if (card) detail.append(card); }
-                else { const row = el("div", undefined, "knowledge-source-record"); row.append(summaryLink(record), chip(record.change === "created" ? "New" : record.change === "updated" ? "Updated" : "Observed in vault")); if (record.occurredAt) row.append(el("small", `Occurred ${formatSourceDate(record.occurredAt)}`)); detail.append(row); }
+                  row.append(el("p", record.attributionConfidence?.basis ?? "No attribution basis recorded"), confidenceView(record.attributionConfidence, true)); attendanceRows.append(row);
+                  attendanceTitle.textContent = `${namesSeen.slice(0, 3).join(", ")}${(entry.group!.counts.attendees ?? 0) > namesSeen.slice(0, 3).length ? ` and ${entry.group!.counts.attendees - namesSeen.slice(0, 3).length} more` : ""} attended`;
+                } else if (record.kind === "claim") { const card = claimCard(record, n); if (card) claims.append(card); }
+                else { const row = saveRow(record, record.change === "created" ? "New" : record.change === "updated" ? "Updated" : "Observed in vault"); if (record.id === source.id) sourceRow.replaceWith(row); else pages.append(row); }
               }
             };
             await appendRecords(entry.group.records);
@@ -475,7 +493,10 @@ export default defineControlUiPlugin({
             }
           } else {
             const item = button("", () => open(entry.id), "knowledge-feed-link");
-            item.append(tile(entry.type, 28, entry.kind), copy); row.append(item, badge);
+            const meta = copy.querySelector(".knowledge-feed-meta")!, change = el("span", undefined, "knowledge-save-status");
+            change.dataset.change = badgeLabel; change.append(icon(entry.change === "created" ? "plus" : entry.change === "updated" || entry.change === "external" ? "pencil" : "eye", 12), el("span", badgeLabel));
+            meta.classList.add("knowledge-source-meta"); meta.replaceChildren(change, el("span", `${kindLabel} · Saved ${savedTime}`));
+            item.append(tile(entry.type, 28, entry.kind), copy, icon("chevronRight", 14)); row.append(item);
           }
           if (lifecycle) { if (!lifecycleGroup) { lifecycleGroup = el("section", undefined, "knowledge-lifecycle-group"); lifecycleGroup.append(el("h3", "Corrections & withdrawals", "knowledge-eyebrow")); group!.prepend(lifecycleGroup); } lifecycleGroup.append(row); lifecycleGroup.querySelector("h3")!.textContent = `Corrections & withdrawals · ${lifecycleGroup.querySelectorAll("article").length}`; } else group!.append(row);
         }
