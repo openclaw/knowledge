@@ -5,6 +5,7 @@ import { evidenceView } from "./evidence-view.js";
 import { loadVocabulary } from "./inspection-client.js";
 import { ontologyView } from "./ontology-view.js";
 import { icon, type IconName } from "./ui-icons.js";
+import { markdownView } from "./markdown-view.js";
 import "./control-ui.css";
 
 type Summary = FeatureOutput<typeof contract, "records">["records"][number];
@@ -155,8 +156,7 @@ export default defineControlUiPlugin({
         if (typeof lifecycle?.superseded_by === "string") main.append(button("View replacement →", () => open(lifecycle.superseded_by as string), "knowledge-quiet"));
         if (typeof lifecycle?.supersedes === "string") main.append(button("View original assertion", () => open(lifecycle.supersedes as string), "knowledge-quiet"));
         const body = el("div", undefined, "knowledge-summary");
-        // textContent keeps portable Markdown safe; raw Markdown remains in File details.
-        for (const paragraph of (r.body ?? "").split(/\n\s*\n/)) body.append(el("p", paragraph));
+        body.append(markdownView(r.body ?? "", open));
         body.append(el("span", `Revision ${r.revision}${meta?.updated_at ? ` · updated ${date(meta.updated_at)}` : ""}`, "knowledge-summary-meta"));
         if (r.kind === "page") main.append(body);
         else {

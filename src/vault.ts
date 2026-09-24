@@ -3,7 +3,7 @@ import { temporalProblems } from "./temporal.js";
 import * as fs from "node:fs";
 import path from "node:path";
 import { inspectEvidence, withEvidenceFile } from "./evidence-files.js";
-import { ATTACHMENT_CHUNK_BYTES } from "./attachment-contract.js";
+import { ATTACHMENT_DOWNLOAD_CHUNK_BYTES } from "./attachment-contract.js";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { Check } from "typebox/value";
@@ -180,7 +180,7 @@ export class SampleVault {
     return withEvidenceFile(this.root, evidence.path, (fd, size) => {
       inspectEvidence(this.root, evidence);
       if (offset > size) throw Error("Attachment offset exceeds file size");
-      const bytes = Buffer.alloc(Math.min(ATTACHMENT_CHUNK_BYTES, size - offset));
+      const bytes = Buffer.alloc(Math.min(ATTACHMENT_DOWNLOAD_CHUNK_BYTES, size - offset));
       let used = 0;
       while (used < bytes.length) { const n = fs.readSync(fd, bytes, used, bytes.length - used, offset + used); if (!n) throw Error("Attachment changed"); used += n; }
       return { filename: evidence.filename ?? path.basename(evidence.path), mediaType: evidence.mediaType ?? "application/octet-stream", sha256: evidence.sha256,

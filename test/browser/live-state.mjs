@@ -50,7 +50,7 @@ try {
     JSON.stringify(result);
     return result;
   });
-  const project=await service.save_page({requestId:randomUUID(),title:'Northwind launch',type:'project',body:'A launch project for the Northwind team.\n\nThe agent maintains this summary.'},context);
+  const project=await service.save_page({requestId:randomUUID(),title:'Northwind launch',type:'project',body:'A launch project for the **Northwind** team.\n\n## Summary\n\n- The agent maintains this summary.'},context);
   const person=await service.save_page({requestId:randomUUID(),title:'Alex Rivera',type:'person',body:'Alex leads Northwind.',aliases:['Alex']},context);
   const source=await service.save_page({requestId:randomUUID(),title:'Team standup',type:'meeting',body:'Launch planning',source:{text:'Alex will deliver on Friday.\nLaunch happened yesterday.',attribution:'Alex, team standup'}},context);
   const evidence=(await service.record({id:source.id,includeMetadata:true},context)).record.metadata.evidence;
@@ -73,6 +73,9 @@ try {
   await page.getByRole('button',{name:'Northwind launch',exact:true}).click();
   await page.locator('.knowledge-claim[data-kind=commitment]').waitFor();
   assert.equal(await page.locator('.knowledge-claim').count(),3);
+  assert.equal(await page.locator('.knowledge-summary strong').innerText(),'Northwind');
+  assert.equal(await page.locator('.knowledge-summary h2').innerText(),'Summary');
+  assert.equal(await page.locator('.knowledge-summary li').innerText(),'The agent maintains this summary.');
   await page.getByText('Agent inferred',{exact:true}).waitFor();
   await page.locator('.knowledge-claim[data-kind=belief]').locator('summary').filter({hasText:'Evidence · 1 source files'}).click();
   await page.getByText('This is the agent’s inference, not a quoted source statement. Supporting material, if any, is shown below.',{exact:true}).waitFor();

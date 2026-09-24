@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { Check } from 'typebox/value';
 import { createKnowledgeService } from '../dist/service.js';
-import { ATTACHMENT_CHUNK_BYTES } from '../dist/attachment-contract.js';
+import { ATTACHMENT_CHUNK_BYTES, ATTACHMENT_DOWNLOAD_CHUNK_BYTES } from '../dist/attachment-contract.js';
 import { contract } from '../dist/contract.js';
 import { KnowledgeStorage } from '../dist/storage.js';
 import { SqliteIdentityStore } from '../dist/identity-store.js';
@@ -170,7 +170,40 @@ test('native feature adapter accepts full-size upload and download chunks', asyn
   const uploaded = await invoke('attach', uploadInput({ filename: 'boundary.bin',
     mediaType: 'application/octet-stream', data: bytes.toString('base64') }));
   const saved = await invoke('save_page', draft([uploaded.evidence]));
-  const downloaded = await invoke('attachment', { id: saved.id, path: uploaded.evidence.path, sha256: uploaded.evidence.sha256 });
-  assert.deepEqual(Buffer.from(downloaded.data, 'base64'), bytes);
-  assert.equal(downloaded.nextOffset, null);
+  const chunks = []; let offset = 0;
+  do {
+    const downloaded = await invoke('attachment', { id: saved.id, path: uploaded.evidence.path, sha256: uploaded.evidence.sha256, offset });
+    const chunk = Buffer.from(downloaded.data, 'base64');
+    assert.ok(chunk.length <= ATTACHMENT_DOWNLOAD_CHUNK_BYTES);
+    chunks.push(chunk); offset = downloaded.nextOffset;
+  } while (offset !== null);
+  assert.deepEqual(Buffer.concat(chunks), bytes);
+});
+
+
+test('agent download JSON survives the dynamic-tool response budget with continuation intact', async t => {
+  const f = await fixture(t), factories = new Map(), sessionId = randomUUID();
+  f.api.runtime = { agent: { session: { getSessionEntry: () => ({ sessionId, chatType: 'direct' }) } } };
+  const { default: plugin } = await import('../dist/index.js');
+  plugin.register({ ...f.api, id: 'knowledge', registerService() {}, registerSessionAction() {},
+    registerTool(factory, options) { factories.set(options.name, factory); } });
+  const tool = factories.get('knowledge_attachment')({ agentId: 'main', sessionId,
+    sessionKey: 'agent:main:download-budget', senderIsOwner: true, assertInvocationCurrent() {} });
+  const bytes = Buffer.from('Original 🌱 evidence\n'.repeat(10000));
+  const evidence = await upload(f, bytes, { filename: '源'.repeat(65) + '.txt', mediaType: 'x'.repeat(200) });
+  const saved = await f.service.save_page(draft([evidence]), f.owner);
+  const chunks = []; let offset = 0;
+  do {
+    const response = await tool.execute(randomUUID(), { id: saved.id, path: evidence.path, sha256: evidence.sha256, offset });
+    const text = response.content.filter(block => block.type === 'text').map(block => block.text).join('\n');
+    assert.ok(text.length < 64000, `Tool JSON needs framing headroom: ${text.length}`);
+    const downloaded = JSON.parse(text.slice(0, 64000));
+    const chunk = Buffer.from(downloaded.data, 'base64');
+    assert.equal(downloaded.offset, offset);
+    assert.equal(downloaded.sha256, evidence.sha256);
+    assert.ok(chunk.length > 0 && chunk.length <= ATTACHMENT_DOWNLOAD_CHUNK_BYTES);
+    assert.equal(downloaded.nextOffset, offset + chunk.length < bytes.length ? offset + chunk.length : null);
+    chunks.push(chunk); offset = downloaded.nextOffset;
+  } while (offset !== null);
+  assert.deepEqual(Buffer.concat(chunks), bytes);
 });
