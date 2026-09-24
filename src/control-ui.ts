@@ -48,7 +48,8 @@ export default defineControlUiPlugin({
       const recentTab = button("Recent", () => navigate("recent"), "knowledge-tab"), browseTab = button("Browse", () => navigate("browse"), "knowledge-tab"); nav.append(recentTab, browseTab);
       const banner = el("p", "", "knowledge-notice"), toolbar = el("div", undefined, "knowledge-toolbar"), content = el("div", undefined, "knowledge-content");
       header.append(title, nav, actions);
-      const body = el("div", undefined, "knowledge-page-body"); body.append(banner, toolbar, content);
+      const body = el("div", undefined, "knowledge-page-body"); const loading = el("div", "", "knowledge-loading knowledge-muted"); loading.hidden = true; loading.setAttribute("role", "status"); loading.setAttribute("aria-live", "polite");
+      body.append(banner, toolbar, loading, content);
       root.append(header, body); container.append(root);
       let tab: "recent" | "browse" | "search" | "ontology" | "diagnostics" = "recent", selectedId = "", query = "", kind: "page" | "claim" | "relationship" = "page", type = "", offset = 0;
       type RecentCursor = { upperSequence: number; beforeSequence: number } | undefined;
@@ -62,6 +63,8 @@ export default defineControlUiPlugin({
       let searchSnapshot: string | null | undefined;
       let displayGeneration = 0, viewReady = false, snapshot: string | undefined;
       let staging: HTMLElement | undefined;
+      let loadingGeneration = 0, displayView = "", displayScreen = "";
+      const viewKey = () => JSON.stringify([tab, selectedId, kind, type, offset, includeHistory, browseQuery, originFilter, query, recentCursor]);
       let connectionPages = 1;
       const evidenceLoaders = new WeakMap<HTMLDetailsElement, () => Promise<void>>();
       let timer: ReturnType<typeof setTimeout> | undefined, suggestGeneration = 0;
@@ -369,8 +372,8 @@ export default defineControlUiPlugin({
         await Promise.all(pending);
       }
       async function browse(n: number, target: HTMLElement) {
-        const result = await feature.invoke("records", { kind, offset, limit: 50, includeCards: kind === "claim", ...(type ? { type } : {}), ...(browseQuery ? { query: browseQuery } : {}), ...(includeHistory ? { lifecycle: "all" } : {}), ...(originFilter && kind === "claim" ? { assertionOrigin: originFilter } : {}) });
-        if (!live(n)) return;
+        const result = await feature.invoke("records", { kind, offset, limit: 50, includeCards: kind === "claim", includeEndpoints: kind === "relationship", ...(type ? { type } : {}), ...(browseQuery ? { query: browseQuery } : {}), ...(includeHistory ? { lifecycle: "all" } : {}), ...(originFilter && kind === "claim" ? { assertionOrigin: originFilter } : {}) });
+        if (!live(n) || n !== generation) return;
         const layout = el("div", undefined, "knowledge-browse"), facets = el("nav", undefined, "knowledge-facets"); facets.setAttribute("aria-label", "Types");
         const facet = (name: string, label: string, count?: number) => { const control = button(label, () => { type = name; offset = 0; void load(); }, "knowledge-facet"); control.prepend(name ? tile(name, 20) : el("span", undefined, "knowledge-facet-spacer")); control.setAttribute("aria-pressed", String(type === name)); if (count !== undefined) control.append(el("span", count.toLocaleString(), "knowledge-facet-count")); facets.append(control); };
         facet("", kind === "claim" ? "All claims" : "Everything", kind === "page" && vocabulary ? vocabulary.definitions.reduce((sum, d) => sum + d.recordCount, 0) : !type ? result.total : undefined);
@@ -385,7 +388,14 @@ export default defineControlUiPlugin({
         if (kind === "claim" && result.facets && Object.keys(result.facets.origins).length > 1) { const select = el("select"); select.setAttribute("aria-label", "Assertion origin"); for (const value of ["", ...Object.keys(result.facets.origins)]) { const option = el("option", value ? origin(value) : "All origins"); option.value = value; select.append(option); } select.value = originFilter; select.onchange = () => { originFilter = select.value; offset = 0; void load(); }; controls.append(select); }
         panel.append(controls);
         if (kind === "claim") { for (const record of result.records) { if (record.lifecycle !== "active") { const row = el("div", undefined, "knowledge-historical knowledge-connection"); row.append(summaryLink(record), el("small", `${record.lifecycle === "withdrawn" ? "Withdrawn" : "Replaced"} · ${record.updatedAt ? date(record.updatedAt) : "Time not recorded"}`)); panel.append(row); } else { const card = claimCard(record, n); if (card) panel.append(card); } } }
-        else if (kind === "relationship") { await Promise.all(result.records.map(async record => { const row = el("div", undefined, "knowledge-connection knowledge-browse-connection"); panel.append(row); const endpoints = await Promise.all([record.from, record.to].map(id => id ? feature.invoke("record", { id, view: "summary" }).then(r => r.record) : null)); if (!live(n)) return; for (const [i, endpoint] of endpoints.entries()) { if (i) row.append(el("span", label(record.label ?? record.type))); row.append(endpoint ? summaryLink(endpoint) : el("span", "Page unavailable")); } row.append(record.lifecycle === "active" ? confidenceView(record.attributionConfidence, true) : button(`Withdrawn · ${record.updatedAt ? date(record.updatedAt) : "Time not recorded"}`, () => open(record.id), "knowledge-quiet")); })); }
+        else if (kind === "relationship") {
+          const endpoints = new Map((result.endpoints ?? []).map(record => [record.id, record]));
+          for (const record of result.records) {
+            const row = el("div", undefined, "knowledge-connection knowledge-browse-connection");
+            for (const [i, id] of [record.from, record.to].entries()) { if (i) row.append(el("span", label(record.label ?? record.type))); const endpoint = id ? endpoints.get(id) : undefined; row.append(endpoint ? summaryLink(endpoint) : el("span", "Page unavailable")); }
+            row.append(record.lifecycle === "active" ? confidenceView(record.attributionConfidence, true) : button(`Withdrawn · ${record.updatedAt ? date(record.updatedAt) : "Time not recorded"}`, () => open(record.id), "knowledge-quiet")); panel.append(row);
+          }
+        }
         else { const table = el("table", undefined, "data-table knowledge-table"), head = el("thead"), row = el("tr"); for (const label of ["Name", "Type", "Occurred", "Last updated"]) row.append(el("th", label)); head.append(row); table.append(head); const body = el("tbody"); for (const record of result.records) { const row = el("tr"), name = el("td"); name.append(summaryLink(record)); row.append(name, el("td", label(record.type)), el("td", record.occurredAt ? `${formatSourceDate(record.occurredAt)}${/^\d{4}-\d{2}-\d{2}$/.test(record.occurredAt) ? " · date only" : ""}` : "—"), el("td", record.updatedAt ? date(record.updatedAt) : "Not recorded")); body.append(row); } table.append(body); panel.append(table); }
         if (!result.records.length) panel.append(empty("Nothing here yet", "Tell your agent in chat and saved knowledge will appear here."));
         const pages = el("div", undefined, "knowledge-pagination");
@@ -508,12 +518,16 @@ export default defineControlUiPlugin({
       }
       async function load(background = false): Promise<boolean> {
         if (vaultChanged || disposed) return false;
-        const n = ++generation;
-        if (!background) { displayGeneration = 0; viewReady = false; connectionPages = 1; }
-        const target = background ? el("div") : content;
-        if (background) staging = target;
-        if (!context.host.connection.connected) { content.replaceChildren(empty("Disconnected", "Reconnect to read your agent’s knowledge.")); return false; }
-        if (!background) content.replaceChildren(el("p", "Loading…", "knowledge-muted"));
+        const n = ++generation, nextView = viewKey(), nextScreen = JSON.stringify([tab, selectedId]);
+        if (!context.host.connection.connected) { void refresh(); return false; }
+        if (!background) connectionPages = 1;
+        // Build off-screen for navigation too. Keep the readable view and its
+        // controls mounted until the newest request is ready to commit.
+        const target = el("div"); staging = target; loadingGeneration = n;
+        if (!background) {
+          loading.textContent = selectedId ? "Opening record…" : tab === "browse" ? `Loading ${kind === "relationship" ? "connections" : kind === "claim" ? "claims" : "pages"}…` : `Loading ${tab}…`;
+          loading.hidden = false; content.setAttribute("aria-busy", "true");
+        }
         try {
           await (async () => {
           if (selectedId) return await showDetail(selectedId, n, target, connectionPages);
@@ -546,15 +560,25 @@ export default defineControlUiPlugin({
             content.replaceChildren(...target.childNodes);
             reading.restore(content);
           }
-          displayGeneration = n; viewReady = true;
+          else {
+            const reading = captureReadingState(content);
+            content.replaceChildren(...target.childNodes);
+            // Preserve list-option focus, but never carry a collapsed preview
+            // into a standalone detail where evidence is open by default.
+            if (displayScreen === nextScreen) reading.restore(content);
+          }
+          displayGeneration = n; displayView = nextView; displayScreen = nextScreen; viewReady = true;
           return true;
         } catch (error) {
           if (live(n) && n === generation) {
             if (background) { status.textContent = "Refresh unavailable"; status.dataset.live = "false"; }
-            else content.replaceChildren(failure(error));
+            else { loading.replaceChildren(failure(error), button("Retry", () => { void load(); }, "knowledge-quiet")); loading.hidden = false; }
           }
           return false;
-        } finally { if (staging === target) staging = undefined; }
+        } finally {
+          if (staging === target) staging = undefined;
+          if (loadingGeneration === n) { loadingGeneration = 0; content.removeAttribute("aria-busy"); if (!loading.querySelector(".knowledge-error")) loading.hidden = true; }
+        }
       }
       let refreshing = false, refreshAgain = false;
       async function refresh() {
@@ -571,18 +595,18 @@ export default defineControlUiPlugin({
           lastChecked = new Date().toISOString(); status.title = `Checked ${time(lastChecked)}`;
           status.textContent = report.live === "watching" ? "Live" : "Periodic refresh"; status.dataset.live = String(report.live === "watching");
           sampleChip.hidden = !report.sample; banner.hidden = true; banner.textContent = "";
-          if (viewReady && report.snapshot && snapshot === report.snapshot) return;
+          if (loadingGeneration || (viewReady && displayView === viewKey() && report.snapshot && snapshot === report.snapshot)) return;
           vocabulary = await loadVocabulary(feature); if (disposed || n !== statusGeneration) return;
           const pageCount = vocabulary.definitions.reduce((sum, d) => sum + d.recordCount, 0);
           const countBadge = el("span", pageCount.toLocaleString(), "knowledge-tab-count"); countBadge.setAttribute("aria-hidden", "true"); browseTab.replaceChildren(document.createTextNode("Browse"), countBadge);
           // A navigation started during the check owns the screen now.
-          if (generation !== observedGeneration) return;
-          if (viewReady && tab === "recent" && !selectedId && !recentCursor) {
+          if (generation !== observedGeneration || loadingGeneration) return;
+          if (viewReady && displayView === viewKey() && tab === "recent" && !selectedId && !recentCursor) {
             const recent = await feature.invoke("recent", { limit: 50, groupBySource: true }); if (disposed || n !== statusGeneration || generation !== observedGeneration) return;
             const count = recent.items.filter(item => item.sequence > recentSequence).length;
             pendingSnapshot = report.snapshot; updates.textContent = count ? `↑ ${count}${recent.nextBefore !== null ? "+" : ""} activity ${count === 1 ? "update" : "updates"} · Show` : "Knowledge changed · Show"; updates.hidden = false; return;
           }
-          if (await load(viewReady)) snapshot = report.snapshot;
+          if (await load(viewReady && displayView === viewKey())) snapshot = report.snapshot;
         } catch (error) { if (!disposed && n === statusGeneration) { status.textContent = "Refresh unavailable"; status.dataset.live = "false"; if (!viewReady) content.replaceChildren(failure(error)); } }
         finally { refreshing = false; if (refreshAgain) { refreshAgain = false; void refresh(); } }
       }

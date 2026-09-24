@@ -15,6 +15,15 @@ await fs.writeFile(base+'/vault/vault.json',JSON.stringify(manifest));
 const services=[]; let page, cappedSearch=false;
 const requests=[], errors=[];
 let statusFailure = false;
+let heldRequest, navigationFailure = false;
+const holdRequest = operation => {
+  let release, started, finished;
+  const gate = new Promise(resolve => { release = resolve; });
+  const entered = new Promise(resolve => { started = resolve; });
+  const completed = new Promise(resolve => { finished = resolve; });
+  heldRequest = { operation, gate, started, finished };
+  return { release, entered, completed };
+};
 let evidenceFailure, evidenceHashMismatch = false, hiddenEndpoint, relationshipWithoutReferences;
 const ownerSessionId=randomUUID();
 const api={runtime:{agent:{session:{getSessionEntry:()=>({sessionId:ownerSessionId,chatType:"direct"})}}},pluginConfig:{vault:{root:base+'/vault',statePath:base+'/state.sqlite',agentId:'main',vaultId:manifest.vaultId,publicationId:manifest.publicationId,operatorRead:true,writesEnabled:true}},registerService:s=>services.push(s)};
@@ -45,6 +54,9 @@ try {
   await page.route('https://knowledge.test/**',route=>route.fulfill({contentType:'text/html',body:html}));
   await page.exposeFunction('invokeKnowledge',async(operation,input)=>{
     requests.push(operation);
+    let held;
+    if (heldRequest?.operation === operation) { held = heldRequest; heldRequest = undefined; held.started(); await held.gate; }
+    if (operation === 'records' && navigationFailure) { navigationFailure = false; throw Error('Temporary browse failure'); }
     if (operation === 'status' && statusFailure) throw Error('Temporary status failure');
     assert.ok(!['save_page','create_claim','create_relationship','resume','attach','correct','withdraw'].includes(operation),'The browser must never mutate knowledge');
     if (operation === 'grep' || operation === 'records') assert.ok((input.offset ?? 0) <= 500, 'UI never sends an invalid paging offset');
@@ -55,6 +67,7 @@ try {
     if (operation === 'record' && input.includeEvidence && evidenceHashMismatch && result.record) result.record.hash = '0'.repeat(64);
     if (operation === 'grep' && cappedSearch) { result.nextOffset=520; result.total=600; }
     JSON.stringify(result);
+    held?.finished();
     return result;
   });
   const project=await service.save_page({requestId:randomUUID(),title:'Northwind launch',type:'project',body:'A launch project for the **Northwind** team.\n\n## Summary\n\n- The agent maintains this summary.'},context);
@@ -77,6 +90,57 @@ try {
   await page.locator('.knowledge-table').waitFor();
   assert.ok((await page.locator('.knowledge-pagination').innerText()).includes('complete list'));
   await page.screenshot({animations:"disabled",path:base+'/browse-desktop.png'});
+  // Keep the actual DOM interactive while a transition is waiting on the server.
+  const connectionStart = requests.length, delayedConnections = holdRequest('records');
+  await page.evaluate(() => { window.retainedTable = document.querySelector('.knowledge-table'); });
+  await page.getByRole('button',{name:'Connections',exact:true}).click();
+  await delayedConnections.entered;
+  assert.ok(await page.evaluate(() => window.retainedTable === document.querySelector('.knowledge-table')));
+  assert.equal(await page.locator('.knowledge-content').getAttribute('aria-busy'),'true');
+  assert.equal(await page.getByRole('button',{name:'Claims',exact:true}).count(),1,'Kind controls remain usable');
+  await page.screenshot({animations:'disabled',path:base+'/pending-navigation.png'});
+  delayedConnections.release();
+  await page.locator('.knowledge-browse-connection').waitFor();
+  assert.equal(requests.slice(connectionStart).filter(op=>op==='records').length,1);
+  assert.equal(requests.slice(connectionStart).filter(op=>op==='record').length,0,'Connections never fetches endpoints per row');
+  assert.ok((await page.locator('.knowledge-browse-connection').innerText()).includes('Northwind launch'));
+  await page.screenshot({animations:'disabled',path:base+'/connections-desktop.png'});
+  const delayedClaims = holdRequest('records');
+  await page.getByRole('button',{name:'Claims',exact:true}).click();
+  await delayedClaims.entered;
+  await page.getByRole('button',{name:'Pages',exact:true}).click();
+  await page.locator('.knowledge-table').waitFor();
+  delayedClaims.release();
+  await delayedClaims.completed;
+  // Wait for the deliberately late response, not an arbitrary animation timeout.
+  await page.waitForFunction(() => !document.querySelector('.knowledge-content').hasAttribute('aria-busy'));
+  await page.clock.runFor(100);
+  assert.equal(await page.locator('.knowledge-claim').count(),0,'Late claims must not replace Pages');
+  navigationFailure = true;
+  await page.getByRole('button',{name:'Connections',exact:true}).click();
+  await page.getByText('Temporary browse failure',{exact:true}).waitFor();
+  assert.equal(await page.locator('.knowledge-table').count(),1,'Errors retain the readable view');
+  await page.getByRole('button',{name:'Retry',exact:true}).click();
+  await page.locator('.knowledge-browse-connection').waitFor();
+  const delayedRecent = holdRequest('recent');
+  await page.getByRole('button',{name:'Recent',exact:true}).click();
+  await delayedRecent.entered;
+  assert.equal(await page.locator('.knowledge-browse-connection').count(),1,'Recent navigation keeps Browse readable');
+  delayedRecent.release();
+  await page.locator('.knowledge-feed-item').first().waitFor();
+  const delayedBrowse = holdRequest('records');
+  await page.getByRole('button',{name:'Browse',exact:true}).click();
+  await delayedBrowse.entered;
+  assert.ok(await page.locator('.knowledge-feed-item').count(),'Browse navigation keeps Recent readable');
+  delayedBrowse.release();
+  await page.locator('.knowledge-browse-connection').waitFor();
+  await page.evaluate(() => window.connect(false));
+  await page.getByRole('button',{name:'Recent',exact:true}).click();
+  assert.equal(await page.locator('.knowledge-browse-connection').count(),1,'Offline navigation retains the readable view');
+  await page.evaluate(() => window.connect(true));
+  await page.locator('.knowledge-feed-item').first().waitFor();
+  await page.getByRole('button',{name:'Browse',exact:true}).click();
+  await page.locator('.knowledge-browse-connection').waitFor();
   const browseStart = requests.length;
   await page.getByRole('button',{name:'Claims',exact:true}).click();
   await page.locator('.knowledge-claim').first().waitFor();
@@ -197,6 +261,7 @@ try {
   await page.getByText(/Ranked text search, not a complete inventory/).waitFor();
   // Agent/service lifecycle operations refresh the read-only UI without browser writes.
   await page.getByRole('button',{name:'Browse',exact:true}).click();
+  await page.locator('.knowledge-table').waitFor();
   await page.getByRole('button',{name:'Northwind launch',exact:true}).click();
   await page.locator('.knowledge-claim[data-kind=commitment]').waitFor();
   const corrected=await service.correct({requestId:randomUUID(),id:commitment.id,expectedRevision:commitment.revision,expectedHash:commitment.hash,expectedOntologyFingerprint:fingerprint,reason:'The delivery date was corrected in chat.',replacement:{kind:'claim',title:'Updated release commitment',body:'Alex will deliver on Monday.',claim_kind:'commitment',assertion_origin:'user_belief',attribution:'User correction in chat',evidence,entities:[project.id],owner:person.id,due_at:'2026-09-28'}},agentContext);
@@ -213,6 +278,7 @@ try {
   // Freeze live notifications while capturing a stable visual state.
   await page.evaluate(()=>{window.emit=()=>{}});
   await page.getByRole('button',{name:'Browse',exact:true}).click();
+  await page.locator('.knowledge-table').waitFor();
   await page.getByRole('button',{name:'Northwind launch',exact:true}).click();
   await page.getByRole('button',{name:'Alex will deliver on Monday.',exact:true}).waitFor();
   await page.getByRole('button',{name:'Relationship evidence',exact:true}).waitFor();
@@ -300,6 +366,7 @@ try {
     await correctionRow.locator('.knowledge-activity-summary').click();
   }
   await page.getByRole('button',{name:'Browse',exact:true}).click();
+  await page.locator('.knowledge-table').waitFor();
   await page.getByRole('button',{name:'Northwind launch',exact:true}).click();
   await page.getByRole('button',{name:'Alex will deliver on Monday.',exact:true}).waitFor();
   for(const mode of ['dark','light']) {
@@ -459,7 +526,7 @@ try {
   await page.evaluate(()=>window.connect(true));
   await page.screenshot({animations:'disabled',path:base+'/v4-source-groups.png',fullPage:true});
   assert.deepEqual(errors,[]);
-  console.log(JSON.stringify({passed:['V4 source groups and relationship-only attendance','V4 deferred Show updates and disconnect DOM preservation','V4 server-side claim filtering and explicit unknown commitment details','V4 modal Escape and exact record reference','wikilink navigation, reverse backlinks, code exclusion, missing targets and source originals','quote-first evidence, compact attribution and icon action row in dark/light','standalone claim details, scoped correction actions, and about links','grouped file details, history and hash-checked Markdown in light mode','light/dark text-tab styling under the production host cascade','reference layout measurements and type icons','search keyboard shortcut','read-only browser contract','agent correction live refresh and historical linkage','one logical lifecycle event, redacted historical assertions and explicit history navigation','search offset cap','design-token dark screenshots','recent default and observed history','ontology-derived browse','native commitment/event/inference cards','attribution and retained inference premise evidence','byte-exact evidence download','revision/hash chat request and no autosend','handoff preserved across periodic refresh','exact name suggestions','ranked search','disconnect and reconnect','subscription cleanup','mobile overflow','no page errors'],artifacts:base},null,2));
+  console.log(JSON.stringify({passed:['Retained DOM during navigation, rapid-switch fencing and retry','Connections endpoints batched without per-row record calls','Offline navigation resumes on reconnect','V4 source groups and relationship-only attendance','V4 deferred Show updates and disconnect DOM preservation','V4 server-side claim filtering and explicit unknown commitment details','V4 modal Escape and exact record reference','wikilink navigation, reverse backlinks, code exclusion, missing targets and source originals','quote-first evidence, compact attribution and icon action row in dark/light','standalone claim details, scoped correction actions, and about links','grouped file details, history and hash-checked Markdown in light mode','light/dark text-tab styling under the production host cascade','reference layout measurements and type icons','search keyboard shortcut','read-only browser contract','agent correction live refresh and historical linkage','one logical lifecycle event, redacted historical assertions and explicit history navigation','search offset cap','design-token dark screenshots','recent default and observed history','ontology-derived browse','native commitment/event/inference cards','attribution and retained inference premise evidence','byte-exact evidence download','revision/hash chat request and no autosend','handoff preserved across periodic refresh','exact name suggestions','ranked search','disconnect and reconnect','subscription cleanup','mobile overflow','no page errors'],artifacts:base},null,2));
 } catch (error) {
   console.error(JSON.stringify({errors,page:await page?.locator('main').innerText()},null,2));throw error;
 } finally {services.forEach(s=>s.stop());await browser.close();}

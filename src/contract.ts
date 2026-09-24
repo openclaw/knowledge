@@ -5,7 +5,7 @@ import { SearchInput, SearchOutput, LookupInput, LookupOutput } from "./retrieva
 import { Type } from "typebox";
 import { defineFeatureContract } from "openclaw/plugin-sdk/feature-contract";
 import { text } from "./model.js";
-import { RecordInput, RecordOutput, OntologyInput, OntologyOutput, CardSummary } from "./inspection-contract.js";
+import { RecordInput, RecordOutput, OntologyInput, OntologyOutput, CardSummary, Summary } from "./inspection-contract.js";
 
 import { AnnotateInput, SavePage, ClaimInput, RelationshipInput, CorrectInput, WithdrawInput, Receipt, HistoryEntry, GitStatus, requestId } from "./mutation-contract.js";
 
@@ -102,15 +102,15 @@ export const contract = defineFeatureContract({
       input: LookupInput, output: LookupOutput, tool: { name: "knowledge_lookup", label: "Resolve knowledge identity" },
     },
     records: {
-      kind: "query", description: "List current eligible authorized records exhaustively using pagination, with optional kind, ontology type/alias, or ID/title/alias filtering. lifecycle=all is an explicit historical inventory including inactive/invalid records; originals remain available by exact record/history inspection. includeCards adds bounded claim text and card metadata from the same scan, without evidence excerpts.",
+      kind: "query", description: "List current eligible authorized records exhaustively using pagination, with optional kind, ontology type/alias, or ID/title/alias filtering. lifecycle=all is an explicit historical inventory including inactive/invalid records; originals remain available by exact record/history inspection. includeCards adds bounded claim text and card metadata from the same scan, without evidence excerpts. includeEndpoints adds deduplicated current eligible relationship endpoint summaries for this page from the same authorized scan.",
       input: Type.Object({
         offset: Type.Optional(Type.Integer({ minimum: 0, maximum: 500 })), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
         kind: Type.Optional(Type.Union([Type.Literal("page"), Type.Literal("claim"), Type.Literal("relationship")])),
-        includeCards: Type.Optional(Type.Boolean()),
+        includeCards: Type.Optional(Type.Boolean()), includeEndpoints: Type.Optional(Type.Boolean()),
         assertionOrigin: Type.Optional(text(30)),
         type: Type.Optional(text(64)), query: Type.Optional(text(200)), lifecycle: Type.Optional(Type.Union([Type.Literal("active"), Type.Literal("all")])),
       }, { additionalProperties: false }),
-      output: Type.Object({ records: Type.Array(record, { maxItems: 100 }), total: Type.Integer(), offset: Type.Integer(), nextOffset: Type.Union([Type.Integer(), Type.Null()]), checkedAt: text(40), facets: Type.Optional(Type.Object({ kinds: Type.Record(Type.String(), Type.Integer()), origins: Type.Record(Type.String(), Type.Integer()) })) }),
+      output: Type.Object({ records: Type.Array(record, { maxItems: 100 }), endpoints: Type.Optional(Type.Array(Summary, { maxItems: 200 })), total: Type.Integer(), offset: Type.Integer(), nextOffset: Type.Union([Type.Integer(), Type.Null()]), checkedAt: text(40), facets: Type.Optional(Type.Object({ kinds: Type.Record(Type.String(), Type.Integer()), origins: Type.Record(Type.String(), Type.Integer()) })) }),
       tool: { name: "knowledge_records", label: "Browse knowledge" },
     },
     record: {

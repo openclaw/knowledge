@@ -56,3 +56,31 @@ test('card projection preserves eligibility, filtering and entity/owner grouping
   assert.deepEqual(filtered.records.map(r => r.id), [claim.id]);
   assert.equal(checked('records', await vault.list({kind:'page', includeCards:true})).records.some(r => r.card), false);
 });
+
+test('relationship browse batches deduplicated eligible endpoints in one scan per page', async () => {
+  const vault = new SampleVault(), data = await vault.scan();
+  const edge = data.records.find(r => r.kind === 'relationship');
+  assert.ok(edge);
+  const edges = Array.from({length:55}, (_, i) => ({...edge, id:`edge_${i}`, metadata:{...edge.metadata,id:`edge_${i}`}}));
+  data.records = [...data.records.filter(r => r.kind !== 'relationship'), ...edges];
+  let scans = 0;
+  vault.scan = async () => { scans++; return data; };
+  vault.detail = () => { throw Error('Endpoint lists must not call detail'); };
+  const first = checked('records', await vault.list({kind:'relationship', includeEndpoints:true, limit:50}));
+  assert.equal(scans, 1); assert.equal(first.records.length, 50); assert.equal(first.nextOffset, 50);
+  assert.deepEqual(new Set(first.endpoints.map(r=>r.id)), new Set([edge.metadata.from,edge.metadata.to]));
+  for (const endpoint of first.endpoints) { assert.equal(endpoint.body,undefined); assert.equal(endpoint.evidence,undefined); }
+  const last = checked('records', await vault.list({kind:'relationship', includeEndpoints:true, offset:50, limit:50}));
+  assert.equal(scans, 2); assert.equal(last.records.length,5); assert.equal(last.nextOffset,null);
+  assert.equal((await vault.list({kind:'relationship'})).endpoints,undefined,'Projection remains opt-in');
+  const target = data.records.find(r=>r.id===edge.metadata.from);
+  target.lifecycle='withdrawn'; target.metadata.lifecycle='withdrawn';
+  const historical = checked('records', await vault.list({kind:'relationship', lifecycle:'all', includeEndpoints:true}));
+  assert.equal(historical.records.length,50);
+  assert.ok(!historical.endpoints.some(r=>r.id===target.id),'History must not leak unavailable endpoint content');
+  target.lifecycle='active'; target.metadata.lifecycle='active';
+  data.records.push({...target,path:'duplicate.md'});
+  assert.ok(!(await vault.list({kind:'relationship', lifecycle:'all', includeEndpoints:true})).endpoints.some(r=>r.id===target.id),'Ambiguous endpoint identities are withheld');
+  const pages = checked('records', await vault.list({kind:'page', includeEndpoints:true}));
+  assert.deepEqual(pages.endpoints,[],'Only relationships on this page contribute endpoints');
+});

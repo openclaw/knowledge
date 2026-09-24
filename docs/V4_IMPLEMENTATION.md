@@ -86,3 +86,35 @@ keyboard disclosure and attendance controls, verifies dynamic host-font inherita
 and mobile bounds, and emits desktop/mobile/theme screenshots. Build, type checking,
 and plugin validation are required as usual. The design archive remains untouched
 and excluded from implementation commits.
+
+## Navigation and Connections latency — September 24
+
+Navigation now stages the next result off-screen while retaining the current DOM
+and usable controls. A compact, non-layout-shifting loading indicator describes
+the pending destination; only the latest response can commit. Failed navigation
+keeps the readable view with Retry. Offline navigation resumes on reconnect even
+when the vault snapshot has not changed. Background refresh cannot supersede a
+pending navigation. List-option focus/scroll is retained, without transferring a
+collapsed card preview into standalone detail evidence.
+
+Connections previously made one list request plus two `record(view=summary)`
+requests per row. Each record read scanned the vault and constructed detail
+projections, including evidence work, even for repeated endpoints. The live
+50-row page therefore triggered 101 requests for only 35 unique endpoints.
+`records(includeEndpoints=true)` now returns deduplicated, bounded endpoint
+summaries from the list's single authorized scan. No cross-request cache or new
+dependency is introduced. Endpoint content remains restricted to currently
+eligible unambiguous records, including when listing historical relationships.
+
+Verification adds one-scan/pagination/deduplication/eligibility contract checks
+and delayed-response browser checks for retained DOM, rapid switching, failed
+navigation and Retry, reconnect, and zero per-row endpoint requests. Existing
+standalone evidence, live updates, keyboard, themes and mobile checks still pass.
+
+Activation verification: backend hot reload succeeded without a gateway restart;
+the live page returned all 50 relationships and all 35 endpoint summaries in
+453 / 322 / 350 ms across three authenticated calls (including connection setup,
+not browser paint timings). The status snapshot remained unchanged, with 147
+valid records and zero findings. UI assets reloaded without diagnostics. The
+170-test pre-existing regression suite, the additional endpoint projection test,
+full rendered browser suite, type check, build and plugin validation passed.

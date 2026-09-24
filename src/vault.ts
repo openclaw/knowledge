@@ -137,7 +137,7 @@ export class SampleVault {
     records.sort((a,b) => a.path.localeCompare(b.path));
     return { records, ontology, sources, issues, checkedAt: new Date().toISOString() };
   }
-  async list(input: { assertionOrigin?: string; includeCards?: boolean; offset?: number; limit?: number; kind?: string; type?: string; query?: string; lifecycle?: "active" | "all" }) {
+  async list(input: { assertionOrigin?: string; includeCards?: boolean; includeEndpoints?: boolean; offset?: number; limit?: number; kind?: string; type?: string; query?: string; lifecycle?: "active" | "all" }) {
     const data = await this.scan();
     const query = input.query?.toLowerCase().trim();
     const types = input.type ? expandTypes(data.ontology, input.type) : null;
@@ -147,7 +147,13 @@ export class SampleVault {
     const matched = (input.lifecycle === "all" ? data.records : current).filter(r => (!input.kind || r.kind === input.kind) && (!input.assertionOrigin || (r.metadata.assertion_origin ?? "unknown") === input.assertionOrigin) && (!types || (r.kind === "page" ? types.has(r.type) : r.type === input.type)) && (!query || [r.id, r.title, ...(r.kind === "claim" ? [r.body] : []), ...(r.metadata.aliases ?? [])].some(v => v.toLowerCase().includes(query))));
     matched.sort((a, b) => b.metadata.updated_at.localeCompare(a.metadata.updated_at) || a.id.localeCompare(b.id));
     const offset = input.offset ?? 0, limit = input.limit ?? 50;
-    return { facets, records: matched.slice(offset, offset + limit).map(r => ({ ...summary(r), ...(input.includeCards && r.kind === "claim" ? { card: claimCard(r, current) } : {}) })), total: matched.length, offset, nextOffset: offset + limit < matched.length ? offset + limit : null, checkedAt: data.checkedAt };
+    const page = matched.slice(offset, offset + limit);
+    // Resolve only this page's endpoints, once, within the same authorized scan.
+    // Historical edges must not expose unavailable/ambiguous endpoint content.
+    const endpointIds = new Set(page.filter(r => r.kind === "relationship").flatMap(r => [r.metadata.from!, r.metadata.to!]));
+    return { facets, records: page.map(r => ({ ...summary(r), ...(input.includeCards && r.kind === "claim" ? { card: claimCard(r, current) } : {}) })),
+      ...(input.includeEndpoints ? { endpoints: current.filter(r => endpointIds.has(r.id)).map(summary) } : {}),
+      total: matched.length, offset, nextOffset: offset + limit < matched.length ? offset + limit : null, checkedAt: data.checkedAt };
   }
   async inspectOntology() {
     const data = await this.scan(), o = data.ontology;

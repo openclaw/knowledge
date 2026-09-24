@@ -26,9 +26,12 @@
 .knowledge-tab-count { min-height: 16px; padding: 0 5px; border-radius: var(--radius-full, 999px); background: var(--bg-hover); color: var(--muted); font-size: 10px; font-weight: 700; line-height: 16px; }
 .knowledge-tabs button[aria-pressed="true"] .knowledge-tab-count { background: var(--accent-subtle); color: var(--accent); }
 .knowledge-tabs button[aria-pressed="true"]::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; border-radius: 1px; background: var(--accent); }
-.knowledge-page-body { display: flex; flex-direction: column; gap: 28px; padding: 4px 16px 0; min-width: 0; }
+.knowledge-page-body { position: relative; display: flex; flex-direction: column; gap: 28px; padding: 4px 16px 0; min-width: 0; }
 .knowledge-toolbar:empty { display: none; }
 .knowledge-content { min-width: 0; }
+/* Loading feedback must not push the retained view or its controls around. */
+.knowledge-loading { position: absolute; top: -20px; right: 16px; z-index: 2; max-width: calc(100% - 32px); padding: 0 6px; border-radius: 4px; background: var(--bg); }
+.knowledge-loading:has(.knowledge-error) { position: static; display: flex; align-items: center; gap: 12px; padding: 8px 12px; border: 1px solid var(--border); }
 .knowledge-page .knowledge-eyebrow, .knowledge-entity-grid h3 { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted-strong, var(--muted)); line-height: 1.55; }
 .knowledge-notice { padding: 10px 14px; border-radius: var(--radius-md, 10px); background: var(--warn-subtle, var(--accent-subtle)); font-size: 13px; }
 .knowledge-muted { color: var(--muted); font-size: 12px; }
