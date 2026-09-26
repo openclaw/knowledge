@@ -92,6 +92,19 @@ try {
   await page.locator('.knowledge-table').waitFor();
   assert.ok((await page.locator('.knowledge-pagination').innerText()).includes('complete list'));
   await page.screenshot({animations:"disabled",path:base+'/browse-desktop.png'});
+  // Primary content must not wait for secondary panels. Late panel responses
+  // remain bound to the old page when navigation has already moved elsewhere.
+  const pageStart=requests.length, delayedDetail=holdRequest('connections');
+  await page.getByRole('button',{name:'Northwind launch',exact:true}).click();
+  await delayedDetail.entered;
+  await page.locator('.knowledge-entity-header h2').filter({hasText:'Northwind launch'}).waitFor();
+  assert.equal(await page.locator('.knowledge-content').getAttribute('aria-busy'),null);
+  assert.ok(await page.getByText('Loading connections…',{exact:true}).isVisible());
+  await page.getByRole('button',{name:'Browse',exact:true}).click();
+  await page.locator('.knowledge-table').waitFor();
+  delayedDetail.release();await delayedDetail.completed;
+  assert.equal(await page.locator('.knowledge-entity-header').count(),0,'Late connections cannot resurrect an old page');
+  assert.equal(requests.slice(pageStart).filter(op=>op==='record').length,1,'One primary record read, no endpoint fan-out');
   // Keep the actual DOM interactive while a transition is waiting on the server.
   const connectionStart = requests.length, delayedConnections = holdRequest('records');
   await page.evaluate(() => { window.retainedTable = document.querySelector('.knowledge-table'); });
@@ -170,7 +183,7 @@ try {
   await page.getByRole('button',{name:'Northwind launch',exact:true}).click();
   await page.locator('.knowledge-claim[data-kind=commitment]').waitFor();
   assert.equal(await page.locator('.knowledge-claim').count(),3);
-  assert.equal(requests.slice(entityStart).filter(op=>op==='record').length,2,'Entity detail and one relationship endpoint only; linked claims are batched');
+  assert.equal(requests.slice(entityStart).filter(op=>op==='record').length,1,'Entity detail only; linked claims and relationship endpoints are batched');
   // A relationship's own endpoints belong in Connections, even with no adjacent edges.
   const relationshipStart = requests.length;
   await page.getByRole('button',{name:'Relationship evidence',exact:true}).click();
@@ -474,8 +487,10 @@ try {
   const v4Claim=await service.create_claim({requestId:randomUUID(),expectedOntologyFingerprint:fingerprint,title:'Investigate',body:'kestrel will investigate.',claim_kind:'commitment',assertion_origin:'source',attribution:'Recorder',evidence:v4Evidence,source_page:v4Source.id,entities:[v4Person.id]},context);
   await page.clock.runFor(30001);
   await page.locator('.knowledge-new-saves:not([hidden])').waitFor();
+  const recentRenderStart=requests.length;
   await page.locator('.knowledge-new-saves').click();
   await page.locator('.knowledge-attendance-group').first().waitFor({state:'attached'});
+  assert.equal(requests.slice(recentRenderStart).filter(op=>op==='record').length,0,'Recent includes attendee names without per-person detail reads');
   const sourceGroup=page.locator('.knowledge-activity-details').filter({has:page.locator('.knowledge-feed-title').filter({hasText:'V4 source — verbatim title'})});
   if(await sourceGroup.getAttribute('open')===null) await sourceGroup.locator(':scope > summary').click();
   await sourceGroup.locator(':scope > summary').getByText('Collapse',{exact:true}).waitFor();

@@ -84,3 +84,19 @@ test('relationship browse batches deduplicated eligible endpoints in one scan pe
   const pages = checked('records', await vault.list({kind:'page', includeEndpoints:true}));
   assert.deepEqual(pages.endpoints,[],'Only relationships on this page contribute endpoints');
 });
+
+test('connection pages batch only current unambiguous endpoints on the requested page', async () => {
+  const data = await new SampleVault().scan();
+  const edge = data.records.find(r => r.kind === 'relationship');
+  const input = {id:edge.metadata.from,direction:'outgoing',includeEndpoints:true,limit:1};
+  const first = checked('connections', connections(data,input));
+  assert.deepEqual(new Set(first.endpoints.map(r=>r.id)),new Set([edge.metadata.from,edge.metadata.to]));
+  assert.ok(first.endpoints.every(r=>r.body===undefined && r.evidence===undefined));
+  assert.equal(connections(data,{...input,includeEndpoints:false}).endpoints,undefined);
+  assert.deepEqual(connections(data,{...input,offset:100}).endpoints,[]);
+  const target=data.records.find(r=>r.id===edge.metadata.to);
+  target.lifecycle='withdrawn';target.metadata.lifecycle='withdrawn';
+  assert.ok(!checked('connections',connections(data,{...input,historical:true})).endpoints.some(r=>r.id===target.id));
+  target.lifecycle='active';target.metadata.lifecycle='active';data.records.push({...target,path:'duplicate.md'});
+  assert.ok(!checked('connections',connections(data,{...input,historical:true})).endpoints.some(r=>r.id===target.id));
+});

@@ -84,27 +84,45 @@ export function keywordExpression(input: SearchInput): string {
   return input.mode === "phrase" ? `"${tokens.join(" ")}"` : tokens.map(t => `"${t}"`).join(input.mode === "any" ? " OR " : " AND ");
 }
 
+function reconcileKeywordIndex(db: DatabaseSync, data: Snapshot, records: LoadedRecord[], binding: string, generation: string) {
+  const table = `keyword_fts_v1_${digest(binding)}`;
+  const snapshot = digest(JSON.stringify([generation, data.ontology?.fingerprint, records.map(r => [r.id, r.path, r.hash, r.revision])]));
+  db.exec("CREATE TABLE IF NOT EXISTS keyword_state_v1 (binding TEXT PRIMARY KEY, snapshot TEXT NOT NULL, indexed_at TEXT NOT NULL) STRICT");
+  const exists = db.prepare("SELECT 1 FROM sqlite_master WHERE name=?").get(table);
+  db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS ${table} USING fts5(id UNINDEXED, title, aliases, body, tokenize='unicode61 remove_diacritics 2')`);
+  const state = db.prepare("SELECT * FROM keyword_state_v1 WHERE binding=?").get(binding);
+  let indexedAt = String(state?.indexed_at ?? new Date().toISOString());
+  if (!exists || state?.snapshot !== snapshot) {
+    db.exec(`DELETE FROM ${table}`);
+    const insert = db.prepare(`INSERT INTO ${table}(id,title,aliases,body) VALUES (?,?,?,?)`);
+    for (const r of records) insert.run(r.id, r.title, (r.metadata.aliases ?? []).join("\n"), r.body);
+    indexedAt = new Date().toISOString();
+    db.prepare("INSERT OR REPLACE INTO keyword_state_v1 VALUES (?,?,?)").run(binding, snapshot, indexedAt);
+  }
+  return { table, snapshot, indexedAt };
+}
+
+/** Verification reconciles the same index without running a synthetic ranked search. */
+export function verifyKeywordIndex(db: DatabaseSync, data: Snapshot, binding: string, generation: string, withdrawn = new Set<string>()): Set<string> | null {
+  try {
+    db.exec("BEGIN IMMEDIATE");
+    const { table } = reconcileKeywordIndex(db, data, eligible(data, withdrawn, false), binding, generation);
+    const ids = new Set(db.prepare(`SELECT id FROM ${table}`).all().map(r => String(r.id)));
+    db.exec("COMMIT"); return ids;
+  } catch {
+    if (db.isTransaction) db.exec("ROLLBACK");
+    return null;
+  }
+}
+
 /** Called only inside the storage authority/identity fence, using the latest validated snapshot. */
 export function keywordSearch(db: DatabaseSync, data: Snapshot, input: SearchInput, binding: string, generation: string, withdrawn = new Set<string>()): SearchOutput {
   const expression = keywordExpression(input), offset = input.offset ?? 0, limit = input.limit ?? 20;
   const base = { mode: "keyword" as const, queryMode: input.mode ?? "all", offset, checkedAt: data.checkedAt, coverage: coverage(data) };
   const records = eligible(data, withdrawn, input.lifecycle !== undefined && input.lifecycle !== "active"), selected = filtered(data, records, input);
-  const table = `keyword_fts_v1_${digest(binding)}`;
-  const snapshot = digest(JSON.stringify([generation, data.ontology?.fingerprint, records.map(r => [r.id, r.path, r.hash, r.revision])]));
   try {
     db.exec("BEGIN IMMEDIATE");
-    db.exec("CREATE TABLE IF NOT EXISTS keyword_state_v1 (binding TEXT PRIMARY KEY, snapshot TEXT NOT NULL, indexed_at TEXT NOT NULL) STRICT");
-    const exists = db.prepare("SELECT 1 FROM sqlite_master WHERE name=?").get(table);
-    db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS ${table} USING fts5(id UNINDEXED, title, aliases, body, tokenize='unicode61 remove_diacritics 2')`);
-    const state = db.prepare("SELECT * FROM keyword_state_v1 WHERE binding=?").get(binding);
-    let indexedAt = String(state?.indexed_at ?? new Date().toISOString());
-    if (!exists || state?.snapshot !== snapshot) {
-      db.exec(`DELETE FROM ${table}`);
-      const insert = db.prepare(`INSERT INTO ${table}(id,title,aliases,body) VALUES (?,?,?,?)`);
-      for (const r of records) insert.run(r.id, r.title, (r.metadata.aliases ?? []).join("\n"), r.body);
-      indexedAt = new Date().toISOString();
-      db.prepare("INSERT OR REPLACE INTO keyword_state_v1 VALUES (?,?,?)").run(binding, snapshot, indexedAt);
-    }
+    const { table, snapshot, indexedAt } = reconcileKeywordIndex(db, data, records, binding, generation);
     // A separate filtered corpus ensures BM25 statistics cannot be influenced by
     // inaccessible scopes OR records excluded by the caller's filters.
     db.exec("DROP TABLE IF EXISTS temp.keyword_query_v1");

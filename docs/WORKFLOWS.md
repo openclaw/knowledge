@@ -34,18 +34,18 @@ is added.
 |---|---|
 | query/recall, search, get_page | `knowledge_lookup`, `knowledge_grep`, `knowledge_record`; agent synthesis over evidence, no semantic search |
 | capture / put_page | `knowledge_save_page`; observed revision/hash for edits, exact request replay, readback |
-| content-hash capture dedup | Agent checks source IDs/hashes/content and existing pages; backend dedup is only same request ID/payload |
+| content-hash capture dedup | Scoped source ID/hash batch receipts via `knowledge_source_check`; exact source reuse, changed-source reconciliation, and legacy record lookup remain distinct |
 | upload-raw / put_raw_data | `knowledge_attach`, file evidence on page, `knowledge_attachment`; local originals, no cloud routing |
 | filing rules | Inspect `knowledge_ontology`; canonical type and server-generated descriptive path; use the returned path |
 | raw transcript / attribution | Retained original + labeled derived transcript; exact locators, unresolved speaker map, source-vs-inference distinction |
 | resolve/enrich | Knowledge-first lookup including connected claims/edges; sourced State, timeline context and entity back-links |
 | remember / timeline-add / add_link | `knowledge_create_claim` (dated event claims for timeline material), `knowledge_create_relationship`, `knowledge_connections`; no separate timeline store; Markdown-derived backlinks stay distinct from typed edges |
 | sync / embed | No sync command: saves publish; keyword search reconciles its own index |
-| bulk job checkpoints | Itemized agent work log + individual upload/publication receipts; no atomic/resumable multi-record job |
+| bulk job checkpoints | Itemized agent work log + uploads and bounded `knowledge_publish_batch` receipts; journal resume is publication, not extraction-job progress |
 | aliases/tags/dependencies | Supported collection replacement through `knowledge_save_page`; omitted fields preserve existing values |
 | claim correction/withdrawal | `knowledge_correct` atomically replaces and supersedes a claim/edge; `knowledge_withdraw` retracts an exact record; page prose uses revision-fenced `knowledge_save_page` |
 | media extraction/OCR/transcription | Host capability if available; otherwise source retention and explicit partial result. Dedicated media skill deferred |
-| curation/dreaming / automatic inbound enrichment | Deferred; no ambient capture, broad profile research or scheduling |
+| curation/dreaming / automatic inbound enrichment | No background extraction, broad profile research or scheduling; selected-provider ordinary-turn remembering uses knowledge-capture |
 | push-before-link | Returned local path/ID or verified host link; no private-vault GitHub push to manufacture a URL |
 
 Knowledge semantic departures: a name/roster match does not establish speaker
@@ -132,7 +132,7 @@ connected claims/relationships before external escalation or asking the user.
 | Conditional host research; no ambient inbound capture, paid enrichment or automatic profile merging | Requested ingestion and trusted host scope do not authorize unrelated acquisition, background capture or identity consolidation |
 | Preserve ambiguous identity and source conflicts; accept explicit user corrections as new evidence | Knowledge distinguishes source/user/inference attribution and corrections from conflicting accounts; similar names or old synthesis cannot override evidence automatically |
 | Verify narrated chronology, not thematic heading order | Knowledge permits topic-organized prose; missing transit narration is not itself evidence of impossible travel |
-| Per-write receipts and agent work log, exact-payload retry and active/historical reconciliation | No ingestion API, required manifest, workflow engine or multi-record rollback. Reruns must not resurrect superseded/withdrawn assertions |
+| Individual/batch receipts and agent work log, exact-payload retry and active/historical reconciliation | No required ingestion manifest, workflow engine or rollback. Reruns must not resurrect superseded/withdrawn assertions |
 | No sync or manual vault Git commands | Publication/index reconciliation/local history already belong to the backend |
 
 The remaining real-content trial is a workflow acceptance check, not a prerequisite
@@ -174,3 +174,23 @@ connections separately from typed assertions. The paired meeting/entity example
 is authored in `skills/shared/meeting-entity-example.md` and synchronized into
 both relevant skill bundles. It illustrates the final prose and evidence mapping;
 it is not an unseen-source behavioral evaluation or a live-vault fixture.
+
+## Bounded ingestion operations — 2026-09-24
+
+See [INGESTION_OPERATIONS.md](INGESTION_OPERATIONS.md) for aggregate exception-only
+verification, multi-record journal publication, source ID/hash receipts, explicit
+changed-source reconciliation and bounded recovery reads. These supersede the
+older per-write-only reliability note above; no extraction workflow engine added.
+
+
+## Selected memory provider
+
+The provider prompt establishes proactive recall and selective, agent-driven
+remembering during an ordinary authorized turn. The bundled skills retain the
+procedures. This adopts gbrain's resolve-before-asking, read-before-write,
+source-preserving reconciliation, meaningful connections, and verified writeback.
+It does not adopt exhaustive lookup on trivial turns, forced identity resolution,
+semantic retrieval, unconditional transcript capture, or implicit external research:
+Knowledge retains ambiguity and obeys its actual keyword and authority contracts.
+Remembering is best effort, not proof that every durable fact was captured.
+See [MEMORY_PROVIDER.md](MEMORY_PROVIDER.md) for runtime and acceptance boundaries.

@@ -7,13 +7,17 @@ description: Find and answer from saved Knowledge vault pages with source citati
 
 Read [shared conventions](references/conventions.md). This workflow is read-only.
 
-1. For a named entity or known record use `knowledge_lookup({query})`. Preserve
-   `ambiguous` as ambiguity and inspect candidates rather than choosing one.
-2. For topical questions use `knowledge_grep({query})`: literal words, `all` by
+1. Search with `knowledge_grep({query})`, including for named people, projects
+   and pages whose exact stored identity is not already known: literal words, `all` by
    default; try a concise variant, `any`, or `phrase` when useful. No embeddings,
    regex, graph traversal or server-side synthesis is available. Narrow by
    ontology type/kind when appropriate; use `knowledge_records` and pagination
    for an inventory, not a ranked search pretending to be exhaustive.
+2. Use `knowledge_lookup({query})` only for an already-known exact record ID,
+   full title or declared alias. It does not perform keyword search. If it returns
+   `missing`, fall back to `knowledge_grep` before concluding no relevant record
+   exists. Preserve `ambiguous` as ambiguity and inspect candidates rather than
+   choosing one.
 3. Inspect relevant hits with `knowledge_record`. Read enough context to support
    the answer; follow body/evidence pagination as needed. Compare the hit's
    citation hash/revision to the readback. Restart on changes rather than combine
@@ -29,4 +33,7 @@ Read [shared conventions](references/conventions.md). This workflow is read-only
    narrow the query or state the coverage limit. Do not claim the vault lacks
    something solely because a short ranked list did not contain it.
 
-Do not capture new pages or enrich entities as a side effect of answering.
+Recall itself is read-only. If the selected Knowledge memory policy calls for
+remembering genuinely new durable information, use `knowledge-capture` separately.
+Do not re-save retrieved summaries as new evidence or enrich entities merely
+because they appeared in an answer.

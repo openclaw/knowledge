@@ -9,6 +9,7 @@ import { text } from "./model.js";
 const sequence = Type.Integer({ minimum: 0 });
 export const RecentInput = Type.Object({
   groupBySource: Type.Optional(Type.Boolean()),
+  includeEndpoints: Type.Optional(Type.Boolean()),
   sourceId: Type.Optional(text(96)), recordOffset: Type.Optional(Type.Integer({ minimum: 0 })),
   limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50 })),
   upperSequence: Type.Optional(sequence), beforeSequence: Type.Optional(sequence),
@@ -17,7 +18,7 @@ export const RecentOutput = Type.Object({
   upperSequence: sequence,
   nextBefore: Type.Union([sequence, Type.Null()]),
   items: Type.Array(Type.Object({
-    group: Type.Optional(Type.Object({ source: Summary, total: Type.Integer(), counts: Type.Record(Type.String(), Type.Integer()), records: Type.Array(Type.Object({ ...CardSummary.properties, change: Type.Optional(text(20)) }), {maxItems:20}), truncated: Type.Boolean(), nextRecordOffset: Type.Optional(Type.Union([Type.Integer(), Type.Null()])), firstSaved: Type.Optional(text(40)), lastSaved: Type.Optional(text(40)) })),
+    group: Type.Optional(Type.Object({ source: Summary, total: Type.Integer(), counts: Type.Record(Type.String(), Type.Integer()), records: Type.Array(Type.Object({ ...CardSummary.properties, change: Type.Optional(text(20)) }), {maxItems:20}), endpoints: Type.Optional(Type.Array(Summary, { maxItems: 40 })), truncated: Type.Boolean(), nextRecordOffset: Type.Optional(Type.Union([Type.Integer(), Type.Null()])), firstSaved: Type.Optional(text(40)), lastSaved: Type.Optional(text(40)) })),
     sequence, id: text(96), at: text(40), kind: text(40), type: text(64),
     change: Type.Union([Type.Literal("created"), Type.Literal("updated"), Type.Literal("observed"), Type.Literal("external"), Type.Literal("corrected"), Type.Literal("withdrawn")]),
     title: Type.Optional(text(200)), identityStatus: Type.Optional(text(20)), reason: Type.Optional(text(2000)),
@@ -34,9 +35,11 @@ export function recentActivity(db: DatabaseSync, scope: string, active: LoadedRe
   const upperSequence = input.upperSequence ?? Number(db.prepare("SELECT COALESCE(MAX(sequence),0) AS n FROM history WHERE scope=?").get(scope)!.n);
   const byId = new Map(active.map(r => [r.id, r]));
   const sourceIds = Object.fromEntries(active.map(r => [r.id, r.kind === "page" && ["meeting", "source"].includes(r.type) ? r.id : r.metadata.source_page]).filter(([, id]) => typeof id === "string" && byId.has(id)));
+  // Reuse this expensive JSON/history join in both event branches. Inlining it
+  // makes SQLite reparse whole publication plans for each history row.
   const rows = db.prepare(`
-    WITH published AS (
-      SELECT m.request, m.receipt, m.plan, j.value AS record,
+    WITH published AS MATERIALIZED (
+      SELECT m.request, m.receipt, j.value AS record,
         (SELECT MIN(h.sequence) FROM history h WHERE h.scope=m.scope
           AND h.id=json_extract(j.value,'$.id') AND h.hash=json_extract(j.value,'$.hash')
           AND h.revision=json_extract(j.value,'$.revision')
@@ -96,6 +99,10 @@ export function recentActivity(db: DatabaseSync, scope: string, active: LoadedRe
       }
       if (attendees.size) counts.attendees = attendees.size;
       item.group = { source: recordSummary(source), total: records.length, counts, records: records.slice(input.recordOffset ?? 0, (input.recordOffset ?? 0) + 20).map(r => ({ ...recordSummary(r), change: String(members.find(member => member.id === r.id)?.change ?? "observed"), ...(r.kind === "claim" ? { card: claimCard(r, active) } : {}) })), truncated: records.length > (input.recordOffset ?? 0) + 20, nextRecordOffset: records.length > (input.recordOffset ?? 0) + 20 ? (input.recordOffset ?? 0) + 20 : null, firstSaved: String(members.at(-1)!.at), lastSaved: String(members[0].at) };
+      if (input.includeEndpoints) {
+        const ids = new Set(item.group.records.filter(r => r.kind === "relationship").flatMap(r => [r.from, r.to]));
+        item.group.endpoints = active.filter(r => ids.has(r.id)).map(recordSummary);
+      }
     }
     return item;
   });

@@ -1,3 +1,6 @@
+import * as memoryHost from "openclaw/plugin-sdk/memory-host-search";
+import { createKnowledgeMemoryRuntime } from "./memory-provider.js";
+import { buildKnowledgeMemoryPrompt } from "./memory-prompt.js";
 import { connections } from "./connections.js";
 import { DatabaseSync } from "node:sqlite";
 import { keywordSearch, exactLookup, eligible } from "./retrieval.js";
@@ -19,6 +22,31 @@ export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureE
   const storage = config ? new KnowledgeStorage(config) : undefined;
   let current = true, epoch = 0;
   const assertCurrent = () => { if (!current) throw Error("Knowledge service was reloaded; reconnect and retry the same request."); };
+  let pending: Promise<void> = Promise.resolve();
+  const enqueue = <T>(operation: () => Promise<T>): Promise<T> => {
+    const submittedEpoch = epoch;
+    const result = pending.then(() => {
+      assertCurrent();
+      if (submittedEpoch !== epoch) throw Error("Knowledge service was reloaded; retry the original request.");
+      return operation();
+    });
+    // A rejected operation must not poison subsequent reads, writes or recovery.
+    pending = result.then(() => undefined, () => undefined);
+    return result;
+  };
+  if (typeof api.registerMemoryCapability === "function") {
+    if (typeof memoryHost.getActiveMemoryProvider !== "function") throw Error("Knowledge memory requires the provider-neutral Memory Runtime V2 host branch.");
+    api.registerMemoryCapability({
+      runtimeV2: createKnowledgeMemoryRuntime(api, storage, { enqueue, drain: () => pending, fence() {
+        const openedEpoch = epoch;
+        return () => { assertCurrent(); if (openedEpoch !== epoch) throw Error("Knowledge service was reloaded."); };
+      } }),
+      promptBuilder: params => config && (!params.agentId || params.agentId === config.agentId)
+        ? buildKnowledgeMemoryPrompt({ ...params, availableTools: config.writesEnabled ? params.availableTools : new Set([...params.availableTools].filter(t => !["knowledge_save_page", "knowledge_correct", "knowledge_withdraw"].includes(t))) }) : [],
+      // A Memory Core sidecar must not donate its append-only file flush plan.
+      flushPlanResolver: () => null,
+    });
+  }
   const accessFor = (context: FeatureInvocationContext, write = false) => {
     assertCurrent();
     const observedEpoch = epoch;
@@ -41,6 +69,13 @@ export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureE
     return accessFor(context, write);
   };
   const handlers: FeatureHandlers<typeof contract> = {
+    verify: (input, context) => { const access = authority(context); return storage!.verify(input, access); },
+    source_check: (input, context) => { const access = authority(context); return storage!.sourceCheck(input, access); },
+    publish_batch: async (input, context) => {
+      if (context.source !== "tool") throw Error("Knowledge changes must be requested through chat and agent tools.");
+      const access = authority(context, true);
+      try { return await storage!.batch(input, access, "agent"); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); }
+    },
     annotate: async (input, context) => {
       if (context.source !== "tool") throw Error("Knowledge changes must be requested through chat and agent tools.");
       const access = authority(context, true);
@@ -65,7 +100,7 @@ export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureE
     connections: (input, context) => storage ? storage.connections(input, authority(context)) : run(context, async vault => connections(await vault.scan(), input)),
     resume: async (input, context) => { const access = authority(context, true); try { return await storage!.resume(access, input.requestId); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); } },
     revision: async (input, context) => { const access = authority(context); return storage!.revision(access, input.sequence); },
-    mutation: async (input, context) => { const access = authority(context); return storage!.mutation(access, input.requestId); },
+    mutation: async (input, context) => { const access = authority(context); return storage!.mutation(access, input.requestId, input); },
     history: async (input, context) => {
       if (!storage) return { entries: [], mutations: [], nextOffset: null, git: { state: "read-only", pending: 0, message: "Sample vault; no Git changes." } };
       const access = authority(context);
@@ -77,7 +112,7 @@ export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureE
       const data = await vault.scan();
       const active = eligible(data, undefined, false);
       return {
-        service: "knowledge", phase: config?.writesEnabled ? "structured-writes" : "read-only-explorer", backendRevision: "markdown-links-1", instanceId, startedAt,
+        service: "knowledge", phase: config?.writesEnabled ? "structured-writes" : "read-only-explorer", backendRevision: "memory-provider-v2-1", instanceId, startedAt,
         checkedAt: data.checkedAt, vault: config?.vaultId ?? "bundled-sample", agent: config?.agentId ?? "none — synthetic sample", scope, sample: !config, writesEnabled: Boolean(config?.writesEnabled && (() => { try { authority(context, true); return true; } catch { return false; } })()),
         live: scope === "agent-private" ? live?.state ?? "stopped" : "stopped",
         // Content, evidence validation, ontology and time-based eligibility can
@@ -108,19 +143,8 @@ export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureE
   // this lane. Otherwise ordinary parallel tool/UI calls look like an external
   // vault replacement. Keep the filesystem and revision fences intact.
   if (!storage) return handlers;
-  let pending: Promise<void> = Promise.resolve();
   const serialize = <Input, Output>(handler: (input: Input, context: FeatureInvocationContext) => Output | Promise<Output>) =>
-    (input: Input, context: FeatureInvocationContext): Promise<Output> => {
-      const submittedEpoch = epoch;
-      const result = pending.then(() => {
-        assertCurrent();
-        if (submittedEpoch !== epoch) throw Error("Knowledge service was reloaded; retry the original request.");
-        return handler(input, context);
-      });
-      // A rejected operation must not poison later requests or recovery calls.
-      pending = result.then(() => undefined, () => undefined);
-      return result;
-    };
+    (input: Input, context: FeatureInvocationContext): Promise<Output> => enqueue(async () => handler(input, context));
   return Object.fromEntries(Object.entries(handlers).map(([name, handler]) =>
     [name, serialize(handler as (input: never, context: FeatureInvocationContext) => unknown)])) as FeatureHandlers<typeof contract>;
 }

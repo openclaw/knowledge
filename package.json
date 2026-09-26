@@ -30,8 +30,10 @@
     "docs/WORKFLOWS.md",
     "scripts/sync-skill-references.mjs",
     "docs/STRUCTURED_WRITES.md",
+    "docs/INGESTION_OPERATIONS.md",
     "docs/CORRECTIONS.md",
-    "docs/MARKDOWN_LINKS.md"
+    "docs/MARKDOWN_LINKS.md",
+    "docs/MEMORY_PROVIDER.md"
   ],
   "peerDependencies": {
     "openclaw": ">=2026.9.5"
@@ -43,7 +45,7 @@
     "yaml": "2.9.0"
   },
   "devDependencies": {
-    "openclaw": "2026.9.5",
+    "openclaw": "file:../openclaw-memory-runtime",
     "esbuild": "0.28.2",
     "typescript": "5.9.3",
     "@types/node": "26.5.1"

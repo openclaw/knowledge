@@ -1,5 +1,10 @@
 # Knowledge
 
+This branch adds optional selection as the host memory provider on the unreleased
+provider-neutral OpenClaw branch. Native tools and the read-only UI remain intact.
+See [Memory provider integration](docs/MEMORY_PROVIDER.md) for activation, authority,
+capabilities, and limitations. Building does not switch the live memory slot.
+
 Evidence-backed knowledge vault and native explorer for OpenClaw.
 
 **Current milestone:** agent-driven knowledge changes with exact-target correction/withdrawal and a read-only, entity-centered Control UI. Tools publish journaled pages, sourced claims/relationships and entity metadata; the UI inspects them and hands change requests to chat. Writes require `vault.writesEnabled: true`; sample mode remains read-only. Owner-direct turns can access the configured agent’s private records; shared turns are restricted to their own conversation partition.

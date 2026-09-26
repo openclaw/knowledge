@@ -28,6 +28,8 @@ export function connections(data: Awaited<ReturnType<SampleVault["scan"]>>, inpu
     }
   }
   const offset = input.offset ?? 0, limit = input.limit ?? 20;
-  return { connections: rows.slice(offset, offset + limit), total: rows.length, nextOffset: offset + limit < rows.length ? offset + limit : null,
+  const page = rows.slice(offset, offset + limit);
+  const endpointIds = new Set(page.filter(r => r.record.kind === "relationship").flatMap(r => [r.from, r.to]));
+  return { connections: page, ...(input.includeEndpoints ? { endpoints: eligible(data, withdrawn, false).filter(r => endpointIds.has(r.id)).map(recordSummary) } : {}), total: rows.length, nextOffset: offset + limit < rows.length ? offset + limit : null,
     snapshot: digest(JSON.stringify(records.map(r => [r.id, r.path, r.hash]))) };
 }

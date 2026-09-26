@@ -12,7 +12,7 @@ export async function inspectRecord(vault: SampleVault, input: RecordInput): Pro
   const detail = await vault.detail(input.id, input.evidenceOffset ?? 0, input.evidenceLimit ?? 20), r = detail.record;
   const result: RecordOutput = { view, record: null, content: { offset, totalChars: 0, nextOffset: null }, issues: detail.issues };
   if (!r) return result;
-  result.relatedStatements = detail.relatedStatements ?? [];
+  if (view === "content" || input.includeEvidence) result.relatedStatements = detail.relatedStatements ?? [];
   const { body, raw, metadata: serialized, ...base } = r, metadata = JSON.parse(serialized);
   const value = view === "content" ? body : view === "raw" ? raw : "";
   const chunk = value.slice(offset, offset + maxChars);

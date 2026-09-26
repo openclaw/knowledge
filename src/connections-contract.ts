@@ -1,12 +1,13 @@
 import { Type, type Static } from "typebox";
-import { CardSummary } from "./inspection-contract.js";
+import { CardSummary, Summary } from "./inspection-contract.js";
 import { Evidence, text } from "./model.js";
 export const ConnectionsInput = Type.Object({
-  id: text(96), includeCards: Type.Optional(Type.Boolean()), historical: Type.Optional(Type.Boolean()),
+  id: text(96), includeCards: Type.Optional(Type.Boolean()), includeEndpoints: Type.Optional(Type.Boolean()), historical: Type.Optional(Type.Boolean()),
   direction: Type.Optional(Type.Union([Type.Literal("incoming"), Type.Literal("outgoing"), Type.Literal("dependents"), Type.Literal("claims"), Type.Literal("backlinks"), Type.Literal("links")])),
   offset: Type.Optional(Type.Integer({ minimum: 0 })), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
 }, { additionalProperties: false });
 export const ConnectionsOutput = Type.Object({
+  endpoints: Type.Optional(Type.Array(Summary, { maxItems: 200 })),
   total: Type.Integer(), nextOffset: Type.Union([Type.Integer(), Type.Null()]), snapshot: text(64),
   connections: Type.Array(Type.Object({
     direction: Type.Union([Type.Literal("incoming"), Type.Literal("outgoing"), Type.Literal("dependents"), Type.Literal("claims"), Type.Literal("backlinks"), Type.Literal("links")]),

@@ -1,5 +1,6 @@
 {
   "id": "knowledge",
+  "kind": "memory",
   "name": "Knowledge",
   "description": "Evidence-backed knowledge, inspectable in OpenClaw.",
   "version": "0.1.0",
@@ -55,9 +56,9 @@
     "onStartup": true
   },
   "controlUi": {
-    "entry": "dist/control-ui/741e0ccc5c4ae792227b2a4c17979ca2126b7189edfdb8f88274338e59dd4e0a/index.js",
+    "entry": "dist/control-ui/0213f43204216c80eba7edfff134e7efda2983d01b70e603511af5a71cfab67d/index.js",
     "styles": [
-      "dist/control-ui/741e0ccc5c4ae792227b2a4c17979ca2126b7189edfdb8f88274338e59dd4e0a/index.css"
+      "dist/control-ui/0213f43204216c80eba7edfff134e7efda2983d01b70e603511af5a71cfab67d/index.css"
     ]
   },
   "skills": [
@@ -78,12 +79,15 @@
       "knowledge_lookup",
       "knowledge_mutation",
       "knowledge_ontology",
+      "knowledge_publish_batch",
       "knowledge_record",
       "knowledge_records",
       "knowledge_resume",
       "knowledge_revision",
       "knowledge_save_page",
+      "knowledge_source_check",
       "knowledge_status",
+      "knowledge_verify",
       "knowledge_withdraw"
     ]
   }

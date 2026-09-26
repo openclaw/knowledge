@@ -1,3 +1,4 @@
+import { BatchInput, SourceCheckInput, SourceCheckOutput, VerifyInput, VerifyOutput } from "./ingestion-contract.js";
 import { ConnectionsInput, ConnectionsOutput } from "./connections-contract.js";
 import { RecentInput, RecentOutput } from "./recent.js";
 import { AttachInput, AttachOutput, AttachmentInput, AttachmentOutput } from "./attachment-contract.js";
@@ -16,6 +17,18 @@ const issues = Type.Array(issue, { maxItems: 1000 });
 export const contract = defineFeatureContract({
   pluginId: "knowledge",
   operations: {
+    verify: {
+      kind: "query", description: "Verify up to 100 published record IDs in one bounded structural check. Prefer this after ingestion, not full-body reads. Checks active eligibility, references/links, retained evidence hashes/locators, optional expected revision/hash and owner/due/occurrence values, and reconciled keyword indexing. Returns counts and exceptions only (20/page, max 50); follow nextOffset with the same records and snapshot. Null expected owner/date asserts absence; omitted means do not compare. Not a semantic, speaker-attribution or source-completeness evaluation.",
+      input: VerifyInput, output: VerifyOutput, tool: { name: "knowledge_verify", label: "Verify knowledge publication" },
+    },
+    source_check: {
+      kind: "query", description: "Check a provider/source key plus exact retained-byte SHA-256 before repeat ingestion. Returns missing, unchanged or changed and the latest scoped batch receipt, even if publication needs recovery. Does not search legacy individual publications, infer semantic equivalence, or prove outputs remain current. Verify returned IDs; never resurrect inactive records. Changed bytes require explicit reconciliation against the prior requestId.",
+      input: SourceCheckInput, output: SourceCheckOutput, tool: { name: "knowledge_source_check", label: "Check ingested source" },
+    },
+    publish_batch: {
+      kind: "action", description: "Publish 1–25 items; max 1 MiB. Unique keys. Batch-level UUID, vault ID, ontology hash. Refs: @key; body links: [[@key|label]]. Upload evidence first; no inline source. Page edit: existing id + revision + hash. Arrays/fields replace; omitted preserves. Validate all, then journal. Retry: same UUID + payload, or knowledge_resume. Source unchanged: old receipt; new payload ignored. Source changed: reconcile, set expectedPreviousRequestId. Receipt state/Git applies to all items. No dedup, correction or rollback.",
+      input: BatchInput, output: Receipt, tool: { name: "knowledge_publish_batch", label: "Publish knowledge batch" },
+    },
     annotate: {
       kind: "action", description: "Revision-fenced, evidence-backed metadata annotation without changing assertion text or lifecycle. Set source-page association, identity uncertainty/candidates, speaker-attribution confidence, continuity links, or explicit fixture classification; append retained evidence to an unchanged assertion. Omitted fields are preserved; supplied arrays replace. Only fixture classification may change historical records. Similarity is not supersession, candidate identity is not a merge, and source grouping is not an ingestion batch. Inspect the target and evidence first; a reason and exact revision/hash are required.",
       input: AnnotateInput, output: Receipt,
@@ -26,11 +39,11 @@ export const contract = defineFeatureContract({
       input: RecentInput, output: RecentOutput,
     },
     attach: {
-      kind: "action", description: "Retain an original source file in the authorized vault scope. Generate a distinct lowercase UUID requestId per file, never a filename/source ID and never shared by different files. Send base64 chunks of up to 48 KiB decoded, sequential byte offsets, the same requestId/filename/attribution for all chunks, and final=true on the last chunk. Retry identical chunks after interruption. No total file-size or evidence-count cap. A complete receipt returns evidence to append via save_page.attachments. Uploading alone does not create a page. No local filesystem path is accepted.",
+      kind: "action", description: "UPLOAD source bytes: use knowledge_attach (verb), not knowledge_attachment (read). Retain an original source file in the authorized vault scope. Generate a distinct lowercase UUID requestId per file, never a filename/source ID and never shared by different files. Send base64 chunks of up to 48 KiB decoded, sequential byte offsets, the same requestId/filename/attribution for all chunks, and final=true on the last chunk. Retry identical chunks after interruption. No total file-size or evidence-count cap. A complete receipt returns evidence to append via save_page.attachments. Uploading alone does not create a page. No local filesystem path is accepted.",
       input: AttachInput, output: AttachOutput, tool: { name: "knowledge_attach", label: "Attach knowledge source file" },
     },
     attachment: {
-      kind: "query", description: "Read the original bytes of a file referenced by an authorized record. Supply the evidence path and sha256 from knowledge_record. Returns a base64 chunk; follow nextOffset until null. Binary files are preserved without text conversion. No arbitrary filesystem paths or unreferenced files are exposed.",
+      kind: "query", description: "DOWNLOAD retained bytes: use knowledge_attachment, not knowledge_attach (upload). Read the original bytes of a file referenced by an authorized record. Supply the evidence path and sha256 from knowledge_record. Returns a base64 chunk; follow nextOffset until null. Binary files are preserved without text conversion. No arbitrary filesystem paths or unreferenced files are exposed.",
       input: AttachmentInput, output: AttachmentOutput, tool: { name: "knowledge_attachment", label: "Read knowledge source file" },
     },
     save_page: {
@@ -69,9 +82,9 @@ export const contract = defineFeatureContract({
       tool: { name: "knowledge_revision", label: "Inspect knowledge revision" },
     },
     mutation: {
-      kind: "query", description: "Inspect a scoped receipt and retained before/proposed/displaced text for publication recovery. A null receipt means no accepted page/assertion mutation was found in this scope; it is not an upload receipt. After an uncertain result, replay the original payload/ID, not a replacement request. Does not resolve or overwrite a conflict.",
-      input: Type.Object({ requestId }, { additionalProperties: false }),
-      output: Type.Object({ receipt: Type.Union([Receipt, Type.Null()]), files: Type.Array(Type.Object({ path: text(500), before: Type.Union([text(65536), Type.Null()]), proposed: text(65536), displaced: Type.Union([text(65536), Type.Null()]) }), { maxItems: 3 }) }),
+      kind: "query", description: "Inspect publication recovery, not source uploads or record content. Use includeFiles=false for receipt-only checks; retained before/proposed/displaced files default to 3/page with nextOffset for batches. A null receipt means no accepted page/assertion mutation was found in this scope; it is not an upload receipt. After an uncertain result, replay the original payload/ID, not a replacement request. Does not resolve or overwrite a conflict.",
+      input: Type.Object({ requestId, includeFiles: Type.Optional(Type.Boolean()), offset: Type.Optional(Type.Integer({ minimum: 0 })), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 3 })) }, { additionalProperties: false }),
+      output: Type.Object({ totalFiles: Type.Optional(Type.Integer()), nextOffset: Type.Optional(Type.Union([Type.Integer(), Type.Null()])), receipt: Type.Union([Receipt, Type.Null()]), files: Type.Array(Type.Object({ path: text(500), before: Type.Union([text(65536), Type.Null()]), proposed: text(65536), displaced: Type.Union([text(65536), Type.Null()]) }), { maxItems: 3 }) }),
       tool: { name: "knowledge_mutation", label: "Inspect knowledge publication" },
     },
     history: {
@@ -94,11 +107,11 @@ export const contract = defineFeatureContract({
       tool: { name: "knowledge_status", label: "Knowledge status" },
     },
     grep: {
-      kind: "query", description: "Rank authorized valid knowledge by title/alias/body keywords with SQLite FTS5. Default: all word tokens, active records. Saved pages need no approval. mode=any ORs literal words; mode=phrase matches their order. No raw FTS/regex operators. lifecycle=superseded/all includes history, never withdrawn records. Filters apply before ranking. Snippets have revision/hash citations and body line locators. index.state=unavailable and total=null mean failed retrieval, not no matches. Compare index.snapshot across pages; restart on changes. Not exhaustive inventory: use knowledge_records. No embeddings.",
+      kind: "query", description: "Search for records, including people, projects and pages whose exact stored identity is not already known. Rank authorized valid knowledge by title/alias/body keywords with SQLite FTS5. Default: all word tokens, active records. Saved pages need no approval. mode=any ORs literal words; mode=phrase matches their order. No raw FTS/regex operators. lifecycle=superseded/all includes history, never withdrawn records. Filters apply before ranking. Snippets have revision/hash citations and body line locators. index.state=unavailable and total=null mean failed retrieval, not no matches. Compare index.snapshot across pages; restart on changes. Not exhaustive inventory: use knowledge_records. No embeddings.",
       input: SearchInput, output: SearchOutput, tool: { name: "knowledge_grep", label: "Search knowledge" },
     },
     lookup: {
-      kind: "query", description: "Resolve an exact stable ID, full title or declared alias in the trusted scope; returns found, ambiguous or missing without choosing an ambiguous identity. Names/aliases normalize Unicode, case and whitespace; IDs are case-sensitive. Active records by default, with no approval step; historical filters are explicit. Invalid, withdrawn and unavailable dependencies are excluded. Independent of keyword indexing. Use knowledge_record for full inspection and knowledge_records for exhaustive listing.",
+      kind: "query", description: "Use only when an exact stable ID, full title or declared alias is already known; use knowledge_grep for discovery and after a missing result. No keyword-search fallback. Resolve that exact identity in the trusted scope; returns found, ambiguous or missing without choosing an ambiguous identity. Names/aliases normalize Unicode, case and whitespace; IDs are case-sensitive. Active records by default, with no approval step; historical filters are explicit. Invalid, withdrawn and unavailable dependencies are excluded. Independent of keyword indexing. Use knowledge_record for full inspection and knowledge_records for exhaustive listing.",
       input: LookupInput, output: LookupOutput, tool: { name: "knowledge_lookup", label: "Resolve knowledge identity" },
     },
     records: {
@@ -114,7 +127,7 @@ export const contract = defineFeatureContract({
       tool: { name: "knowledge_records", label: "Browse knowledge" },
     },
     record: {
-      kind: "query", description: "Read a scoped record by stable ID. Default content view returns body once (12,000 characters), revision/hash, attribution, issues and verified evidence (4,000 excerpt characters total). Follow content.nextOffset with offset to read more; compare hashes across chunks. view=summary omits text; view=raw returns original Markdown instead. Evidence is paginated with evidenceOffset/evidenceLimit and nextEvidenceOffset; preview limits never truncate originals. Full metadata is opt-in as a structured object; references are opt-in and paginated. Missing/duplicate IDs return null. Never edit from a truncated body.",
+      kind: "query", description: "Inspect ONE record; use knowledge_verify for aggregate post-ingestion checks, knowledge_records for inventory. Read a scoped record by stable ID. Default content view returns body once (12,000 characters), revision/hash, attribution, issues and verified evidence (4,000 excerpt characters total). Follow content.nextOffset with offset to read more; compare hashes across chunks. view=summary omits body and related-statement text unless evidence is explicitly requested; view=raw returns original Markdown instead. Evidence is paginated with evidenceOffset/evidenceLimit and nextEvidenceOffset; preview limits never truncate originals. Full metadata is opt-in as a structured object; references are opt-in and paginated. Missing/duplicate IDs return null. Never edit from a truncated body.",
       input: RecordInput, output: RecordOutput,
       tool: { name: "knowledge_record", label: "Inspect knowledge" },
     },

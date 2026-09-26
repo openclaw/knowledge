@@ -21,8 +21,10 @@ writes, [publication](references/publication.md).
 
 Run this chain in order, stopping at the first evidence-supported resolution:
 
-1. **Search + full page read.** Use `knowledge_lookup` for exact names/aliases/IDs,
-   then `knowledge_grep` for spelling variants and relevant context. Read the
+1. **Search + full page read.** Use `knowledge_grep` to discover entities and
+   relevant context. Use `knowledge_lookup` only for an already-known exact
+   record ID, full title or declared alias; if it returns `missing`, fall back
+   to grep. A name mentioned in conversation is not necessarily a stored alias. Read the
    complete candidate pages and metadata, including role/relationship fields.
 2. **Existing sources.** Inspect relevant retained meetings, documents and
    imported context. Knowledge has no mounted-source or synthesis API; use

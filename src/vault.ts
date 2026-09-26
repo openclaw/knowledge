@@ -30,7 +30,7 @@ export function sameScope(a: unknown, b: Scope): boolean {
 export class SampleVault {
   constructor(private readonly root = SAMPLE_ROOT, private readonly scope: Scope = { visibility: "sample" }, private readonly empty = false, private readonly observe?: (records: LoadedRecord[], scope: Scope) => void) {}
   private read(relative: string) { return readText(this.root, relative); }
-  async scan(overlay?: { record: LoadedRecord; artifacts: Record<string, string> }) {
+  async scan(overlay?: { record?: LoadedRecord; records?: LoadedRecord[]; artifacts: Record<string, string> }) {
     const issues: Issue[] = [];
     const directory = this.empty ? null : await safeRoot(this.root);
     const records: LoadedRecord[] = [];
@@ -72,7 +72,7 @@ export class SampleVault {
       }
     };
     try { if (!this.empty) await walk(); } catch { throw Error("Vault unavailable or scan limit exceeded; no partial catalog returned."); }
-    if (overlay) { const old = records.findIndex(r => r.path === overlay.record.path); if (old >= 0) records.splice(old, 1); records.push(overlay.record); }
+    if (overlay) for (const record of overlay.records ?? (overlay.record ? [overlay.record] : [])) { const old = records.findIndex(r => r.path === record.path); if (old >= 0) records.splice(old, 1); records.push(record); }
     const ontology = resolveOntology(sources, issues);
     const active = new Map(ontology?.definitions.map(d => [d.definition.name, d.definition]) ?? []);
     // Infer only absent page types; never rewrite authored metadata or override an explicit type.

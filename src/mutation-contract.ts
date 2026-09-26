@@ -81,6 +81,7 @@ export const Receipt = Type.Object({
   id: text(96), path: text(500), revision: Type.Integer(), hash: text(64),
   at: text(40), message: text(1000),
   operation: Type.Optional(Type.Union([Type.Literal("correct"), Type.Literal("withdraw")])),
+  items: Type.Optional(Type.Array(Type.Object({ key: text(40), id, path: text(500), revision: Type.Integer(), hash: text(64) }, { additionalProperties: false }), { maxItems: 25 })),
   targetId: Type.Optional(id), replacementId: Type.Optional(id), reason: Type.Optional(text(2000)),
   impact: Type.Optional(LifecycleImpact), indexed: Type.Literal(false), git: Type.Optional(GitCheckpoint),
 }, { additionalProperties: false });

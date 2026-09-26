@@ -71,6 +71,11 @@ export class SqliteIdentityStore implements IdentityStore {
           PRIMARY KEY(scope,request,offset)
         ) STRICT;
         PRAGMA user_version=4; COMMIT;`);
+      // Additive indexes remain readable by older plugin versions. The activity
+      // projection joins exact publication snapshots to history; without this
+      // key every published record scans the entire history table again.
+      db.exec(`CREATE INDEX IF NOT EXISTS history_record_snapshot ON history(scope,id,hash,revision,provenance,sequence);
+        CREATE INDEX IF NOT EXISTS history_scope_sequence ON history(scope,sequence);`);
       return run(db);
     } finally { db.close(); }
   }

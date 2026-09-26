@@ -143,3 +143,23 @@ test('source groups are counted before pagination; repeated saves and new activi
   assert.equal(next.items[0].group.counts.commitment,1);
   assert.equal(next.nextBefore,null);
 });
+
+test('Recent batches attendee summaries only for the current group page',async t=>{
+  const f=await setup(t), person=await f.page('Alex','person');
+  for(let i=0;i<21;i++) await f.service.create_relationship({requestId:randomUUID(),expectedOntologyFingerprint:f.fingerprint,title:`Attendance ${i}`,body:'Alex attended.',from:person.id,to:f.source.id,label:'attended',evidence:f.evidence,attribution:'Synthetic fixture',source_page:f.source.id},f.owner);
+  const input={groupBySource:true,sourceId:f.source.id,includeEndpoints:true,limit:1};
+  const first=await f.service.recent(input,f.owner);
+  assert.ok(Check(contract.operations.recent.output,first));
+  const group=first.items[0].group;
+  assert.equal(group.records.length,20);
+  assert.deepEqual(new Set(group.endpoints.map(r=>r.id)),new Set([person.id,f.source.id]));
+  assert.ok(group.endpoints.every(r=>r.body===undefined && r.evidence===undefined));
+  const next=await f.service.recent({...input,recordOffset:group.nextRecordOffset,upperSequence:first.upperSequence},f.owner);
+  assert.equal(next.items[0].group.records.length,2);
+  assert.deepEqual(new Set(next.items[0].group.endpoints.map(r=>r.id)),new Set([person.id,f.source.id]));
+  assert.equal((await f.service.recent({...input,includeEndpoints:false},f.owner)).items[0].group.endpoints,undefined);
+  const record=(await f.service.record({id:person.id},f.owner)).record;
+  await f.service.withdraw({requestId:randomUUID(),id:person.id,expectedRevision:record.revision,expectedHash:record.hash,reason:'Fixture withdrawal'},f.owner);
+  const after=await f.service.recent({...input,upperSequence:first.upperSequence},f.owner);
+  assert.ok(after.items.every(item=>!item.group?.endpoints.some(r=>r.id===person.id)),'Pinned history cannot expose a now-withdrawn endpoint');
+});

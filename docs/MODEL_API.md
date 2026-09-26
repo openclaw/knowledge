@@ -216,6 +216,15 @@ in with `historical:true`; withdrawn records remain excluded. Evidence is limite
 to three references per connection; `evidenceTruncated` signals further evidence
 available from record inspection. Markdown links are not relationship assertions.
 
+`includeEndpoints:true` adds deduplicated, currently eligible endpoint summaries
+for only the returned connection page. Historical edges never expose withdrawn
+or ambiguous endpoints. The Recent feature query supports the same option on
+each returned source group (at most 40 endpoint summaries for 20 records),
+including `recordOffset` continuation pages. The inspector uses these projections
+instead of issuing one record read per relationship or attendee. Page content
+renders independently of secondary connections/history; late panel responses
+remain fenced to their original navigation generation.
+
 Native UI offers New claim/New relationship alongside New page. Advanced source
 controls accept file uploads or existing evidence with exact locators. Drafts
 retain operation kind, all form values and exact submitted payload/preconditions;
@@ -235,3 +244,9 @@ Default records/ontology/status counts now describe current eligible knowledge.
 Use exact record metadata and history for obsolete assertions and withdrawal
 reasons; inactive dependencies are not automatically repaired. The complete
 portable/recovery/access contract is in [CORRECTIONS.md](CORRECTIONS.md).
+
+## Ingestion operations
+
+See [INGESTION_OPERATIONS.md](INGESTION_OPERATIONS.md) for `knowledge_verify`,
+`knowledge_publish_batch`, `knowledge_source_check`, local batch references,
+source replay/reconciliation, and bounded mutation recovery.

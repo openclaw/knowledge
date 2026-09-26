@@ -18,7 +18,12 @@ withdrawal ship as agent operations, without browser forms or dialogs. See
 
 Knowledge is a native OpenClaw plugin, informed by gbrain's knowledge model and workflows—not a compatible reimplementation or an attempt to reproduce its full feature set.
 
-Knowledge is intended to replace memory-wiki's knowledge-vault role, without depending on that plugin or taking over OpenClaw's memory or context-engine slots. Replacement does not imply feature parity or automatic migration.
+Knowledge replaces memory-wiki's knowledge-vault role without depending on it.
+The provider-neutral-memory branch also supports selection as OpenClaw's memory
+provider, with shared read/search/health and ordinary-turn remembering guidance.
+It does not take the context-engine slot. Replacement does not imply feature
+parity, automatic migration, dreaming, startup replacement, or pre-compaction
+saves. See [MEMORY_PROVIDER.md](MEMORY_PROVIDER.md) for capability boundaries.
 
 The first release should complete this loop:
 
@@ -125,7 +130,7 @@ Use memory-wiki as a source of suitable engineering and regression cases, not as
 
 Prefer supported OpenClaw SDK helpers; otherwise adapt small modules with their relevant tests and attribution. Do not import memory-wiki internals. Knowledge must own its authoritative editable-record format, external-edit reconciliation, access enforcement, correction/withdrawal semantics, and recoverable file/SQLite publication contract.
 
-Memory-wiki's compiled-page authority model, complete claim schema, search service, memory bridges, and automation are not v1 requirements. Optional shared-memory search integration and migration tooling remain follow-up candidates. Reuse must not expand the product scope.
+Memory-wiki's compiled-page authority model, complete claim schema, search service, memory bridges, and automation are not v1 requirements. Shared-memory read integration is implemented on the provider-neutral-memory branch; migration tooling remains a follow-up. Reuse must not expand the product scope.
 
 ### 5.2 Introspection is part of feature delivery
 

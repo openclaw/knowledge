@@ -5,9 +5,13 @@
 1. Confirm `knowledge_status` is non-sample and `writesEnabled: true`. Retain the
    observed vault UUID (`vault`) as `expectedVaultId` on uploads and saves.
 2. Search for an existing page before creating one. Match source IDs/URLs,
-   original hashes, title/date and content, not merely a similar title. There is
-   no automatic content-deduplication service. Identical content with a new request
-   ID can create a duplicate. Reuse verified existing evidence/pages when possible.
+   original hashes, title/date and content, not merely a similar title. For source-bound batches use `knowledge_source_check` with provider, stable
+   source key and exact original-byte sha256 before uploading again. An unchanged
+   receipt is reusable publication history: verify its IDs, inspect dependencies
+   for follow-on work, and never recreate inactive outputs. A changed source needs
+   explicit reconciliation. Legacy individual writes are not in this registry;
+   "missing" does not prove the source was never ingested. Same content under a
+   different source key is not automatically semantically deduplicated. Reuse verified existing evidence/pages when possible.
 3. For edits read the entire body and observed revision/hash; request
    `includeMetadata: true` if changing domain fields. Preserve unrelated prose.
    Omit `fields` to preserve them; supplying `fields` replaces the complete object.
@@ -40,6 +44,55 @@ Only `state: complete` returns usable `evidence`. Supply that object in
 Attachments append and existing evidence remains; uploading alone creates no
 page. Failed page publication can leave an unattached retained file: report it,
 reuse its receipt, and do not promise automatic garbage collection.
+
+## Canonical ingestion sequence
+
+1. `knowledge_status` and targeted `knowledge_ontology` definitions.
+2. `knowledge_source_check` for a stable provider/key and exact original hash;
+   `knowledge_grep` to discover existing entities and legacy outputs, or
+   `knowledge_lookup` only for already-known exact record IDs, full titles or
+   declared aliases (fall back to grep on `missing`). Inspect records and bounded
+   `knowledge_connections`. Do not confuse source identity with speaker identity.
+3. `knowledge_attach` uploads bytes; `knowledge_attachment` downloads them.
+4. Prepare reconciled page/claim/relationship outputs, then
+   `knowledge_publish_batch` for related records (up to 25, at most 1 MiB).
+   Use the individual create/save tools for isolated writes or follow-on work.
+5. `knowledge_verify` once for all returned IDs and supplied expectations.
+   Read substantive prose/evidence for semantic checks and investigate exceptions.
+
+## Publish related records together
+
+Use one generated UUID `requestId`, observed `expectedVaultId` and
+`expectedOntologyFingerprint`, and an `items` array. Each item contains a unique
+`key`, `kind` (`page`, `claim`, `relationship`), and ordinary write `input` without
+its own request/vault/ontology fields. Upload originals first; inline `source`
+text is not accepted inside a batch. Page edits retain exact revision/hash fences.
+
+Typed ID positions accept `@key`, including forward references, dependencies,
+entities, owner, endpoints, source_page, identity candidates and continuity IDs.
+Page edit `id` must identify an existing record, never `@key`. Authored body
+wikilinks can use `[[ @key|label ]]` **without the spaces**, e.g.
+`[[@meeting|Review]]` or `[[@person|Morgan]]`; these become stable-ID links at
+publication, including self-links. Ordinary prose, fields, attribution, evidence
+and original bytes are not substituted. Resolve actual entities before batching.
+
+The whole batch is validated before acceptance. Receipt `items` maps keys to
+IDs/paths/revisions/hashes; every item shares the batch's requestId, publication
+state and Git checkpoint. A crash can leave partially installed files, but reads
+are blocked until the existing journal finishes. Replay the exact request or
+`knowledge_resume` with the batch requestId. No automatic rollback or conflict
+bypass. Preserve the receipt; an accepted batch is not yet published.
+
+An optional `source: {provider, key, sha256}` binds this **publication batch** to
+an exact retained original. Its hash must match evidence on a batch record.
+An unchanged source returns the prior receipt **without applying the new input**.
+Changed bytes require `expectedPreviousRequestId` from source_check, after the
+agent reconciles existing pages/assertions; this is not permission to overwrite
+or duplicate them. Semantic correction still uses `knowledge_correct`.
+Choose a stable key for a logical publication unit (include a stable segment ID
+for split meetings). For additional batches, use separate stable unit keys or omit
+source binding and retain their receipts; the first receipt does not cover all
+later entity enrichment. There is no extraction/workflow-completion ledger.
 
 ## Publish one page
 
@@ -78,11 +131,12 @@ change; the observer may have advanced the revision.
 ## Retry and reconcile
 
 The shared service serializes vault operations, including reads, so simultaneous
-tool/UI calls cannot invalidate one another's publication snapshot. This is not
-a batch transaction or cross-process writer lock. Keep dependent calls sequential
+tool/UI calls cannot invalidate one another's publication snapshot. Individual calls are not
+a batch transaction or cross-process writer lock; publish_batch is the explicit
+multi-record journal operation. Keep dependent calls sequential
 (create before linking; read current preconditions before editing).
 
-- Lost/uncertain save response: inspect `knowledge_mutation({requestId})`. Replay
+- Lost/uncertain save response: inspect `knowledge_mutation({requestId, includeFiles: false})`. Replay
   the exact payload with that ID, or use `knowledge_resume({requestId})` for a
   known accepted publication. Never replace an uncertain request with a new ID.
   A null receipt is not proof of failure while a call is still in flight; wait
@@ -112,7 +166,10 @@ a batch transaction or cross-process writer lock. Keep dependent calls sequentia
   is an agent work log, not a Knowledge ingestion checkpoint. If it is lost,
   inspect history and existing pages before proceeding. When uncertain whether
   an item was published, stop that item rather than create a possible duplicate.
-  No general multi-record ingestion atomicity, rollback, semantic dedup or job-resume guarantee is available. Explicit correction is the one supported two-record logical mutation.
+  `knowledge_publish_batch` provides a bounded multi-record logical publication,
+  not whole-workflow atomicity, rollback, semantic dedup or extraction-job resume.
+  For recovery material request `knowledge_mutation` files only when needed and
+  follow `nextOffset` (at most 3 files/call).
 
 ## Supported structured assertions
 

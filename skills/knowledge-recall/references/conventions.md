@@ -9,8 +9,10 @@ existing tools, not a separate ingestion engine.
 - Use `knowledge_status({})` to establish availability and the current scope.
   Sample mode is read-only. A missing/disabled tool is a limitation, not a reason
   to write vault files directly or change configuration.
-- Knowledge is separate from conversation recall, the host memory provider and
-  procedural skills. A request to save to Knowledge does not authorize editing
+- Knowledge can be the selected host memory provider, but remains separate from
+  transcript recall and procedural skills. Its provider prompt authorizes selective
+  ordinary-turn remembering, not background extraction, migration or scheduling.
+  A request to save to Knowledge does not authorize editing
   USER.md, MEMORY.md, skills, schedulers, or another conversation's records.
 - Before authoring, discover types with `knowledge_ontology({})`, then inspect
   `{"view":"definitions","name":"<type>"}`. Follow `nextOffset` as needed.
@@ -77,9 +79,14 @@ existing tools, not a separate ingestion engine.
 - Source context, employment and speaker identity are distinct. A participant
   label containing a company name is not sufficient to publish `works_at`.
 
-- Resolve by exact ID/name/alias with `knowledge_lookup`, then inspect candidates.
-  Search spelling variants with `knowledge_grep` when useful. A matching name or
-  email domain is a candidate, not proof. Never select the first ambiguous hit.
+- Use `knowledge_grep` for searches, including people, projects and pages named
+  in conversation. Use `knowledge_lookup` only when the exact record ID, full
+  title or declared alias is already known; a familiar entity name is not
+  necessarily its stored title or alias. Lookup does not perform keyword search.
+  If lookup returns `missing`, search with grep before treating the identity as
+  unresolved or creating a new page. Inspect candidates with `knowledge_record`.
+  A matching name or email domain is a candidate, not proof. Never select the
+  first ambiguous hit.
 - Use observed stable IDs for tool calls. Filenames are descriptive slugs; IDs
   remain in frontmatter and survive renames. Inside pages use wikilinks to
   observed paths/titles or relative Markdown links. These create derived
@@ -95,7 +102,20 @@ existing tools, not a separate ingestion engine.
 
 ## Readback and reporting
 
-- Inspect saved records with `knowledge_record`; follow `content.nextOffset` and
+- First run `knowledge_verify` over all published IDs (up to 100/call), using
+  receipt revision/hash and independently supplied owner/due/occurrence expectations.
+  `null` asserts absence; omission skips a comparison. It validates all retained
+  evidence and references, current eligibility and reconciled indexing, returning
+  exceptions only. Follow `nextOffset` with the same records and returned snapshot.
+  A changed snapshot means restart. This replaces repetitive structural readbacks,
+  not source reading, semantic checks, or checking that intended links target the
+  correct entity. Investigate exceptions before marking complete.
+- For identity/revision checks use `knowledge_record({id, view: "summary"})`.
+  Request metadata only when needed; keep evidence previews bounded (for example
+  `evidenceLimit: 3, maxEvidenceChars: 1000`). Do not fetch every body or download
+  every original merely to confirm publication. Full source reads remain required
+  when substantive verification needs them.
+- Inspect substantive saved prose with `knowledge_record`; follow `content.nextOffset` and
   `nextEvidenceOffset` independently. Compare record hashes across chunks and
   restart if changed. A preview is not the complete source.
 - Check `knowledge_record({id, view: "content"})` results: each intended inline
@@ -117,7 +137,8 @@ existing tools, not a separate ingestion engine.
   correctness of a speaker identification. Read the cited passage too. Download
   full originals with `knowledge_attachment({id,path,sha256,offset})`, following
   `nextOffset` until null when the preview is insufficient.
-- Verify discovery via exact lookup or a distinctive keyword. Failed retrieval
+- `knowledge_verify` checks keyword-index membership. Use exact lookup or a distinctive
+  keyword when evaluating retrieval quality beyond structural membership. Failed retrieval
   (`index.state: unavailable`, `total: null`) is not an empty vault; incomplete
   coverage is not proof of absence. Use diagnostics when warranted.
 - Report created/updated/reused pages with title, stable ID and returned local
@@ -125,3 +146,11 @@ existing tools, not a separate ingestion engine.
   links, absolute vault roots, hosted URLs, or push private vaults to make links.
   State retained sources, verification performed, unresolved identities, conflicts
   and partial work. Do not call a multi-page workflow complete from one receipt.
+
+## Comparable-run measurements
+
+For ingestion trials record tool-call count, serialized response bytes (when the
+host exposes them), retries, elapsed time, and structural verification failures.
+Separate acquisition/upload from publication/verification, report unavailable
+metrics as unavailable, and compare similar source/output sizes. Backend fixture
+timing is not a real model-driven ingestion benchmark.

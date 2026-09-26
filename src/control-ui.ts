@@ -204,7 +204,7 @@ export default defineControlUiPlugin({
         card.append(evidence); return card;
       }
 
-      async function showDetail(id: string, n: number, target: HTMLElement, pages = 1) {
+      async function showDetail(id: string, n: number, target: HTMLElement, pages = 1, waitForPanels = false) {
         const pending: Promise<unknown>[] = [];
         const result = await feature.invoke("record", { id, maxChars: 65536, includeMetadata: true, includeReferences: true, referenceLimit: 20 });
         if (!live(n)) return;
@@ -326,17 +326,18 @@ export default defineControlUiPlugin({
           }
         }
         const claimSurface = el("div", undefined, "knowledge-surface knowledge-claim-groups"); claims.append(claimSurface);
+        const connectionLoading = el("p", "Loading connections…", "knowledge-muted"); refs.append(connectionLoading);
+        const claimsLoading = el("p", "Loading saved claims…", "knowledge-muted"); if (r.kind === "page") claimSurface.append(claimsLoading);
         let linkOffset = 0, snapshot: string | undefined; const claimGroups = new Map<string, HTMLElement>();
         async function moreConnections() {
-          const page = await feature.invoke("connections", { id, offset: linkOffset, limit: 20, includeCards: true }); if (!live(n)) return;
+          const page = await feature.invoke("connections", { id, offset: linkOffset, limit: 20, includeCards: true, includeEndpoints: true }); if (!live(n)) return;
           if (snapshot && snapshot !== page.snapshot) throw Error("Connections changed; reopen this page to refresh."); snapshot = page.snapshot;
-          const [cards, endpoints] = await Promise.all([
-            page.connections.map(link => link.direction === "claims" ? claimCard(link.record, n, id) : undefined),
-            Promise.all(page.connections.map(async link => {
+          const cards = page.connections.map(link => link.direction === "claims" ? claimCard(link.record, n, id) : undefined);
+          const endpoints = page.connections.map(link => {
               const targetId = link.direction === "incoming" ? link.from : link.direction === "outgoing" ? link.to : undefined;
-              return targetId ? (await feature.invoke("record", { id: targetId, view: "summary" })).record : null;
-            })),
-          ]); if (!live(n)) return;
+              return targetId ? page.endpoints?.find(record => record.id === targetId) ?? null : null;
+            });
+          connectionLoading.remove(); claimsLoading.remove();
           for (const [i, link] of page.connections.entries()) {
             if (link.direction === "claims" && r.kind === "page") { const card = cards[i]; if (!card || (r.type === "meeting" && (link.record.sourceEvent || link.record.card?.source?.id !== id))) continue; if (card.dataset.kind === "Owned commitments") { owned.hidden = false; owned.append(card); continue; } const kind = card.dataset.kind!; let group = claimGroups.get(kind); if (!group) { group = el("div", undefined, "knowledge-claim-group"); group.append(el("h4", label(kind))); claimGroups.set(kind, group); claimSurface.append(group); } group.append(card); const count = group.querySelectorAll(".knowledge-claim").length; group.querySelector("h4")!.textContent = `${({belief:"Beliefs",commitment:"Commitments",decision:"Decisions",preference:"Preferences",fact:"Facts",event:"Events"} as Record<string,string>)[kind] ?? label(kind)} · ${count}`; }
             else { const row = el("div", undefined, "knowledge-connection"), target = endpoints[i] ?? link.record;
@@ -371,7 +372,12 @@ export default defineControlUiPlugin({
           if (!history.entries.length) historyList.append(el("p", "No saved history recorded."));
           if (history.nextOffset !== null) historyList.append(el("p", "Showing the latest 10 revisions."));
         }).catch(error => { if (live(n)) { checkpointValue.textContent = "Unavailable"; historyList.append(failure(error)); } }));
-        await Promise.all(pending);
+        // Commit the primary content now. Secondary panels retain this view's
+        // generation fence, so delayed responses cannot replace a newer page.
+        const panels = Promise.all(pending).catch(error => { if (live(n)) { connectionLoading.remove(); claimsLoading.remove(); connections.append(failure(error)); } });
+        // Background replacement needs the complete tree to preserve existing
+        // expanded evidence, focus and scroll state. Only navigation streams it.
+        if (waitForPanels) await panels;
       }
       async function browse(n: number, target: HTMLElement) {
         const result = await feature.invoke("records", { kind, offset, limit: 50, includeCards: kind === "claim", includeEndpoints: kind === "relationship", ...(type ? { type } : {}), ...(browseQuery ? { query: browseQuery } : {}), ...(includeHistory ? { lifecycle: "all" } : {}), ...(originFilter && kind === "claim" ? { assertionOrigin: originFilter } : {}) });
@@ -409,7 +415,7 @@ export default defineControlUiPlugin({
         const results = el("div", undefined, "knowledge-browse-results"); results.append(panel); layout.append(facets, results); target.replaceChildren(layout);
       }
       async function recent(n: number, target: HTMLElement) {
-        const activity = await feature.invoke("recent", { limit: 20, groupBySource: true, ...recentCursor }); if (!live(n)) return;
+        const activity = await feature.invoke("recent", { limit: 20, groupBySource: true, includeEndpoints: true, ...recentCursor }); if (!live(n)) return;
         if (!recentCursor) recentSequence = activity.upperSequence;
         const feed = el("div", undefined, "knowledge-feed");
         let currentDay = "", group: HTMLElement | undefined, lifecycleGroup: HTMLElement | undefined; let firstSource = true;
@@ -463,12 +469,12 @@ export default defineControlUiPlugin({
             attendanceCopy.append(attendanceTitle, el("span", `${entry.group.counts.attendees ?? 0} attendance connections · each with its own attribution`, "knowledge-feed-meta"));
             attendanceSummary.append(tile("attended", 28, "relationship"), attendanceCopy, disclosureLabel("Show all", "Hide")); attendance.append(attendanceSummary, attendanceRows);
             const namesSeen: string[] = []; let attendanceShown = false;
-            const appendRecords = async (records: typeof entry.group.records) => {
+            const appendRecords = (records: typeof entry.group.records, endpoints = entry.group!.endpoints ?? []) => {
               for (const record of [...records].sort((a, b) => ["page", "relationship", "claim"].indexOf(a.kind) - ["page", "relationship", "claim"].indexOf(b.kind))) {
                 if (record.sourceEvent) continue;
                 if (record.kind === "relationship" && record.label === "attended" && record.to === source.id) {
                   if (!attendanceShown) { detail.insertBefore(attendance, claims); attendanceShown = true; }
-                  const person = record.from ? (await feature.invoke("record", { id: record.from, view: "summary" })).record : null;
+                  const person = endpoints.find(person => person.id === record.from);
                   if (!live(n)) return;
                   const row = el("div", undefined, "knowledge-attendee"); if (person) { row.append(summaryLink(person)); namesSeen.push(person.title); } else row.append(el("span", "Person unavailable"));
                   row.append(el("p", record.attributionConfidence?.basis ?? "No attribution basis recorded"), confidenceView(record.attributionConfidence, true)); attendanceRows.append(row);
@@ -477,9 +483,9 @@ export default defineControlUiPlugin({
                 else { const row = saveRow(record, record.change === "created" ? "New" : record.change === "updated" ? "Updated" : "Observed in vault"); if (record.id === source.id) sourceRow.replaceWith(row); else pages.append(row); }
               }
             };
-            await appendRecords(entry.group.records);
+            appendRecords(entry.group.records);
             let recordOffset = entry.group.nextRecordOffset;
-            if (recordOffset != null) { const more = button(`Load ${entry.group.total - recordOffset} more from this source`, () => { more.disabled = true; void (async () => { const page = await feature.invoke("recent", { groupBySource: true, sourceId: source.id, recordOffset: recordOffset!, upperSequence: activity.upperSequence }); if (!live(n)) return; const next = page.items.find(item => item.group?.source.id === source.id)?.group; if (!next) throw Error("Source changed; reopen Recent to refresh."); await appendRecords(next.records); recordOffset = next.nextRecordOffset; if (recordOffset == null) more.remove(); else { more.textContent = `Load ${next.total - recordOffset} more from this source`; detail.append(more); } })().catch(error => detail.append(failure(error))).finally(() => { more.disabled = false; }); }, "knowledge-quiet"); detail.append(more); }
+            if (recordOffset != null) { const more = button(`Load ${entry.group.total - recordOffset} more from this source`, () => { more.disabled = true; void (async () => { const page = await feature.invoke("recent", { groupBySource: true, includeEndpoints: true, sourceId: source.id, recordOffset: recordOffset!, upperSequence: activity.upperSequence }); if (!live(n)) return; const next = page.items.find(item => item.group?.source.id === source.id)?.group; if (!next) throw Error("Source changed; reopen Recent to refresh."); appendRecords(next.records, next.endpoints); recordOffset = next.nextRecordOffset; if (recordOffset == null) more.remove(); else { more.textContent = `Load ${next.total - recordOffset} more from this source`; detail.append(more); } })().catch(error => detail.append(failure(error))).finally(() => { more.disabled = false; }); }, "knowledge-quiet"); detail.append(more); }
             disclosure.append(summary, detail); row.append(disclosure);
           } else if (lifecycle) {
             row.classList.add("knowledge-activity-event");
@@ -532,7 +538,7 @@ export default defineControlUiPlugin({
         }
         try {
           await (async () => {
-          if (selectedId) return await showDetail(selectedId, n, target, connectionPages);
+          if (selectedId) return await showDetail(selectedId, n, target, connectionPages, background);
           if (tab === "recent") return await recent(n, target);
           if (tab === "browse") return await browse(n, target);
           if (tab === "ontology") { const result = await loadVocabulary(feature, true); if (live(n)) target.replaceChildren(button("← Knowledge", () => navigate("recent"), "knowledge-quiet"), button("Vault status", () => navigate("diagnostics"), "knowledge-quiet"), ontologyView(result, open, () => navigate("diagnostics"))); return; }
