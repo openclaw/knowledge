@@ -54,37 +54,7 @@ export function evidenceView(feature: FeatureClient<typeof contract>, result: De
     retained.className = e.verified ? "knowledge-retained" : "knowledge-unverified";
     retained.prepend(icon(e.verified ? "badgeCheck" : "info", 12)); metadata.append(retained);
     quote.append(metadata);
-    const download = el("button", "Original file"), status = el("p");
-    download.type = "button"; download.prepend(icon("download", 16)); download.disabled = !e.verified;
-    status.className = "knowledge-download-status"; status.setAttribute("role", "status");
-    download.onclick = async () => {
-      download.disabled = true;
-      let writer: { write(bytes: Uint8Array): Promise<void>; close(): Promise<void>; abort(): Promise<void> } | undefined;
-      try {
-        // Stream to disk when the browser supports it; otherwise use its Blob
-        // download facility. Never render source HTML/SVG in the app's origin.
-        const picker = (window as unknown as { showSaveFilePicker?: (options: { suggestedName: string }) => Promise<{ createWritable(): Promise<NonNullable<typeof writer>> }> }).showSaveFilePicker;
-        if (picker) writer = await (await picker.call(window, { suggestedName: e.filename ?? e.path.split("/").at(-1)! })).createWritable();
-        const chunks: ArrayBuffer[] = []; let offset = 0;
-        while (true) {
-          if (!alive()) throw Error("Record view changed; download canceled.");
-          const page = await feature.invoke("attachment", { id, path: e.path, sha256: e.sha256, offset });
-          const binary = atob(page.data), bytes = Uint8Array.from(binary, c => c.charCodeAt(0));
-          if (page.offset !== offset || page.sha256 !== e.sha256) throw Error("Source changed during download");
-          if (writer) await writer.write(bytes); else chunks.push(bytes.buffer);
-          status.textContent = `${(offset + bytes.length).toLocaleString()} / ${page.size.toLocaleString()} bytes`;
-          if (page.nextOffset === null) break;
-          offset = page.nextOffset;
-        }
-        if (writer) await writer.close();
-        else {
-          const url = URL.createObjectURL(new Blob(chunks, { type: "application/octet-stream" }));
-          const link = el("a"); link.href = url; link.download = e.filename ?? e.path.split("/").at(-1)!; link.click(); setTimeout(() => URL.revokeObjectURL(url), 60000);
-        }
-        status.textContent = "Original file downloaded.";
-      } catch (error) { await writer?.abort().catch(() => {}); status.textContent = redact(String(error)); }
-      finally { download.disabled = !e.verified; }
-    };
+    const { download, status } = originalDownload(feature, id, e, alive, redact);
     if (e.verified) actions.append(download);
     if (correction && !correction.parentElement) actions.append(correction);
     article.append(quote, actions, status); group.node.append(article);
@@ -110,4 +80,43 @@ export function evidenceView(feature: FeatureClient<typeof contract>, result: De
     if (offset < expansion.count) void loadMore();
   }
   return root;
+}
+
+/** Download control for one retained original, streamed through `id`'s attachment authority.
+ * `compact` renders an icon-only button for dense lists such as the Sources rail. */
+export function originalDownload(feature: FeatureClient<typeof contract>, id: string, e: FileEvidence, alive: () => boolean, redact: (s: string) => string, compact = false) {
+  const name = e.filename ?? e.path.split("/").at(-1)!;
+  const download = el("button", compact ? undefined : "Original file"), status = el("p");
+  download.type = "button"; download.prepend(icon("download", compact ? 14 : 16)); download.disabled = !e.verified;
+  if (compact) { download.setAttribute("aria-label", `Download ${name}`); download.title = `Download ${name}`; }
+  status.className = "knowledge-download-status"; status.setAttribute("role", "status");
+  download.onclick = async () => {
+    download.disabled = true;
+    let writer: { write(bytes: Uint8Array): Promise<void>; close(): Promise<void>; abort(): Promise<void> } | undefined;
+    try {
+      // Stream to disk when the browser supports it; otherwise use its Blob
+      // download facility. Never render source HTML/SVG in the app's origin.
+      const picker = (window as unknown as { showSaveFilePicker?: (options: { suggestedName: string }) => Promise<{ createWritable(): Promise<NonNullable<typeof writer>> }> }).showSaveFilePicker;
+      if (picker) writer = await (await picker.call(window, { suggestedName: name })).createWritable();
+      const chunks: ArrayBuffer[] = []; let offset = 0;
+      while (true) {
+        if (!alive()) throw Error("Record view changed; download canceled.");
+        const page = await feature.invoke("attachment", { id, path: e.path, sha256: e.sha256, offset });
+        const binary = atob(page.data), bytes = Uint8Array.from(binary, c => c.charCodeAt(0));
+        if (page.offset !== offset || page.sha256 !== e.sha256) throw Error("Source changed during download");
+        if (writer) await writer.write(bytes); else chunks.push(bytes.buffer);
+        status.textContent = `${(offset + bytes.length).toLocaleString()} / ${page.size.toLocaleString()} bytes`;
+        if (page.nextOffset === null) break;
+        offset = page.nextOffset;
+      }
+      if (writer) await writer.close();
+      else {
+        const url = URL.createObjectURL(new Blob(chunks, { type: "application/octet-stream" }));
+        const link = el("a"); link.href = url; link.download = name; link.click(); setTimeout(() => URL.revokeObjectURL(url), 60000);
+      }
+      status.textContent = "Original file downloaded.";
+    } catch (error) { await writer?.abort().catch(() => {}); status.textContent = redact(String(error)); }
+    finally { download.disabled = !e.verified; }
+  };
+  return { download, status };
 }

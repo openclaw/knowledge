@@ -1,7 +1,7 @@
 import { defineControlUiPlugin } from "openclaw/plugin-sdk/control-ui";
 import { createFeatureClient, type FeatureOutput } from "openclaw/plugin-sdk/feature-contract";
 import { contract } from "./contract.js";
-import { evidenceView } from "./evidence-view.js";
+import { evidenceView, originalDownload } from "./evidence-view.js";
 import { loadVocabulary } from "./inspection-client.js";
 import { ontologyView } from "./ontology-view.js";
 import { icon, type IconName } from "./ui-icons.js";
@@ -29,6 +29,20 @@ const tile = (type: string, size = 28, kind = "page") => { const [glyph, tone] =
 const date = (text: string) => formatSourceDate(text);
 const time = (text: string) => new Date(text).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", timeZoneName: "short" });
 
+/** Summary label whose text swaps with its details element's open state. */
+const disclosureLabel = (closed: string, opened: string) => { const control = el("span", undefined, "knowledge-disclosure-label"); control.append(el("span", closed, "knowledge-when-closed"), el("span", opened, "knowledge-when-open"), icon("chevronDown", 14)); return control; };
+/** Drop a leading `# Title` heading that repeats the page title shown in the entity header. */
+const withoutTitleHeading = (body: string, title: string) => { const match = /^\s*#[ \t]+(.+?)[ \t#]*(?:\r?\n|$)/.exec(body); return match && match[1].trim() === title.trim() ? body.slice(match[0].length).replace(/^\s*\n/, "") : body; };
+/** Page bodies longer than this preview behind "Show full notes". */
+const longBodyChars = 3000;
+/** Short file kind for a retained original, from its recorded media type or extension. */
+const fileKind = (e: { mediaType?: string; filename?: string; path: string }) => {
+  const kinds: Record<string, string> = { "text/plain": "Text", "text/markdown": "Markdown", "application/json": "JSON", "application/pdf": "PDF", "text/html": "HTML", "text/csv": "CSV" };
+  const media = e.mediaType?.split(";")[0].trim().toLowerCase();
+  return (media && kinds[media]) ?? (e.filename ?? e.path).split(".").at(-1)?.toUpperCase() ?? "File";
+};
+/** Human-scale byte count, e.g. "49 KB". */
+const fileSize = (bytes: number) => bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${Math.round(bytes / 1024)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 const rawBlock = (label: string, text: string) => { const n = el("details"); n.append(el("summary", label), el("pre", text)); return n; };
 
 export default defineControlUiPlugin({
@@ -237,13 +251,16 @@ export default defineControlUiPlugin({
           const versions = el("section", undefined, "knowledge-versions"); versions.append(el("h3", "Versions")); main.append(versions);
           pending.push((async () => { const seen = new Set<string>(), queue = [r.id]; while (queue.length && seen.size < 10) { const nextId = queue.shift()!; if (seen.has(nextId)) continue; seen.add(nextId); const version = nextId === r.id ? r : (await feature.invoke("record", { id: nextId, includeMetadata: true, maxChars: 4000 })).record; if (!live(n)) return; if (!version) continue; const item = el("div", undefined, "knowledge-version"); item.append(el("code", `rev ${version.revision}`), button(version.body || version.title, () => open(version.id), "knowledge-quiet"), el("small", `${version.lifecycle === "active" ? "Current · saved" : version.lifecycle === "withdrawn" ? "Withdrawn" : "Replaced"} ${version.metadata?.lifecycle_change?.at ? date(version.metadata.lifecycle_change.at) : version.recordedAt ? date(version.recordedAt) : "time not recorded"}`)); if (version.id === r.id) { item.classList.add("knowledge-version-viewing"); item.append(chip("Viewing")); } versions.append(item); for (const linked of [version.metadata?.supersedes, version.metadata?.superseded_by]) if (linked && !seen.has(linked)) queue.push(linked); } if (queue.length) versions.append(el("p", "Showing 10 linked versions. Open a version to continue.")); })().catch(error => { if (live(n)) versions.append(failure(error)); }));
         }
-        const body = el("div", undefined, "knowledge-summary");
-        body.append(markdownView(r.body ?? "", targetId => {
+        const body = el("div", undefined, "knowledge-summary"), bodyText = withoutTitleHeading(r.body ?? "", r.title);
+        body.append(markdownView(bodyText, targetId => {
           if (targetId !== id) { open(targetId); return; }
           files.open = true;
           const originals = files.querySelector<HTMLDetailsElement>(".knowledge-retained-originals");
           if (originals) { originals.open = true; originals.scrollIntoView({ block: "nearest" }); }
         }, result.links));
+        // Long agent-written notes preview behind a disclosure so structured
+        // sections (attendance, claims) stay near the top of the page.
+        if (bodyText.length > longBodyChars) { const notes = el("details", undefined, "knowledge-notes-toggle"), summary = el("summary"); notes.dataset.readingKey = `notes:${id}`; summary.append(disclosureLabel("Show full notes", "Show less")); notes.append(summary); body.dataset.clamped = "true"; body.append(notes); }
         body.append(el("span", `${r.writtenByAgentId ? `Saved by ${agentName(r.writtenByAgentId)}` : "Author not recorded"} · revision ${r.revision}${meta?.updated_at ? ` · updated ${date(meta.updated_at)}` : ""}`, "knowledge-summary-meta"));
         if (meta?.attribution_confidence) {
           const confidence = meta.attribution_confidence;
@@ -287,13 +304,34 @@ export default defineControlUiPlugin({
         const historyButton = button("History", () => { historyList.hidden = !historyList.hidden; historyButton.setAttribute("aria-expanded", String(!historyList.hidden)); }, "knowledge-quiet"); historyButton.prepend(icon("clock", 14)); historyButton.setAttribute("aria-expanded", "false");
         fileActions.append(raw, historyButton); filePanel.append(fileActions, historyList, technical); files.append(filePanel); aside.append(files);
         if (r.kind === "page" && result.sourceFiles?.length) {
-          const sources = el("section", undefined, "knowledge-sources"); sources.append(el("h3", "Sources"), el("p", `${result.sourceFilesTotal ?? result.sourceFiles.length} files · ${result.sourceFiles.reduce((sum, file) => sum + file.citations, 0)} citations from this ${r.type === "meeting" ? "meeting’s" : "source’s"} claims`, "knowledge-muted"));
-          for (const file of result.sourceFiles) { const item = el("div", undefined, "knowledge-source-file"); item.append(el("code", file.evidence.filename ?? file.evidence.path.split("/").at(-1)), el("p", `${file.evidence.mediaType ?? "Retained file"}${file.evidence.size !== undefined ? ` · ${file.evidence.size.toLocaleString()} bytes` : ""}`), el("p", file.citations ? `${file.citations} cited passages` : "Not cited directly"));
-            // Downloads use the citing claim when the source page doesn't itself retain this file.
-            const own = result.evidence?.some(e => e.path === file.evidence.path && e.sha256 === file.evidence.sha256);
-            if (own) { item.append(el("p", file.evidence.verified ? "File verified" : "Source file unavailable")); item.append(evidenceView(feature, { ...result, evidence: [file.evidence], evidenceTotal: 1, evidenceSourceTotal: 1, nextEvidenceOffset: null }, () => live(n), errorText)); } else item.append(el("p", file.evidence.verified ? "File verified · download from the citing claim" : "Source file unavailable")); sources.append(item);
+          // One compact row per file. Downloads need the retaining record's
+          // authority, so a file retained only by a citing claim downloads there.
+          const sourceFile = (file: NonNullable<typeof result.sourceFiles>[number]) => {
+            const e = file.evidence, name = e.filename ?? e.path.split("/").at(-1)!, row = el("div", undefined, "knowledge-source-file"), copy = el("span", undefined, "knowledge-source-file-copy");
+            const title = el("span", name, "knowledge-source-file-name"); title.title = e.attribution ? `${name}\n${e.attribution}` : name;
+            copy.append(title, el("small", [fileKind(e), e.size !== undefined ? fileSize(e.size) : "", file.citations ? `${file.citations} cited ${file.citations === 1 ? "passage" : "passages"}` : ""].filter(Boolean).join(" · ")));
+            if (!e.verified) { const warning = el("small", "Source file unavailable", "knowledge-unverified"); warning.prepend(icon("alertTriangle", 12)); copy.append(warning); }
+            row.append(icon("fileText", 14), copy);
+            const own = result.evidence?.some(o => o.path === e.path && o.sha256 === e.sha256);
+            if (own && e.verified) { const { download, status } = originalDownload(feature, id, e, () => live(n), errorText, true); download.className = "knowledge-source-download"; copy.append(status); row.append(download); }
+            else if (e.verified) row.title = "Download this file from the claim that cites it.";
+            return row;
+          };
+          // Cited files lead and uncited retained files collapse beneath them.
+          // Outside meetings a page's own retained files already live in File
+          // details, so the rail appears only when claims sourced here cite files.
+          const cited = result.sourceFiles.filter(file => file.citations), uncited = result.sourceFiles.filter(file => !file.citations);
+          if (cited.length || r.type === "meeting") {
+            const sources = el("section", undefined, "knowledge-sources"), passages = cited.reduce((sum, file) => sum + file.citations, 0), total = result.sourceFilesTotal ?? result.sourceFiles.length;
+            sources.append(el("h3", "Sources"), el("p", `${passages} cited ${passages === 1 ? "passage" : "passages"} · ${total} ${total === 1 ? "file" : "files"}`, "knowledge-muted"));
+            if (cited.length) { const list = el("div", undefined, "knowledge-surface knowledge-source-files"); list.append(...cited.map(sourceFile)); sources.append(list); }
+            if (uncited.length) {
+              const rest = el("details", undefined, "knowledge-source-uncited"), summary = el("summary", `${uncited.length} ${cited.length ? "more " : ""}${uncited.length === 1 ? "file" : "files"} not cited directly`), list = el("div", undefined, "knowledge-surface knowledge-source-files");
+              rest.dataset.readingKey = `uncited:${id}`; rest.open = !cited.length; summary.append(icon("chevronDown", 12)); list.append(...uncited.map(sourceFile)); rest.append(summary, list); sources.append(rest);
+            }
+            if (total > result.sourceFiles.length) sources.append(el("p", "Showing the first 100 files. Other files remain available from their citing claims.", "knowledge-muted"));
+            aside.insertBefore(sources, learned);
           }
-          if ((result.sourceFilesTotal ?? 0) > result.sourceFiles.length) sources.append(el("p", "Showing the first 100 files. Other files remain available from their citing claims.")); aside.insertBefore(sources, learned);
         }
         if (r.kind === "page" && result.evidence?.length) { const originals = el("details", undefined, "knowledge-retained-originals"); originals.append(el("summary", "Retained originals"), evidenceView(feature, result, () => live(n), errorText)); filePanel.append(originals); }
         grid.append(main, aside); target.replaceChildren(breadcrumb, head, grid);
@@ -328,38 +366,74 @@ export default defineControlUiPlugin({
         const claimSurface = el("div", undefined, "knowledge-surface knowledge-claim-groups"); claims.append(claimSurface);
         const connectionLoading = el("p", "Loading connections…", "knowledge-muted"); refs.append(connectionLoading);
         const claimsLoading = el("p", "Loading saved claims…", "knowledge-muted"); if (r.kind === "page") claimSurface.append(claimsLoading);
-        let linkOffset = 0, snapshot: string | undefined; const claimGroups = new Map<string, HTMLElement>();
+        // Claims and rail connections page independently. A single mixed stream
+        // let a page of claims crowd out every relationship, so a person with
+        // many claims showed no attendance. Dependents are omitted: they repeat
+        // the claims list and incoming relationships.
+        const railDirections: Array<"outgoing" | "incoming" | "links" | "backlinks"> = r.kind === "page" ? ["outgoing", "incoming", "backlinks"] : ["outgoing", "incoming", "links", "backlinks"];
+        let claimOffset: number | null = 0, railIndex = 0, railOffset = 0, snapshot: string | undefined; const claimGroups = new Map<string, HTMLElement>();
+        const railMore = () => railIndex < railDirections.length, railIds = new Set<string>();
+        const connectionsPage = async (direction: "claims" | typeof railDirections[number], offset: number) => {
+          const page = await feature.invoke("connections", { id, direction, offset, limit: 20, includeCards: direction === "claims", includeEndpoints: direction === "incoming" || direction === "outgoing" });
+          if (live(n) && snapshot && snapshot !== page.snapshot) throw Error("Connections changed; reopen this page to refresh.");
+          snapshot = page.snapshot; return page;
+        };
+        async function moreClaims() {
+          const page = await connectionsPage("claims", claimOffset ?? 0); if (!live(n)) return;
+          claimsLoading.remove();
+          for (const link of page.connections) {
+            const card = claimCard(link.record, n, id);
+            if (!card || (r.type === "meeting" && (link.record.sourceEvent || link.record.card?.source?.id !== id))) continue; if (card.dataset.kind === "Owned commitments") { owned.hidden = false; owned.append(card); continue; } const kind = card.dataset.kind!; let group = claimGroups.get(kind); if (!group) { group = el("div", undefined, "knowledge-claim-group"); group.append(el("h4", label(kind))); claimGroups.set(kind, group); claimSurface.append(group); } group.append(card); const count = group.querySelectorAll(".knowledge-claim").length; group.querySelector("h4")!.textContent = `${({belief:"Beliefs",commitment:"Commitments",decision:"Decisions",preference:"Preferences",fact:"Facts",event:"Events"} as Record<string,string>)[kind] ?? label(kind)} · ${count}`;
+          }
+          const count = claims.querySelectorAll(".knowledge-claim").length; claims.querySelector("h3")!.replaceChildren(document.createTextNode("Saved claims "), el("span", `${count} ${count === 1 ? "claim" : "claims"}${page.nextOffset !== null ? " shown" : ""}`, "knowledge-section-count"));
+          claimOffset = page.nextOffset; moreClaimsButton.remove();
+          if (claimOffset !== null) claims.append(moreClaimsButton);
+          else if (!claimGroups.size) { claimSurface.remove(); claims.append(el("p", `No claims about ${r.title}.${r.type === "person" && attendanceIds.size ? " Only attendance is recorded." : ""}`)); }
+        }
         async function moreConnections() {
-          const page = await feature.invoke("connections", { id, offset: linkOffset, limit: 20, includeCards: true, includeEndpoints: true }); if (!live(n)) return;
-          if (snapshot && snapshot !== page.snapshot) throw Error("Connections changed; reopen this page to refresh."); snapshot = page.snapshot;
-          const cards = page.connections.map(link => link.direction === "claims" ? claimCard(link.record, n, id) : undefined);
-          const endpoints = page.connections.map(link => {
-              const targetId = link.direction === "incoming" ? link.from : link.direction === "outgoing" ? link.to : undefined;
-              return targetId ? page.endpoints?.find(record => record.id === targetId) ?? null : null;
-            });
-          connectionLoading.remove(); claimsLoading.remove();
-          for (const [i, link] of page.connections.entries()) {
-            if (link.direction === "claims" && r.kind === "page") { const card = cards[i]; if (!card || (r.type === "meeting" && (link.record.sourceEvent || link.record.card?.source?.id !== id))) continue; if (card.dataset.kind === "Owned commitments") { owned.hidden = false; owned.append(card); continue; } const kind = card.dataset.kind!; let group = claimGroups.get(kind); if (!group) { group = el("div", undefined, "knowledge-claim-group"); group.append(el("h4", label(kind))); claimGroups.set(kind, group); claimSurface.append(group); } group.append(card); const count = group.querySelectorAll(".knowledge-claim").length; group.querySelector("h4")!.textContent = `${({belief:"Beliefs",commitment:"Commitments",decision:"Decisions",preference:"Preferences",fact:"Facts",event:"Events"} as Record<string,string>)[kind] ?? label(kind)} · ${count}`; }
-            else { const row = el("div", undefined, "knowledge-connection"), target = endpoints[i] ?? link.record;
+          // Fill one page of up to 20 rows, moving through directions in order.
+          let shown = 0;
+          while (shown < 20 && railMore()) {
+            const page = await connectionsPage(railDirections[railIndex], railOffset); if (!live(n)) return;
+            const endpoints = page.connections.map(link => { const targetId = link.direction === "incoming" ? link.from : link.direction === "outgoing" ? link.to : undefined; return targetId ? page.endpoints?.find(record => record.id === targetId) ?? null : null; });
+            for (const [i, link] of page.connections.entries()) {
+              const row = el("div", undefined, "knowledge-connection"), target = endpoints[i] ?? link.record;
+              // A wikilink to a record already shown as a typed connection adds nothing.
+              if ((link.direction === "links" || link.direction === "backlinks") && (railIds.has(target.id) || attendanceIds.has(target.id))) continue;
+              railIds.add(target.id);
               if (link.label === "attended" && ((r.type === "meeting" && link.to === id) || (r.type === "person" && link.from === id))) {
                 attendanceIds.add(target.id);
-                if (r.type === "person") knownFrom.textContent = `Known from ${attendanceIds.size} meeting${attendanceIds.size === 1 ? "" : "s"}${page.nextOffset !== null ? " shown" : ""}`;
-                else { const attendee = el("div", undefined, "knowledge-attendee"); attendee.append(summaryLink(target), el("p", link.record.attributionConfidence?.basis ?? "No attribution basis recorded"), confidenceView(link.record.attributionConfidence, true)); attendanceRows.append(attendee); attended.querySelector("h3")!.textContent = `Attended · ${attendanceIds.size} people${page.nextOffset !== null ? " shown" : ""} · from attendance connections`; }
+                if (r.type !== "person") { const attendee = el("div", undefined, "knowledge-attendee"); attendee.append(summaryLink(target), el("p", link.record.attributionConfidence?.basis ?? "No attribution basis recorded"), confidenceView(link.record.attributionConfidence, true)); attendanceRows.append(attendee); continue; }
               }
               const destination = button("", () => open(target.id), "knowledge-connection-link"), copy = el("span", undefined, "knowledge-connection-copy");
-              copy.append(el("small", `${link.direction === "incoming" ? "← " : link.direction === "outgoing" || link.direction === "links" || link.direction === "backlinks" ? "" : "Depends on this · "}${label(link.label ?? link.direction)}`), el("span", target.title));
+              copy.append(el("small", `${link.direction === "incoming" ? "← " : ""}${label(link.label ?? link.direction)}`), el("span", target.title));
               destination.append(tile(target.type, 24, target.kind), copy); row.append(destination); if (endpoints[i]) copy.querySelector("small")!.append(confidenceView(link.record.attributionConfidence, true));
-              if (endpoints[i]) { const detail = button("", () => open(link.record.id), "knowledge-connection-evidence"); detail.setAttribute("aria-label", "Relationship evidence"); detail.title = "Relationship evidence"; detail.append(icon("paperclip", 13)); row.append(detail); } refs.append(row); }
+              if (endpoints[i]) { const detail = button("", () => open(link.record.id), "knowledge-connection-evidence"); detail.setAttribute("aria-label", "Relationship evidence"); detail.title = "Relationship evidence"; detail.append(icon("paperclip", 13)); row.append(detail); } refs.append(row);
+            }
+            shown += page.connections.length;
+            if (page.nextOffset !== null) railOffset = page.nextOffset; else { railIndex++; railOffset = 0; }
           }
-          if (r.kind === "page") { const count = claims.querySelectorAll(".knowledge-claim").length; const heading = claims.querySelector("h3")!; heading.replaceChildren(document.createTextNode("Saved claims "), el("span", `${count} ${count === 1 ? "claim" : "claims"}${page.nextOffset !== null ? " shown" : ""}`, "knowledge-section-count")); }
-          loadMore.remove(); if (page.nextOffset !== null) { linkOffset = page.nextOffset; connections.append(loadMore); }
-          else { if (!refs.children.length) { refs.remove(); connections.append(el("p", "No connections recorded.", "knowledge-muted")); } if (r.kind === "page" && !claimGroups.size) { claimSurface.remove(); claims.append(el("p", `No claims about ${r.title}.${r.type === "person" && attendanceIds.size ? " Only attendance is recorded." : ""}`)); } }
+          // Counts say "shown" only while more connections remain unloaded.
+          const partial = railMore() ? " shown" : "";
+          if (attendanceIds.size && r.type === "person") knownFrom.textContent = `Known from ${attendanceIds.size} meeting${attendanceIds.size === 1 ? "" : "s"}${partial}`;
+          if (attendanceIds.size && r.type === "meeting") attended.querySelector("h3")!.textContent = `Attended · ${attendanceIds.size} ${attendanceIds.size === 1 ? "person" : "people"}${partial} · from attendance connections`;
+          connectionLoading.remove(); loadMore.remove();
+          if (railMore()) connections.append(loadMore);
+          else if (!refs.children.length) { refs.remove(); connections.append(el("p", "No connections recorded.", "knowledge-muted")); }
         }
-        const loadMore = button("More claims and connections", () => { ++connectionPages; loadMore.disabled = true; void moreConnections().catch(error => { connections.append(failure(error)); }).finally(() => { loadMore.disabled = false; }); });
+        const pageLoader = (loader: () => Promise<void>, control: () => HTMLButtonElement, section: HTMLElement) => () => { ++connectionPages; control().disabled = true; void loader().catch(error => { section.append(failure(error)); }).finally(() => { control().disabled = false; }); };
+        const loadMore = button("More connections", pageLoader(moreConnections, () => loadMore, connections));
+        const moreClaimsButton = button("More claims", pageLoader(moreClaims, () => moreClaimsButton, claims), "knowledge-quiet");
         pending.push((async () => {
           for (let page = 0; page < pages; page++) {
             await moreConnections();
             if (!live(n) || !loadMore.parentElement) break;
+          }
+        })());
+        if (r.kind === "page") pending.push((async () => {
+          for (let page = 0; page < pages; page++) {
+            await moreClaims();
+            if (!live(n) || claimOffset === null) break;
           }
         })());
         if (result.references?.length) { const references = el("details"); references.append(el("summary", "Record references · not asserted relationships")); for (const ref of result.references) references.append(summaryLink(ref)); if (result.nextReferenceOffset != null) references.append(el("p", "Showing the first 20 references.")); technical.append(references); }
@@ -450,7 +524,6 @@ export default defineControlUiPlugin({
             text.append(metadata);
             const names: Record<string, string> = { attendees: "attended", decision: "decisions", commitment: "commitments", event: "events", belief: "beliefs", fact: "facts", preference: "preferences", page: "pages" };
             text.append(el("span", Object.keys(names).filter(kind => entry.group!.counts[kind]).map(kind => `${entry.group!.counts[kind]} ${entry.group!.counts[kind] === 1 && kind !== "attendees" ? names[kind].replace(/s$/, "") : names[kind]}`).concat(entry.group.counts.sourceEvent ? ["meeting event"] : []).join(" · "), "knowledge-feed-meta"));
-            const disclosureLabel = (closed: string, opened: string) => { const control = el("span", undefined, "knowledge-disclosure-label"); control.append(el("span", closed, "knowledge-when-closed"), el("span", opened, "knowledge-when-open"), icon("chevronDown", 14)); return control; };
             summary.append(tile(source.type, 32), text, disclosureLabel("Expand", "Collapse"));
             const detail = el("div", undefined, "knowledge-source-body");
             const pages = el("div", undefined, "knowledge-source-pages"), claims = el("div", undefined, "knowledge-source-claims"); detail.append(pages, claims);
@@ -579,7 +652,7 @@ export default defineControlUiPlugin({
           return true;
         } catch (error) {
           if (live(n) && n === generation) {
-            if (background) { status.textContent = "Refresh unavailable"; status.dataset.live = "false"; }
+            if (background) { status.textContent = "Refresh unavailable"; status.hidden = false; }
             else { loading.replaceChildren(failure(error), button("Retry", () => { void load(); }, "knowledge-quiet")); loading.hidden = false; }
           }
           return false;
@@ -591,17 +664,17 @@ export default defineControlUiPlugin({
       let refreshing = false, refreshAgain = false;
       async function refresh() {
         if (vaultChanged || disposed) return;
-        if (!context.host.connection.connected) { ++statusGeneration; status.textContent = viewReady ? "Reconnecting…" : "Offline"; status.dataset.live = "false"; banner.hidden = false; banner.textContent = `Can’t reach the vault. ${viewReady ? `Showing the last readable view, checked at ${lastChecked ? time(lastChecked) : "an unknown time"}. Retrying.` : "Reconnect to read your agent’s knowledge."}`; return; }
+        if (!context.host.connection.connected) { ++statusGeneration; status.textContent = viewReady ? "Reconnecting…" : "Offline"; status.hidden = false; banner.hidden = false; banner.textContent = `Can’t reach the vault. ${viewReady ? `Showing the last readable view, checked at ${lastChecked ? time(lastChecked) : "an unknown time"}. Retrying.` : "Reconnect to read your agent’s knowledge."}`; return; }
         if (refreshing) { refreshAgain = true; return; }
         refreshing = true;
         const n = ++statusGeneration, observedGeneration = generation;
         try {
           const report = await feature.invoke("status", {}); if (disposed || n !== statusGeneration || !context.host.connection.connected) return;
           const nextIdentity = JSON.stringify([report.agent, report.vault, report.scope]);
-          if (identity && identity !== nextIdentity) { vaultChanged = true; ++generation; ++suggestGeneration; toolbar.replaceChildren(); root.querySelector(".knowledge-chat-handoff")?.remove(); status.textContent = "Vault changed"; status.dataset.live = "false"; content.replaceChildren(empty("Vault changed", "Reload this page to open the newly connected vault.")); return; }
+          if (identity && identity !== nextIdentity) { vaultChanged = true; ++generation; ++suggestGeneration; toolbar.replaceChildren(); root.querySelector(".knowledge-chat-handoff")?.remove(); status.textContent = "Vault changed"; status.hidden = false; content.replaceChildren(empty("Vault changed", "Reload this page to open the newly connected vault.")); return; }
           identity = nextIdentity; agentId = report.sample ? "" : report.agent;
-          lastChecked = new Date().toISOString(); status.title = `Checked ${time(lastChecked)}`;
-          status.textContent = report.live === "watching" ? "Live" : "Periodic refresh"; status.dataset.live = String(report.live === "watching");
+          lastChecked = new Date().toISOString();
+          status.textContent = ""; status.hidden = true;
           sampleChip.hidden = !report.sample; banner.hidden = true; banner.textContent = "";
           if (loadingGeneration || (viewReady && displayView === viewKey() && report.snapshot && snapshot === report.snapshot)) return;
           vocabulary = await loadVocabulary(feature); if (disposed || n !== statusGeneration) return;
@@ -615,7 +688,7 @@ export default defineControlUiPlugin({
             pendingSnapshot = report.snapshot; updates.textContent = count ? `↑ ${count}${recent.nextBefore !== null ? "+" : ""} activity ${count === 1 ? "update" : "updates"} · Show` : "Knowledge changed · Show"; updates.hidden = false; return;
           }
           if (await load(viewReady && displayView === viewKey())) snapshot = report.snapshot;
-        } catch (error) { if (!disposed && n === statusGeneration) { status.textContent = "Refresh unavailable"; status.dataset.live = "false"; if (!viewReady) content.replaceChildren(failure(error)); } }
+        } catch (error) { if (!disposed && n === statusGeneration) { status.textContent = "Refresh unavailable"; status.hidden = false; if (!viewReady) content.replaceChildren(failure(error)); } }
         finally { refreshing = false; if (refreshAgain) { refreshAgain = false; void refresh(); } }
       }
       let connected = context.host.connection.connected;

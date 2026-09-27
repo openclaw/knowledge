@@ -461,12 +461,16 @@ try {
   await page.locator('.knowledge-table').getByRole('button',{name:'Northwind launch',exact:true}).click();
   await page.locator('.knowledge-markdown').getByRole('link',{name:'Project lead',exact:true}).click();
   await page.locator('.knowledge-entity-header h2').filter({hasText:'Alex Rivera'}).waitFor();
-  await page.getByRole('button',{name:'Referenced by Northwind launch',exact:true}).waitFor();
-  await page.getByRole('button',{name:'Referenced by Northwind launch',exact:true}).click();
+  // A backlink that repeats a typed connection is omitted; the typed row navigates instead.
+  const typedProject=page.locator('.knowledge-connection-link').filter({hasText:'Northwind launch'});
+  await typedProject.waitFor();
+  assert.equal(await page.getByRole('button',{name:'Referenced by Northwind launch',exact:true}).count(),0,'Backlinks do not repeat typed connections');
+  await typedProject.click();
   assert.equal(await page.locator('.knowledge-markdown code').innerText(),'[[Alex|Code example]]');
   assert.equal(await page.locator('.knowledge-unresolved-link').getAttribute('aria-disabled'),'true');
   await page.locator('.knowledge-markdown').getByRole('link',{name:'Planning source',exact:true}).click();
   await page.locator('.knowledge-markdown').getByRole('link',{name:'Transcript · lines 1–2',exact:true}).waitFor();
+  await page.getByRole('button',{name:'Referenced by Northwind launch',exact:true}).waitFor();
   assert.equal(await page.locator('.knowledge-entity-main > details').count(),0,'No redundant Sources footer');
   await page.locator('.knowledge-markdown').getByRole('link',{name:'Transcript · lines 1–2',exact:true}).click();
   assert.equal(await page.locator('.knowledge-file-details[open] .knowledge-retained-originals[open]').count(),1,'Self source citation reveals retained originals');
