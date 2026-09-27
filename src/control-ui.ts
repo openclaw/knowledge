@@ -263,7 +263,32 @@ export default defineControlUiPlugin({
         let versionsNode: HTMLElement | undefined;
         if (r.kind === "claim" && (meta?.supersedes || meta?.superseded_by)) {
           const versions = el("section", undefined, "knowledge-versions"); versionsNode = versions; versions.append(el("h3", "Versions")); if (reason && reasonInVersions) versions.append(el("p", `Correction reason: ${reason}`, "knowledge-muted"));
-          pending.push((async () => { const seen = new Set<string>(), queue = [r.id]; while (queue.length && seen.size < 10) { const nextId = queue.shift()!; if (seen.has(nextId)) continue; seen.add(nextId); const version = nextId === r.id ? r : (await feature.invoke("record", { id: nextId, includeMetadata: true, maxChars: 4000 })).record; if (!live(n)) return; if (!version) continue; const item = el("div", undefined, "knowledge-version"); item.append(el("code", `rev ${version.revision}`), button(version.body || version.title, () => open(version.id), "knowledge-quiet"), el("small", `${version.lifecycle === "active" ? "Current · saved" : version.lifecycle === "withdrawn" ? "Withdrawn" : "Replaced"} ${version.metadata?.lifecycle_change?.at ? date(version.metadata.lifecycle_change.at) : version.recordedAt ? date(version.recordedAt) : "time not recorded"}`)); if (version.id === r.id) { item.classList.add("knowledge-version-viewing"); item.append(chip("Viewing")); } versions.append(item); for (const linked of [version.metadata?.supersedes, version.metadata?.superseded_by]) if (linked && !seen.has(linked)) queue.push(linked); } if (queue.length) versions.append(el("p", "Showing 10 linked versions. Open a version to continue.")); })().catch(error => { if (live(n)) versions.append(failure(error)); }));
+          // A correction writes a new record (revision 1) and rewrites the old one as superseded,
+          // so per-record revisions don't order versions. Number them by position in the
+          // supersedes chain instead, oldest = v1, and list newest first.
+          pending.push((async () => {
+            type Version = NonNullable<Detail["record"]>;
+            const found = new Map<string, Version>(), queue = [r.id];
+            while (queue.length && found.size < 10) {
+              const nextId = queue.shift()!; if (found.has(nextId)) continue;
+              const version = nextId === r.id ? r : (await feature.invoke("record", { id: nextId, includeMetadata: true, maxChars: 4000 })).record; if (!live(n)) return;
+              if (!version) continue; found.set(nextId, version);
+              for (const linked of [version.metadata?.supersedes, version.metadata?.superseded_by]) if (linked && !found.has(linked)) queue.push(linked);
+            }
+            // Walk forward from the oldest loaded version; anything off the chain follows.
+            const oldest = [...found.values()].find(v => !v.metadata?.supersedes || !found.has(v.metadata.supersedes)) ?? r, chain: Version[] = [];
+            for (let v: Version | undefined = oldest; v && !chain.includes(v); v = v.metadata?.superseded_by ? found.get(v.metadata.superseded_by) : undefined) chain.push(v);
+            for (const v of found.values()) if (!chain.includes(v)) chain.push(v);
+            // Numbers are only meaningful when the chain reaches the original.
+            const numbered = !oldest.metadata?.supersedes;
+            for (const [index, version] of [...chain.entries()].reverse()) {
+              const item = el("div", undefined, "knowledge-version"), number = el("code", numbered ? `v${index + 1}` : "·"); number.title = `Record revision ${version.revision}`;
+              item.append(number, button(version.body || version.title, () => open(version.id), "knowledge-quiet"), el("small", `${version.lifecycle === "active" ? "Current · saved" : version.lifecycle === "withdrawn" ? "Withdrawn" : "Replaced"} ${version.metadata?.lifecycle_change?.at ? date(version.metadata.lifecycle_change.at) : version.recordedAt ? date(version.recordedAt) : "time not recorded"}`));
+              if (version.id === r.id) { item.classList.add("knowledge-version-viewing"); item.append(chip("Viewing")); }
+              versions.append(item);
+            }
+            if (queue.length) versions.append(el("p", "Showing 10 linked versions. Open a version to continue."));
+          })().catch(error => { if (live(n)) versions.append(failure(error)); }));
         }
         const body = el("div", undefined, "knowledge-summary"), bodyText = withoutTitleHeading(r.body ?? "", r.title);
         body.append(markdownView(bodyText, targetId => {
@@ -294,7 +319,7 @@ export default defineControlUiPlugin({
           const statement = el("section", undefined, "knowledge-statement"), surface = el("div", undefined, "knowledge-surface knowledge-claim-groups");
           if (r.kind !== "claim") statement.append(el("h3", "Relationship & evidence"));
           surface.append(renderClaim({ record: r, truncated: result.content.nextOffset !== null, evidenceTotal: result.evidenceTotal, evidenceSourceTotal: result.evidenceSourceTotal }, n, undefined, result));
-          statement.append(surface, el("p", `Revision ${r.revision}${meta?.updated_at ? ` · updated ${date(meta.updated_at)}` : ""}`, "knowledge-summary-meta")); main.append(statement);
+          statement.append(surface); main.append(statement);
           if (versionsNode) main.append(versionsNode);
         }
         if (result.content.nextOffset !== null) main.append(el("p", "Preview is truncated. Open the original Markdown in File details for paged content."));

@@ -399,3 +399,5 @@ details[open] > summary > .knowledge-disclosure-label > .knowledge-icon { transf
 .knowledge-excerpt-toggle > summary::-webkit-details-marker { display: none; }
 .knowledge-evidence-single > .knowledge-source-group > summary { display: none; }
 .knowledge-versions > p { margin: 0 0 8px; }
+.knowledge-excerpt-speaker { margin-right: 6px; color: var(--muted-strong, var(--muted)); font-size: 12px; font-weight: 600; }
+.knowledge-claim-standalone .knowledge-claim-text p { margin: 0; color: var(--text-strong, var(--text)); }

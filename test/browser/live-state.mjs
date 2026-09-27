@@ -293,6 +293,10 @@ try {
   // The correction reason sits with Versions, after the statement; a version row opens the original.
   await page.locator('.knowledge-versions').getByText('Correction reason: The delivery date was corrected in chat.',{exact:true}).waitFor();
   assert.ok(await page.evaluate(()=>{const s=document.querySelector('.knowledge-statement'),v=document.querySelector('.knowledge-versions');return Boolean(s&&v&&(s.compareDocumentPosition(v)&Node.DOCUMENT_POSITION_FOLLOWING));}),'Versions follow the statement and evidence');
+  // Versions number by correction order, not per-record revision: the correction is v2 even though its record is at revision 1.
+  await page.locator('.knowledge-versions .knowledge-version').nth(1).waitFor();
+  assert.deepEqual(await page.locator('.knowledge-versions .knowledge-version > code').allInnerTexts(),['v2','v1']);
+  assert.match(await page.locator('.knowledge-versions .knowledge-version').first().innerText(),/Alex will deliver on Monday\./);
   await page.locator('.knowledge-versions').getByRole('button',{name:'Alex will deliver on Friday.',exact:true}).click();
   await page.getByText('The delivery date was corrected in chat.',{exact:true}).waitFor();
   await page.getByText(/Viewing history · Replaced/).waitFor();

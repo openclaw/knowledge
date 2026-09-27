@@ -134,14 +134,18 @@ export function originalDownload(feature: FeatureClient<typeof contract>, id: st
 }
 
 /** Excerpt block. Transcript lines that open with an ISO timestamp show it as a
- * muted local time, keeping the recorded value in the tooltip. */
+ * muted local time, and a bracketed recorder label as a muted speaker tag; both
+ * keep the recorded text in their tooltips. */
 function excerptQuote(text: string) {
   const quote = el("blockquote"), lines = text.split("\n"), stamped = lines.some(line => timestamp.test(line));
   for (const line of lines) {
     const row = el("span"), stamp = timestamp.exec(line); row.className = "knowledge-excerpt-line";
     if (stamp && !Number.isNaN(Date.parse(stamp[1]))) {
       const at = el("time", new Date(stamp[1]).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", second: "2-digit" }));
-      at.className = "knowledge-excerpt-time"; at.dateTime = stamp[1]; at.title = stamp[0].trim(); row.append(at, line.slice(stamp[0].length));
+      at.className = "knowledge-excerpt-time"; at.dateTime = stamp[1]; at.title = stamp[0].trim(); row.append(at);
+      const label = speakerLabel.exec(line.slice(stamp[0].length));
+      if (label) { const speaker = el("span", label[1].split(";")[0].trim()); speaker.className = "knowledge-excerpt-speaker"; speaker.title = label[0].trim(); row.append(speaker, line.slice(stamp[0].length + label[0].length)); }
+      else row.append(line.slice(stamp[0].length));
     } else row.append(line);
     quote.append(row);
   }
@@ -150,4 +154,7 @@ function excerptQuote(text: string) {
   return quote;
 }
 // Escaped dashes keep the pattern intact however the bundle is decoded.
-const timestamp = /^\[(\d{4}-\d{2}-\d{2}T[\d:.]+Z)(?:[\u2013\u2014-][^\]]*)?\]\s*/;
+// Recorders write "[start–end]", "[start — end]" or "[start]", optionally followed
+// by "[label; source=…]" or "[speaker / them]".
+const timestamp = /^\[(\d{4}-\d{2}-\d{2}T[\d:.]+Z)(?:\s*[\u2013\u2014-]\s*[^\]]*)?\]\s*/;
+const speakerLabel = /^\[([^\]\n]{1,80})\]\s*/;
