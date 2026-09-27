@@ -8,7 +8,9 @@ export function agentDisplayName(id: string | undefined, agents: readonly Contro
 }
 export function confidenceView(confidence?: Envelope['attribution_confidence'], compact = false) {
   const node = document.createElement('span'); node.className = 'knowledge-confidence';
-  if (!confidence) { node.append(icon('circleQuestionMark', 12), compact ? 'Confidence not recorded' : 'Attribution confidence not recorded'); return node; }
+  // Compact rows omit an unrecorded level: most records lack one, so repeating
+  // "not recorded" on every row adds noise. Evidence captions still state it.
+  if (!confidence) { if (compact) node.hidden = true; else node.append(icon('circleQuestionMark', 12), 'Attribution confidence not recorded'); return node; }
   node.title = confidence.basis;
   const bars = document.createElement('span'); bars.className = 'knowledge-confidence-bars'; bars.setAttribute('aria-hidden', 'true');
   for (let i = 0; i < 3; i++) { const bar = document.createElement('i'); bar.dataset.filled = String(i < ({ low: 1, medium: 2, high: 3 })[confidence.level]); bars.append(bar); }

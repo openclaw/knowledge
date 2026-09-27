@@ -520,8 +520,8 @@ try {
   await sourceGroup.locator(':scope > summary').getByText('Collapse',{exact:true}).waitFor();
   await sourceGroup.locator('.knowledge-attendance-group > summary').click();
   await sourceGroup.locator('.knowledge-attendance-group > summary').getByText('Hide',{exact:true}).waitFor();
-  await sourceGroup.getByText('Confidence not recorded',{exact:true}).waitFor();
   await sourceGroup.getByText('Identity unresolved',{exact:true}).waitFor();
+  assert.equal(await sourceGroup.getByText('Confidence not recorded',{exact:true}).count(),0,'Compact rows omit an unrecorded confidence level');
   await page.screenshot({animations:'disabled',path:base+'/v4-aligned-attendance-desktop.png',fullPage:true});
   await page.setViewportSize({width:390,height:844});
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Expanded source group fits mobile');
