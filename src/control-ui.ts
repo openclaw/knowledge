@@ -197,17 +197,17 @@ export default defineControlUiPlugin({
           field("Saved", `${record.recordedAt ? date(record.recordedAt) : "Time not recorded"} · revision ${record.revision}`); evidenceBody.append(details);
           if (record.assertionOrigin === "agent_inference") evidenceBody.append(el("p", "No direct quote for this inference. Premises below.", "knowledge-notice"));
           const correct = button("Correct in chat", () => ask(record, true), "knowledge-quiet knowledge-correct"); correct.prepend(icon("pencil", 16));
+          const openClaim = standalone ? undefined : button("Open claim", () => open(record.id), "knowledge-quiet"); openClaim?.prepend(icon("fileText", 16));
           if (loaded.evidence?.some(e => !e.verified) && !metadata.querySelector(".knowledge-unverified")) metadata.append(el("span", "Source file unavailable", "knowledge-unverified"));
-          if (loaded.evidence?.length) evidenceBody.append(evidenceView(feature, loaded, alive, errorText, undefined, record.lifecycle === "active" ? correct : undefined));
+          if (loaded.evidence?.length) evidenceBody.append(evidenceView(feature, loaded, alive, errorText, undefined, record.lifecycle === "active" ? correct : undefined, openClaim));
           else {
             if (record.attribution) evidenceBody.append(el("p", record.attribution, "knowledge-attribution"));
-            evidenceBody.append(el("p", "No source evidence recorded.")); if (record.lifecycle === "active") evidenceBody.append(correct);
+            evidenceBody.append(el("p", "No source evidence recorded.")); const actions = el("div", undefined, "knowledge-evidence-actions"); if (openClaim) actions.append(openClaim); if (record.lifecycle === "active") actions.append(correct); if (actions.childNodes.length) evidenceBody.append(actions);
           }
           if (loaded.relatedStatements?.length) {
             const related = el("section", undefined, "knowledge-related"); related.append(el("h4", "Related statements"));
             for (const link of loaded.relatedStatements) { const row = el("div", undefined, "knowledge-related-row"); const verb = link.relation === "contradicts" ? "Conflicts with" : link.relation === "updates" ? link.incoming ? "Updated by" : "Updates" : link.incoming ? "Reaffirmed by" : "Reaffirms"; row.append(el("strong", verb), button(link.text || link.record.title, () => open(link.record.id), "knowledge-quiet"), el("small", origin(link.assertionOrigin, link.attribution, link.record.writtenByAgentId ? agentName(link.record.writtenByAgentId) : undefined)), el("p", `${link.basis}${link.source ? ` From ${link.source.title}.` : ""}`)); related.append(row); } evidenceBody.append(related);
           }
-          if (!standalone) evidenceBody.append(button("Open claim", () => open(record.id), "knowledge-quiet"));
         };
         let loaded = Boolean(detail), loading = false;
         if (detail) showEvidence(detail);
@@ -254,11 +254,15 @@ export default defineControlUiPlugin({
         if (r.lifecycle !== "active") { head.classList.add("knowledge-historical"); main.append(el("p", `Viewing history · ${r.lifecycle === "withdrawn" ? "Withdrawn" : "Replaced"}${meta?.lifecycle_change?.at ? ` ${date(meta.lifecycle_change.at)}` : ""}. ${r.lifecycle === "withdrawn" ? "Not used in search, connections or answers." : "An earlier version. Search and answers use the current one."}`, "knowledge-notice")); askButton.remove(); }
         const lifecycle = meta as Record<string, unknown> | undefined;
         const change = lifecycle?.lifecycle_change;
-        if (change && typeof change === "object" && "reason" in change && typeof change.reason === "string") main.append(el("p", change.reason, "knowledge-notice"));
+        const reason = change && typeof change === "object" && "reason" in change && typeof change.reason === "string" ? change.reason : undefined;
+        // A current claim's correction reason belongs with its versions; history keeps the notice.
+        const reasonInVersions = r.kind === "claim" && r.lifecycle === "active" && Boolean(meta?.supersedes);
+        if (reason && !reasonInVersions) main.append(el("p", reason, "knowledge-notice"));
         if (typeof lifecycle?.superseded_by === "string") main.append(button("View replacement →", () => open(lifecycle.superseded_by as string), "knowledge-quiet"));
-        if (typeof lifecycle?.supersedes === "string") main.append(button("View original assertion", () => open(lifecycle.supersedes as string), "knowledge-quiet"));
+        if (typeof lifecycle?.supersedes === "string" && r.kind !== "claim") main.append(button("View original assertion", () => open(lifecycle.supersedes as string), "knowledge-quiet"));
+        let versionsNode: HTMLElement | undefined;
         if (r.kind === "claim" && (meta?.supersedes || meta?.superseded_by)) {
-          const versions = el("section", undefined, "knowledge-versions"); versions.append(el("h3", "Versions")); main.append(versions);
+          const versions = el("section", undefined, "knowledge-versions"); versionsNode = versions; versions.append(el("h3", "Versions")); if (reason && reasonInVersions) versions.append(el("p", `Correction reason: ${reason}`, "knowledge-muted"));
           pending.push((async () => { const seen = new Set<string>(), queue = [r.id]; while (queue.length && seen.size < 10) { const nextId = queue.shift()!; if (seen.has(nextId)) continue; seen.add(nextId); const version = nextId === r.id ? r : (await feature.invoke("record", { id: nextId, includeMetadata: true, maxChars: 4000 })).record; if (!live(n)) return; if (!version) continue; const item = el("div", undefined, "knowledge-version"); item.append(el("code", `rev ${version.revision}`), button(version.body || version.title, () => open(version.id), "knowledge-quiet"), el("small", `${version.lifecycle === "active" ? "Current · saved" : version.lifecycle === "withdrawn" ? "Withdrawn" : "Replaced"} ${version.metadata?.lifecycle_change?.at ? date(version.metadata.lifecycle_change.at) : version.recordedAt ? date(version.recordedAt) : "time not recorded"}`)); if (version.id === r.id) { item.classList.add("knowledge-version-viewing"); item.append(chip("Viewing")); } versions.append(item); for (const linked of [version.metadata?.supersedes, version.metadata?.superseded_by]) if (linked && !seen.has(linked)) queue.push(linked); } if (queue.length) versions.append(el("p", "Showing 10 linked versions. Open a version to continue.")); })().catch(error => { if (live(n)) versions.append(failure(error)); }));
         }
         const body = el("div", undefined, "knowledge-summary"), bodyText = withoutTitleHeading(r.body ?? "", r.title);
@@ -288,9 +292,10 @@ export default defineControlUiPlugin({
         if (r.kind === "page") main.append(body);
         else {
           const statement = el("section", undefined, "knowledge-statement"), surface = el("div", undefined, "knowledge-surface knowledge-claim-groups");
-          statement.append(el("h3", r.kind === "claim" ? "Statement & evidence" : "Relationship & evidence"));
+          if (r.kind !== "claim") statement.append(el("h3", "Relationship & evidence"));
           surface.append(renderClaim({ record: r, truncated: result.content.nextOffset !== null, evidenceTotal: result.evidenceTotal, evidenceSourceTotal: result.evidenceSourceTotal }, n, undefined, result));
           statement.append(surface, el("p", `Revision ${r.revision}${meta?.updated_at ? ` · updated ${date(meta.updated_at)}` : ""}`, "knowledge-summary-meta")); main.append(statement);
+          if (versionsNode) main.append(versionsNode);
         }
         if (result.content.nextOffset !== null) main.append(el("p", "Preview is truncated. Open the original Markdown in File details for paged content."));
         const attended = el("section", undefined, "knowledge-attended"), attendanceRows = el("div", undefined, "knowledge-surface"); const attendanceIds = new Set<string>();

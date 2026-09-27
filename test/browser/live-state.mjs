@@ -290,7 +290,10 @@ try {
   await page.getByRole('button',{name:'Alex will deliver on Monday.',exact:true}).waitFor();
   assert.equal(await page.getByRole('button',{name:'Alex will deliver on Friday.',exact:true}).count(),0);
   await page.getByRole('button',{name:'Alex will deliver on Monday.',exact:true}).click();
-  await page.getByRole('button',{name:'View original assertion',exact:true}).click();
+  // The correction reason sits with Versions, after the statement; a version row opens the original.
+  await page.locator('.knowledge-versions').getByText('Correction reason: The delivery date was corrected in chat.',{exact:true}).waitFor();
+  assert.ok(await page.evaluate(()=>{const s=document.querySelector('.knowledge-statement'),v=document.querySelector('.knowledge-versions');return Boolean(s&&v&&(s.compareDocumentPosition(v)&Node.DOCUMENT_POSITION_FOLLOWING));}),'Versions follow the statement and evidence');
+  await page.locator('.knowledge-versions').getByRole('button',{name:'Alex will deliver on Friday.',exact:true}).click();
   await page.getByText('The delivery date was corrected in chat.',{exact:true}).waitFor();
   await page.getByText(/Viewing history · Replaced/).waitFor();
   await page.getByRole('button',{name:'View replacement →',exact:true}).click();
@@ -418,7 +421,8 @@ try {
   await page.locator('.knowledge-claim-standalone').waitFor();
   await page.locator('.knowledge-about').getByRole('button',{name:'Northwind launch',exact:true}).waitFor();
   assert.equal(await page.locator('.knowledge-claim-standalone > details[open]').count(),1,'Standalone evidence is visible by default');
-  assert.equal(await page.locator('.knowledge-entity-main > button').count(),1,'Only the lifecycle navigation action is outside the statement card');
+  assert.equal(await page.locator('.knowledge-entity-main > button').count(),0,'Lifecycle navigation lives in Versions, not loose in the page');
+  await page.locator('.knowledge-versions .knowledge-version').first().waitFor();
   for(const mode of ['dark','light']) {
     await page.evaluate(mode=>{document.documentElement.dataset.theme=mode==='light'?'phosphor-light':'dark';document.documentElement.dataset.themeMode=mode;},mode);
     const correct=page.getByRole('button',{name:'Correct in chat',exact:true});

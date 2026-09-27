@@ -7,7 +7,7 @@ type Detail = FeatureOutput<typeof contract, "record">;
 type FileEvidence = NonNullable<Detail["evidence"]>[number];
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, text?: string) => { const n = document.createElement(tag); if (text) n.textContent = text; return n; };
 
-export function evidenceView(feature: FeatureClient<typeof contract>, result: Detail, alive: () => boolean, redact: (s: string) => string, expansion = { count: 20 }, correction?: HTMLButtonElement) {
+export function evidenceView(feature: FeatureClient<typeof contract>, result: Detail, alive: () => boolean, redact: (s: string) => string, expansion = { count: 20 }, correction?: HTMLButtonElement, lead?: HTMLButtonElement) {
   const root = el("section"), id = result.record!.id, hash = result.record!.hash;
   root.className = "knowledge-evidence-list";
   root.setAttribute("aria-label", "Source evidence");
@@ -33,7 +33,16 @@ export function evidenceView(feature: FeatureClient<typeof contract>, result: De
     const caption = el("div"); caption.className = "knowledge-excerpt-label";
     caption.append(el("strong", result.record?.assertionOrigin === "agent_inference" ? "PREMISE · EXCERPT" : "EXCERPT"), el("code", `${e.filename ?? e.path.split("/").at(-1)}${e.start_line ? ` · lines ${e.start_line}–${e.end_line ?? e.start_line}` : ""}${e.excerptTruncated ? " · Truncated" : ""}`)); quote.append(caption);
     if (!e.verified) { quote.classList.add("knowledge-source-unavailable"); quote.append(el("strong", "Source file unavailable"), el("p", "The retained file or cited location could not be verified.")); }
-    else if (e.excerpt) quote.append(el("blockquote", `“${e.excerpt}”`));
+    else if (e.excerpt) {
+      quote.append(excerptQuote(e.excerpt));
+      // Long excerpts preview behind a toggle so one citation can't fill the page.
+      if (e.excerpt.split("\n").length > 6 || e.excerpt.length > 600) {
+        const toggle = el("details"), summary = el("summary"), control = el("span"); toggle.className = "knowledge-excerpt-toggle"; control.className = "knowledge-disclosure-label";
+        toggle.dataset.readingKey = `${id}:excerpt:${e.path}:${e.sha256}:${e.start_line ?? ""}:${e.end_line ?? ""}`;
+        const closed = el("span", "Show full excerpt"), opened = el("span", "Show less"); closed.className = "knowledge-when-closed"; opened.className = "knowledge-when-open";
+        control.append(closed, opened, icon("chevronDown", 12)); summary.append(control); toggle.append(summary); quote.dataset.clamped = "true"; quote.append(toggle);
+      }
+    }
     else quote.append(el("p", "No text preview available. Open the original file to inspect this source."));
     if (e.excerptTruncated) quote.append(el("small", "Excerpt · Original retained in full."));
     const attribution = e.attribution;
@@ -57,9 +66,12 @@ export function evidenceView(feature: FeatureClient<typeof contract>, result: De
     const { download, status } = originalDownload(feature, id, e, alive, redact);
     if (e.verified) actions.append(download);
     if (correction && !correction.parentElement) actions.append(correction);
+    if (lead && !lead.parentElement) actions.prepend(lead);
     article.append(quote, actions, status); group.node.append(article);
   };
   result.evidence?.forEach(append);
+  // A lone citation needs no per-file heading; its excerpt line names the file.
+  if (sources.size === 1 && [...sources.values()][0].count === 1 && result.nextEvidenceOffset == null) root.classList.add("knowledge-evidence-single");
   let offset = result.nextEvidenceOffset;
   if (offset != null) {
     const more = el("button", "More source files"); more.type = "button"; root.append(more);
@@ -120,3 +132,22 @@ export function originalDownload(feature: FeatureClient<typeof contract>, id: st
   };
   return { download, status };
 }
+
+/** Excerpt block. Transcript lines that open with an ISO timestamp show it as a
+ * muted local time, keeping the recorded value in the tooltip. */
+function excerptQuote(text: string) {
+  const quote = el("blockquote"), lines = text.split("\n"), stamped = lines.some(line => timestamp.test(line));
+  for (const line of lines) {
+    const row = el("span"), stamp = timestamp.exec(line); row.className = "knowledge-excerpt-line";
+    if (stamp && !Number.isNaN(Date.parse(stamp[1]))) {
+      const at = el("time", new Date(stamp[1]).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", second: "2-digit" }));
+      at.className = "knowledge-excerpt-time"; at.dateTime = stamp[1]; at.title = stamp[0].trim(); row.append(at, line.slice(stamp[0].length));
+    } else row.append(line);
+    quote.append(row);
+  }
+  // Timestamped transcript lines read as a transcript; plain excerpts keep quotation marks.
+  if (!stamped) { quote.prepend("“"); quote.append("”"); quote.classList.add("knowledge-excerpt-quoted"); }
+  return quote;
+}
+// Escaped dashes keep the pattern intact however the bundle is decoded.
+const timestamp = /^\[(\d{4}-\d{2}-\d{2}T[\d:.]+Z)(?:[\u2013\u2014-][^\]]*)?\]\s*/;
