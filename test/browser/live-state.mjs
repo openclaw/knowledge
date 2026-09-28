@@ -25,11 +25,10 @@ const holdRequest = operation => {
   return { release, entered, completed };
 };
 let evidenceFailure, evidenceHashMismatch = false, hiddenEndpoint, relationshipWithoutReferences;
-const ownerSessionId=randomUUID();
-const api={runtime:{agent:{session:{getSessionEntry:()=>({sessionId:ownerSessionId,chatType:"direct"})}}},pluginConfig:{vault:{root:base+'/vault',statePath:base+'/state.sqlite',agentId:'main',vaultId:manifest.vaultId,publicationId:manifest.publicationId,operatorRead:true,writesEnabled:true}},registerService:s=>services.push(s)};
+const api={pluginConfig:{vault:{root:base+'/vault',statePath:base+'/state.sqlite',agentId:'main',vaultId:manifest.vaultId,publicationId:manifest.publicationId,operatorRead:true,writesEnabled:true}},registerService:s=>services.push(s)};
 const service=createKnowledgeService(api,{emit:(event,payload)=>{void page?.evaluate(({event,payload})=>window.emit?.(event,payload),{event,payload}).catch(()=>{});}});
 const context={source:'session-action',api,action:{client:{connId:'isolated-browser',scopes:['operator.write']}}};
-const agentContext={source:"tool",api,tool:{agentId:"main",sessionId:ownerSessionId,sessionKey:"agent:main:browser-lifecycle-test",senderIsOwner:true,assertInvocationCurrent(){}}};
+const agentContext={source:"tool",api,tool:{agentId:"main",memoryAudience:{kind:"owner-private",agentId:"main"},assertInvocationCurrent(){},assertMemoryAudienceCurrent(){}}};
 const browser=await chromium.launch({headless:true,args:['--disable-gpu'],executablePath:process.env.KNOWLEDGE_BROWSER_PATH??'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'});
 const entry=`import plugin from './src/control-ui.ts';
 const listeners=new Set(), events=new Map(); let mounted, controller;

@@ -16,20 +16,20 @@ async function fixture(t, overrides = {}) {
   await mkdir(path.join(root, 'private'));
   await mkdir(path.join(root, 'conversations', sessionId), { recursive: true });
   await writeFile(path.join(root, 'vault.json'), JSON.stringify({ format: 'knowledge-vault-v1', vaultId, agentId: 'main', generation: 0, publicationId }));
-  let capability, active = true, entry = { sessionId, chatType: 'direct' };
+  let capability, active = true;
   const services = [];
   const api = { id: 'knowledge', pluginConfig: { vault: { root, statePath: path.join(root, '..', `${path.basename(root)}.sqlite`), vaultId, publicationId, agentId: 'main', operatorRead: true, writesEnabled: true, ...overrides } },
-    registerMemoryCapability(c) { capability = c; }, registerService(s) { services.push(s); },
-    runtime: { agent: { session: { getSessionEntry() { return entry; } } } } };
+    registerMemoryCapability(c) { capability = c; }, registerService(s) { services.push(s); } };
   t.after(() => rm(api.pluginConfig.vault.statePath, { force: true }));
   const service = createKnowledgeService(api);
   const assertCurrent = () => { if (!active) throw Error('caller revoked'); };
-  const context = { authority: { kind: 'session', sessionKey: 'agent:main:test', sessionId, senderIsOwner: true, sandboxed: false }, assertCurrent };
-  const tool = { source: 'tool', api, tool: { ...context.authority, agentId: 'main', assertInvocationCurrent: assertCurrent } };
+  const audience = { kind: 'owner-private', agentId: 'main' };
+  const context = { authority: { kind: 'session', sessionKey: 'agent:main:test', sessionId, sandboxed: false, audience }, assertCurrent };
+  const tool = { source: 'tool', api, tool: { agentId: 'main', memoryAudience: audience, assertInvocationCurrent: assertCurrent, assertMemoryAudienceCurrent: assertCurrent } };
   const open = (ctx = context, agentId = 'main') => capability.providerRuntime.open({ cfg: {}, agentId, context: ctx });
   const save = (title, body = 'Evidence-backed durable note', ctx = tool) => service.save_page({ requestId: randomUUID(), expectedVaultId: vaultId, type: 'note', title, body }, ctx);
   return { api, service, services, open, save, tool, context, sessionId, vaultId, root, capability,
-    revoke() { active = false; }, setEntry(e) { entry = e; } };
+    revoke() { active = false; }, setAudience(value) { context.authority.audience = value; tool.tool.memoryAudience = value; } };
 }
 
 test('shared search/get/health roundtrip uses native publication, provenance and revision refs', async t => {
@@ -53,34 +53,33 @@ test('shared search/get/health roundtrip uses native publication, provenance and
   assert.equal((await f.service.record({ id: saved.id }, f.tool)).record.id, saved.id);
 });
 
-test('owner group and non-owner direct reads never acquire private scope', async t => {
+test('conversation audiences never acquire private scope', async t => {
   const f = await fixture(t); await f.save('Private sentinel');
-  f.setEntry({ sessionId: f.sessionId, chatType: 'group' });
+  const conversation = { kind: 'conversation', agentId: 'main', sessionKey: 'agent:main:group', sessionId: f.sessionId };
+  f.setAudience(conversation);
   await f.save('Conversation sentinel');
   const { provider } = await f.open();
   const group = await provider.search({ query: 'sentinel' });
   assert.equal(group.hits.length, 1); assert.match(group.hits[0].excerpt, /Conversation/);
   assert.doesNotMatch(JSON.stringify(await provider.health()), /Private/);
-  f.setEntry({ sessionId: f.sessionId, chatType: 'direct' });
+  f.setAudience({ kind: 'owner-private', agentId: 'main' });
   await assert.rejects(provider.search({ query: 'sentinel' }), /authority/);
-  const nonowner = await f.open({ ...f.context, authority: { ...f.context.authority, senderIsOwner: false } });
+  const nonowner = await f.open({ ...f.context, authority: { ...f.context.authority, audience: conversation } });
   assert.equal((await nonowner.provider.search({ query: 'Private' })).hits.length, 0);
 });
 
-test('operator authorization, missing authority, wrong incarnation, host and sandbox rejection', async t => {
+test('operator authorization and missing, foreign, host, and sandbox audience rejection', async t => {
   const f = await fixture(t); await f.save('Private note');
   const operator = { ...f.context, authority: { kind: 'operator', connId: 'real-connection', scopes: ['operator.read'] } };
   assert.equal((await (await f.open(operator)).provider.search({ query: 'Private' })).hits.length, 1);
   for (const authority of [
     { kind: 'operator', scopes: ['operator.read'] }, { kind: 'operator', connId: 'x', scopes: [] },
     { kind: 'host', operation: 'bootstrap' }, { ...f.context.authority, sandboxed: true },
-    { ...f.context.authority, sessionKey: 'agent:foreign:test' },
-    { ...f.context.authority, sessionKey: 'unscoped' },
-    { ...f.context.authority, sessionId: randomUUID() }, { ...f.context.authority, sessionId: undefined },
+    { ...f.context.authority, audience: undefined },
+    { ...f.context.authority, audience: { kind: 'owner-private', agentId: 'other' } },
   ]) await assert.rejects(f.open({ ...f.context, authority }), /authority/);
   await assert.rejects(f.open(f.context, 'other'), /authority/);
   await assert.rejects(f.open({ ...f.context, assertCurrent: undefined }), /authority/);
-  f.setEntry({ sessionId: f.sessionId }); await assert.rejects(f.open(), /authority/);
   const restricted = await fixture(t, { operatorRead: false }); await assert.rejects(restricted.open(operator), /authority/);
 });
 
@@ -183,11 +182,11 @@ test('prompt routes all workflows, obeys citation settings and omits disabled sa
 test('index failure is not empty success and late backend results are fenced', async () => {
   const { createKnowledgeMemoryRuntime } = await import('../dist/memory-provider.js');
   const sessionId = randomUUID(); let active = true, reply;
-  const api = { runtime: { agent: { session: { getSessionEntry() { return { sessionId, chatType: 'direct' }; } } } } };
   const storage = { config: { agentId: 'main', vaultId: randomUUID(), operatorRead: true }, async call(op) { assert.equal(op, 'search'); return reply(); } };
   const lane = { enqueue: operation => operation(), drain: async () => {}, fence: () => () => {} };
-  const context = { authority: { kind: 'session', sessionKey: 'agent:main:test', sessionId, senderIsOwner: true, sandboxed: false }, assertCurrent() { if (!active) throw Error('caller revoked'); } };
-  const { provider } = await createKnowledgeMemoryRuntime(api, storage, lane).open({ cfg: {}, agentId: 'main', context });
+  const context = { authority: { kind: 'session', sessionKey: 'agent:main:test', sessionId, sandboxed: false,
+    audience: { kind: 'owner-private', agentId: 'main' } }, assertCurrent() { if (!active) throw Error('caller revoked'); } };
+  const { provider } = await createKnowledgeMemoryRuntime(storage, lane).open({ cfg: {}, agentId: 'main', context });
   reply = () => ({ index: { state: 'unavailable', message: 'Index unavailable; retry' } });
   await assert.rejects(provider.search({ query: 'Orchid' }), /Index unavailable/);
   reply = () => { active = false; return { index: { state: 'ready', snapshot: 's', message: '' }, hits: [], total: 0, nextOffset: null, coverage: { complete: true, message: '' } }; };

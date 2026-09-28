@@ -116,9 +116,8 @@ test('status snapshot is stable for unchanged reads and detects equal-count edit
 
 
 test('agent bylines follow exact journaled revisions, never scope ownership or source attribution', async t => {
-  const f = await fixture(t), sessionId = randomUUID();
-  f.context.api.runtime = {agent:{session:{getSessionEntry:()=>({sessionId,chatType:'direct'})}}};
-  const agent = {source:'tool', api:f.context.api, tool:{agentId:'main',sessionId,sessionKey:'agent:main:authorship',senderIsOwner:true,assertInvocationCurrent(){}}};
+  const f = await fixture(t);
+  const agent = {source:'tool', api:f.context.api, tool:{agentId:'main',memoryAudience:{kind:'owner-private',agentId:'main'},assertInvocationCurrent(){},assertMemoryAudienceCurrent(){}}};
   const saved = await f.service.save_page({requestId:randomUUID(),title:'Authored page',type:'note',body:'Agent text'},agent);
   const record = (await f.service.record({id:saved.id,view:'raw'},f.context)).record;
   assert.equal(record.writtenByAgentId,'main');

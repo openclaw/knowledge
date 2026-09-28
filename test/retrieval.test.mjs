@@ -19,9 +19,8 @@ async function fixture(t) {
   const manifest = { format: 'knowledge-vault-v1', vaultId: randomUUID(), agentId: 'main', generation: 0, publicationId: randomUUID() };
   await mkdir(root); await mkdir(path.join(root, 'private')); await writeFile(path.join(root, 'vault.json'), JSON.stringify(manifest));
   const config = { root, statePath: path.join(base, 'state.sqlite'), agentId: 'main', vaultId: manifest.vaultId, publicationId: manifest.publicationId, operatorRead: true };
-  let entry = { sessionId, chatType: 'direct' };
-  const api = { pluginConfig: { vault: config }, runtime: { agent: { session: { getSessionEntry: () => entry } } } };
-  const owner = { source: 'tool', api, tool: { agentId: 'main', sessionId, sessionKey: 'agent:main:retrieval-test', senderIsOwner: true, assertInvocationCurrent() {} } };
+  const api = { pluginConfig: { vault: config } };
+  const owner = { source: 'tool', api, tool: { agentId: 'main', memoryAudience: { kind: 'owner-private', agentId: 'main' }, assertInvocationCurrent() {}, assertMemoryAudienceCurrent() {} } };
   const operator = { source: 'session-action', api, action: { client: { connId: 'test', scopes: ['operator.read'] } } };
   const service = createKnowledgeService(api), store = new SqliteIdentityStore(config.statePath);
   async function put(id, title, body, metadata = {}, partition = 'private') {
@@ -30,7 +29,8 @@ async function fixture(t) {
     const target = path.join(root, partition, 'notes', id + '.md'); await mkdir(path.dirname(target), { recursive: true });
     await writeFile(target, `---\n${stringify(envelope)}---\n${body}`); return target;
   }
-  return { root, base, config, manifest, sessionId, api, owner, operator, service, store, put, group: () => { entry = { sessionId, chatType: 'group' }; }, setEntry: value => { entry = value; } };
+  return { root, base, config, manifest, sessionId, api, owner, operator, service, store, put,
+    group: () => { owner.tool.memoryAudience = { kind: 'conversation', agentId: 'main', sessionKey: 'agent:main:group', sessionId }; } };
 }
 const ids = result => result.hits.map(h => h.record.id);
 const stable = value => JSON.parse(JSON.stringify(value), (k, v) => ['checkedAt', 'indexedAt'].includes(k) ? undefined : v);

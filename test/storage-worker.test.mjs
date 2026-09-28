@@ -15,12 +15,13 @@ test('authority revoked during a worker operation fails the write and publishes 
   await mkdir(path.join(root, 'private'));
   await writeFile(path.join(root, 'vault.json'), JSON.stringify({ format: 'knowledge-vault-v1', vaultId, agentId: 'main', generation: 0, publicationId }));
   const statePath = path.join(root, '..', `${path.basename(root)}.sqlite`); t.after(() => rm(statePath, { force: true }));
-  const api = { pluginConfig: { vault: { root, statePath, vaultId, publicationId, agentId: 'main', operatorRead: true, writesEnabled: true } }, registerService() {},
-    runtime: { agent: { session: { getSessionEntry() { return { sessionId, chatType: 'direct' }; } } } } };
+  const api = { pluginConfig: { vault: { root, statePath, vaultId, publicationId, agentId: 'main', operatorRead: true, writesEnabled: true } }, registerService() {} };
   const service = createKnowledgeService(api);
   let checks = 0, allowed = Infinity;
-  const tool = { source: 'tool', api, tool: { agentId: 'main', sessionKey: 'agent:main:test', sessionId, senderIsOwner: true,
-    assertInvocationCurrent() { if (++checks > allowed) throw Error('invocation revoked'); } } };
+  const assertCurrent = () => { if (++checks > allowed) throw Error('invocation revoked'); };
+  const tool = { source: 'tool', api, tool: { agentId: 'main', sessionKey: 'agent:main:test', sessionId,
+    memoryAudience: { kind: 'owner-private', agentId: 'main' }, assertInvocationCurrent: assertCurrent,
+    assertMemoryAudienceCurrent() {} } };
   const save = title => service.save_page({ requestId: randomUUID(), expectedVaultId: vaultId, type: 'note', title, body: 'Body' }, tool);
 
   await save('Warm up');

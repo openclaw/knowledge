@@ -38,7 +38,7 @@ export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureE
   };
   if (typeof api.registerMemoryCapability === "function") {
     api.registerMemoryCapability({
-      providerRuntime: createKnowledgeMemoryRuntime(api, storage, { enqueue, drain: () => pending, fence() {
+      providerRuntime: createKnowledgeMemoryRuntime(storage, { enqueue, drain: () => pending, fence() {
         const openedEpoch = epoch;
         return () => { assertCurrent(); if (openedEpoch !== epoch) throw Error("Knowledge service was reloaded."); };
       } }),

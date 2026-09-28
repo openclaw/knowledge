@@ -20,13 +20,13 @@ async function fixture(t) {
   const manifest = { format: 'knowledge-vault-v1', vaultId: randomUUID(), agentId: 'main', generation: 0, publicationId: randomUUID() };
   await writeFile(path.join(root, 'vault.json'), JSON.stringify(manifest));
   const config = { root, statePath: path.join(base, 'state.sqlite'), agentId: 'main', vaultId: manifest.vaultId, publicationId: manifest.publicationId, operatorRead: true, writesEnabled: true };
-  let entry = { sessionId: randomUUID(), chatType: 'direct' };
-  const api = { pluginConfig: { vault: config }, runtime: { agent: { session: { getSessionEntry: () => entry } } } };
-  const owner = { source: 'tool', api, tool: { agentId: 'main', sessionId: entry.sessionId, sessionKey: 'agent:main:write-test', senderIsOwner: true, assertInvocationCurrent() {} } };
+  const api = { pluginConfig: { vault: config } };
+  const owner = { source: 'tool', api, tool: { agentId: 'main', memoryAudience: { kind: 'owner-private', agentId: 'main' }, assertInvocationCurrent() {}, assertMemoryAudienceCurrent() {} } };
   const operator = { source: 'session-action', api, action: { client: { connId: 'test', scopes: ['operator.write'] } } };
   const store = new SqliteIdentityStore(config.statePath), service = createKnowledgeService(api);
   const access = () => authorizeVault(owner, 'main', true, true);
-  return { base, root, config, manifest, api, owner, operator, store, service, access, setEntry: v => { entry = v; } };
+  return { base, root, config, manifest, api, owner, operator, store, service, access,
+    setAudience: value => { owner.tool.memoryAudience = value; } };
 }
 const draft = () => ({ requestId: randomUUID(), title: 'Publication test', type: 'note', body: 'Authored text.\n' });
 const edit = (record, fields = {}) => ({ requestId: randomUUID(), id: record.id, expectedRevision: record.revision, expectedHash: record.hash, title: record.title, body: record.body, ...fields });
@@ -175,7 +175,7 @@ test('verification checks page occurrence fields and claim dates consistently wi
 
 test('group scope cannot discover private source receipts or verification content', async t => {
   const f = await batchFixture(t), receipt = await f.service.publish_batch(f.input, f.owner);
-  f.setEntry({ sessionId: f.owner.tool.sessionId, chatType: 'group' });
+  f.setAudience({ kind: 'conversation', agentId: 'main', sessionKey: 'agent:main:group', sessionId: randomUUID() });
   const source = await f.service.source_check(f.input.source, f.owner);
   assert.equal(source.state, 'missing'); assert.equal(source.receipt, null);
   const checked = await f.service.verify(verifyInput(receipt), f.owner);

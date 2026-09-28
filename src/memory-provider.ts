@@ -1,4 +1,3 @@
-import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 import { authorizeMemoryAccess } from "./access.js";
 import type { MemoryCitation, MemoryProviderRuntime, MemoryReference, MemorySearchRequest } from "./memory-provider-types.js";
 import type { StorageClient } from "./storage-client.js";
@@ -20,13 +19,13 @@ const integer = (n: number | undefined, fallback: number, max: number) => {
 const attribution = (origin?: string, who?: string) => `Origin: ${origin || "not recorded"}; attribution: ${who || "not recorded"}.`;
 
 /** Shares storage and the feature service's lane; never creates a second vault. */
-export function createKnowledgeMemoryRuntime(api: OpenClawPluginApi, storage: StorageClient | undefined, lane: MemoryServiceLane): MemoryProviderRuntime {
+export function createKnowledgeMemoryRuntime(storage: StorageClient | undefined, lane: MemoryServiceLane): MemoryProviderRuntime {
   let generation = 0, retiring = false;
   return {
     async open({ agentId, context }) {
       if (!storage) return { provider: null, error: "Knowledge memory requires a configured real vault; sample records are not memory." };
       const serviceFence = lane.fence(), openedGeneration = generation;
-      const access = authorizeMemoryAccess(api, context, storage.config.agentId, agentId, storage.config.operatorRead);
+      const access = authorizeMemoryAccess(context, storage.config.agentId, agentId, storage.config.operatorRead);
       let closed = false;
       const check = () => {
         serviceFence(); access.assertCurrent();

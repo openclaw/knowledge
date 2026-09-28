@@ -141,8 +141,9 @@ for (const stage of ['attachment-after-link', 'attachment-before-receipt']) test
 
 test('conversation uploads and downloads cannot reach private originals or receipts', async t => {
   const f = await fixture(t), sessionId = randomUUID();
-  f.api.runtime = { agent: { session: { getSessionEntry: () => ({ sessionId, chatType: 'group' }) } } };
-  const group = { source: 'tool', api: f.api, tool: { agentId: 'main', sessionId, sessionKey: 'agent:main:group-files', senderIsOwner: true, assertInvocationCurrent() {} } };
+  const group = { source: 'tool', api: f.api, tool: { agentId: 'main',
+    memoryAudience: { kind: 'conversation', agentId: 'main', sessionKey: 'agent:main:group-files', sessionId },
+    assertInvocationCurrent() {}, assertMemoryAudienceCurrent() {} } };
   const input = uploadInput({ data: Buffer.from('PRIVATE').toString('base64') });
   const privateFile = await f.service.attach(input, f.owner), privatePage = await f.service.save_page(draft([privateFile.evidence]), f.owner);
   await assert.rejects(f.service.attachment({ id: privatePage.id, path: privateFile.evidence.path, sha256: privateFile.evidence.sha256 }, group), /unavailable/);
@@ -183,12 +184,12 @@ test('native feature adapter accepts full-size upload and download chunks', asyn
 
 test('agent download JSON survives the dynamic-tool response budget with continuation intact', async t => {
   const f = await fixture(t), factories = new Map(), sessionId = randomUUID();
-  f.api.runtime = { agent: { session: { getSessionEntry: () => ({ sessionId, chatType: 'direct' }) } } };
   const { default: plugin } = await import('../dist/index.js');
   plugin.register({ ...f.api, id: 'knowledge', registerService() {}, registerSessionAction() {},
     registerTool(factory, options) { factories.set(options.name, factory); } });
   const tool = factories.get('knowledge_attachment')({ agentId: 'main', sessionId,
-    sessionKey: 'agent:main:download-budget', senderIsOwner: true, assertInvocationCurrent() {} });
+    sessionKey: 'agent:main:download-budget', memoryAudience: { kind: 'owner-private', agentId: 'main' },
+    assertInvocationCurrent() {}, assertMemoryAudienceCurrent() {} });
   const bytes = Buffer.from('Original 🌱 evidence\n'.repeat(10000));
   const evidence = await upload(f, bytes, { filename: '源'.repeat(65) + '.txt', mediaType: 'x'.repeat(200) });
   const saved = await f.service.save_page(draft([evidence]), f.owner);

@@ -71,16 +71,15 @@ and candidate kinds before dispatch. Search cursors are supported; automatic
 trigger/project selection is not.
 
 Operator reads require a current host capability, connection ID, read/write/admin
-scope, configured agent, and `operatorRead`. Session reads require current host
-session authority, session incarnation, and latest matching session metadata.
-Owner-direct sessions and their host-authorized spawned descendants read
-agent-private records. Other recognized chats and their spawned descendants read
-the originating parent's exact conversation partition. Spawn inheritance uses
-host-stamped parent incarnation and sender authority, never the worker's launch
-owner bit; stale or incomplete lineage fails closed. The same session-scope
-resolver and ancestor revalidation serve native tools. Host/background and
-sandboxed shared calls are denied rather than
-reconstructed as owner tool calls. Some host consumers lack sufficient authority;
+scope, configured agent, and `operatorRead`. Session reads consume the
+host-resolved audience on the provider authority. An `owner-private` audience
+maps to agent-private records; a `conversation` audience maps to its exact
+session UUID partition. Native tools consume `memoryAudience` from their tool
+context. Knowledge does not read session entries, infer owner status, or walk
+spawn lineage. OpenClaw owns those decisions, gives spawned children their
+validated root audience, and revokes stale lineage through the audience currency
+assertion. Missing and foreign audiences, host/background calls, and sandboxed
+provider calls are denied. Some host consumers lack sufficient authority;
 registering the provider runtime does not make those consumers work automatically.
 
 ## Prompt and lifecycle boundaries

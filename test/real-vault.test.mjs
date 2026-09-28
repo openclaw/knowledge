@@ -32,15 +32,15 @@ async function fixture(t) {
   await partition('private', { visibility: 'agent-private' }, 'PRIVATE SENTINEL');
   await partition(`conversations/${sessionId}`, { visibility: 'conversation', sessionId }, 'SHARED SENTINEL');
   const store = new SqliteIdentityStore(config.statePath);
-  let entry = { sessionId, chatType: 'direct' };
-  const api = { pluginConfig: { vault: config }, runtime: { state: { openKeyedStore: () => store }, agent: { session: { getSessionEntry: () => entry } } } };
-  const owner = { source: 'tool', api, tool: { agentId: 'main', sessionId, sessionKey: 'agent:main:test', senderIsOwner: true, assertInvocationCurrent() {} } };
+  const api = { pluginConfig: { vault: config }, runtime: { state: { openKeyedStore: () => store } } };
+  const owner = { source: 'tool', api, tool: { agentId: 'main', memoryAudience: { kind: 'owner-private', agentId: 'main' }, assertInvocationCurrent() {}, assertMemoryAudienceCurrent() {} } };
   const operator = { source: 'session-action', api, action: { client: { connId: 'authenticated-connection', scopes: ['operator.read'] } } };
-  return { root, base, config, manifest, sessionId, api, store, owner, operator, partition, setEntry: v => { entry = v; }, service: createKnowledgeService(api) };
+  const setAudience = audience => { owner.tool.memoryAudience = audience; };
+  return { root, base, config, manifest, sessionId, api, store, owner, operator, partition, setAudience, service: createKnowledgeService(api) };
 }
 const invokeAll = async (service, ctx) => Object.fromEntries(await Promise.all(Object.entries(service).filter(([name]) => ["status", "records", "record", "ontology", "diagnostics"].includes(name)).map(async ([name, op]) => [name, await op(name === 'record' ? { id: 'sample_person_alex' } : {}, ctx)])));
 
-test('UI and owner-direct tool read identical private records through the same service', async t => {
+test('UI and owner-private tool read identical private records through the same service', async t => {
   const f = await fixture(t);
   for (const ctx of [f.owner, f.operator]) {
     const output = await invokeAll(f.service, ctx);
@@ -52,8 +52,8 @@ test('UI and owner-direct tool read identical private records through the same s
   assert.deepEqual(await f.store.lookup('agent:main'), f.manifest);
 });
 
-test('group owner sees only its conversation: records, counts, evidence, ontology and diagnostics', async t => {
-  const f = await fixture(t); f.setEntry({ sessionId: f.sessionId, chatType: 'group' });
+test('conversation audience sees only its records, counts, evidence, ontology and diagnostics', async t => {
+  const f = await fixture(t); f.setAudience({ kind: 'conversation', agentId: 'main', sessionKey: 'agent:main:group', sessionId: f.sessionId });
   const before = await invokeAll(f.service, f.owner);
   assert.match(JSON.stringify(before), /SHARED SENTINEL/); assert.doesNotMatch(JSON.stringify(before), /PRIVATE SENTINEL/);
   // Changes in hidden scopes cannot change any authorized result except timestamps.
@@ -65,27 +65,24 @@ test('group owner sees only its conversation: records, counts, evidence, ontolog
   assert.equal((await f.service.record({ id: 'missing-private-id' }, f.owner)).record, null);
 });
 
-test('non-owner direct calls are conversation-scoped; missing chat authority fails closed', async t => {
+test('host-resolved conversation calls are scoped; missing audience fails closed', async t => {
   const f = await fixture(t);
-  const nonowner = { ...f.owner, tool: { ...f.owner.tool, senderIsOwner: false } };
+  const nonowner = { ...f.owner, tool: { ...f.owner.tool, memoryAudience: { kind: 'conversation', agentId: 'main', sessionKey: 'agent:main:direct', sessionId: f.sessionId } } };
   assert.equal((await f.service.status({}, nonowner)).scope, `conversation:${f.sessionId}`);
-  for (const chatType of [undefined, 'unknown']) {
-    f.setEntry({ sessionId: f.sessionId, chatType });
-    await assert.rejects(f.service.records({}, f.owner), /authority/);
-  }
+  const missing = { ...f.owner, tool: { ...f.owner.tool, memoryAudience: undefined } };
+  await assert.rejects(f.service.records({}, missing), /authority/);
 });
 
-test('missing, foreign, stale, and revoked tool authority fails for every operation', async t => {
+test('missing, foreign, and revoked tool authority fails for every operation', async t => {
   const f = await fixture(t);
-  for (const override of [{ agentId: 'other' }, { sessionId: randomUUID() }, { sessionKey: undefined }, { assertInvocationCurrent: undefined }, { assertInvocationCurrent() { throw Error('revoked'); } }]) {
+  for (const override of [{ memoryAudience: undefined }, { memoryAudience: { kind: 'owner-private', agentId: 'other' } }, { assertInvocationCurrent: undefined }, { assertInvocationCurrent() { throw Error('revoked'); } }, { assertMemoryAudienceCurrent() { throw Error('audience revoked'); } }]) {
     for (const [name, op] of Object.entries(f.service)) await assert.rejects(async () => op(name === 'record' ? { id: 'sample_person_alex' } : {}, { ...f.owner, tool: { ...f.owner.tool, ...override } }));
   }
-  f.setEntry(undefined); await assert.rejects(f.service.records({}, f.owner));
 });
 
 test('operator scopes are explicit, selectors cannot create conversation authority', async t => {
   const f = await fixture(t);
-  for (const action of [{}, { client: { scopes: ['operator.read'] } }, { client: { connId: 'x', scopes: [] } }, { ...f.operator.action, agentId: 'other' }, { ...f.operator.action, sessionKey: f.owner.tool.sessionKey }]) {
+  for (const action of [{}, { client: { scopes: ['operator.read'] } }, { client: { connId: 'x', scopes: [] } }, { ...f.operator.action, agentId: 'other' }, { ...f.operator.action, sessionKey: 'agent:main:selected' }]) {
     await assert.rejects(f.service.records({}, { ...f.operator, action }));
   }
   const restricted = createKnowledgeService({ ...f.api, pluginConfig: { vault: { ...f.config, operatorRead: false } } });
@@ -95,8 +92,7 @@ test('operator scopes are explicit, selectors cannot create conversation authori
 
 test('empty conversation scope returns an empty catalog, without creating files or reading private ontology', async t => {
   const f = await fixture(t), sessionId = randomUUID();
-  f.setEntry({ sessionId, chatType: 'channel' });
-  const ctx = { ...f.owner, tool: { ...f.owner.tool, sessionId } };
+  const ctx = { ...f.owner, tool: { ...f.owner.tool, memoryAudience: { kind: 'conversation', agentId: 'main', sessionKey: 'agent:main:channel', sessionId } } };
   const output = await invokeAll(f.service, ctx);
   assert.equal(output.status.records, 0); assert.equal(output.record.record, null); assert.equal(output.diagnostics.total, 0);
   assert.equal(output.ontology.available, true); assert.doesNotMatch(JSON.stringify(output), /PRIVATE SENTINEL/);
@@ -143,9 +139,9 @@ test('moving the same vault preserves identity, reordered manifest keys are imma
 test('authority and identity are rechecked after asynchronous reads', async t => {
   const f = await fixture(t), real = new RealVault(f.config, f.store);
   await assert.rejects(real.run(authorizeVault(f.owner, 'main', true), async vault => {
-    const result = await vault.list({}); f.setEntry({ sessionId: f.sessionId, chatType: 'group' }); return result;
+    const result = await vault.list({}); f.setAudience({ kind: 'conversation', agentId: 'main', sessionKey: 'agent:main:group', sessionId: f.sessionId }); return result;
   }), /authority/);
-  f.setEntry({ sessionId: f.sessionId, chatType: 'direct' });
+  f.setAudience({ kind: 'owner-private', agentId: 'main' });
   await assert.rejects(real.run(authorizeVault(f.owner, 'main', true), async vault => {
     const result = await vault.list({}); await writeFile(path.join(f.root, 'vault.json'), JSON.stringify({ ...f.manifest, publicationId: randomUUID() })); return result;
   }), /identity/);
@@ -156,7 +152,7 @@ test('hardlinks, file and partition symlinks cannot expose another scope', async
   await link(path.join(f.root, 'private', 'people', 'alex-rivera.md'), path.join(shared, 'leak.md'));
   await symlink(path.join(f.root, 'private'), path.join(shared, 'leak-dir'));
   await symlink(path.join(f.root, 'private', 'people', 'alex-rivera.md'), path.join(shared, 'leak-file.md'));
-  f.setEntry({ sessionId: f.sessionId, chatType: 'group' });
+  f.setAudience({ kind: 'conversation', agentId: 'main', sessionKey: 'agent:main:group', sessionId: f.sessionId });
   assert.doesNotMatch(JSON.stringify(await invokeAll(f.service, f.owner)), /PRIVATE SENTINEL/);
   await rename(shared, shared + '-saved'); await symlink(path.join(f.root, 'private'), shared);
   await assert.rejects(f.service.records({}, f.owner), /identity/);
@@ -205,7 +201,7 @@ test('build metadata retains the real-vault configuration contract', async () =>
 
 
 test('all opt-in inspection views retain conversation scope and authority', async t => {
-  const f = await fixture(t); f.setEntry({ sessionId: f.sessionId, chatType: 'group' });
+  const f = await fixture(t); f.setAudience({ kind: 'conversation', agentId: 'main', sessionKey: 'agent:main:group', sessionId: f.sessionId });
   for (const input of [{id:'sample_person_alex',view:'raw'}, {id:'sample_person_alex',includeMetadata:true,includeReferences:true}]) {
     const result = await f.service.record(input, f.owner);
     assert.ok(Check(contract.operations.record.output, result));

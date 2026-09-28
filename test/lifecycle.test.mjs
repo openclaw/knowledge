@@ -19,13 +19,13 @@ async function fixture(t) {
   const manifest = { format: 'knowledge-vault-v1', vaultId: randomUUID(), agentId: 'main', generation: 0, publicationId: randomUUID() };
   await writeFile(path.join(root, 'vault.json'), JSON.stringify(manifest));
   const config = { root, statePath: path.join(base, 'state.sqlite'), agentId: 'main', vaultId: manifest.vaultId, publicationId: manifest.publicationId, operatorRead: true, writesEnabled: true };
-  let entry = { sessionId: randomUUID(), chatType: 'direct' };
-  const api = { pluginConfig: { vault: config }, runtime: { agent: { session: { getSessionEntry: () => entry } } } };
-  const owner = { source: 'tool', api, tool: { agentId: 'main', sessionId: entry.sessionId, sessionKey: 'agent:main:write-test', senderIsOwner: true, assertInvocationCurrent() {} } };
+  const api = { pluginConfig: { vault: config } };
+  const owner = { source: 'tool', api, tool: { agentId: 'main', memoryAudience: { kind: 'owner-private', agentId: 'main' }, assertInvocationCurrent() {}, assertMemoryAudienceCurrent() {} } };
   const operator = { source: 'session-action', api, action: { client: { connId: 'test', scopes: ['operator.write'] } } };
   const store = new SqliteIdentityStore(config.statePath), service = createKnowledgeService(api);
   const access = () => authorizeVault(owner, 'main', true, true);
-  return { base, root, config, manifest, api, owner, operator, store, service, access, setEntry: v => { entry = v; } };
+  return { base, root, config, manifest, api, owner, operator, store, service, access,
+    setAudience: value => { owner.tool.memoryAudience = value; } };
 }
 const draft = () => ({ requestId: randomUUID(), title: 'Publication test', type: 'note', body: 'Authored text.\n' });
 const edit = (record, fields = {}) => ({ requestId: randomUUID(), id: record.id, expectedRevision: record.revision, expectedHash: record.hash, title: record.title, body: record.body, ...fields });
@@ -77,7 +77,7 @@ test('recent groups exact lifecycle publications before paging, suppresses inact
   }
   assert.deepEqual([first.items[0],...rest],all.items,'keyset paging cannot split a correction or shift after a new save');
   assert.equal((await f.service.recent({},f.operator)).items[0].title,'New arrival');
-  f.setEntry({sessionId:f.owner.tool.sessionId,chatType:'group'});
+  f.setAudience({kind:'conversation',agentId:'main',sessionKey:'agent:main:group',sessionId:randomUUID()});
   assert.deepEqual((await f.service.recent({},f.owner)).items,[],'private activity never appears in conversation scope');
 });
 
@@ -196,7 +196,7 @@ test('invalid, stale, hidden and wrong-kind corrections fail before receipt; no 
   }
   await assert.rejects(f.service.correct(input,f.operator),/chat/);
   await assert.rejects(f.service.withdraw(withdrawal(original),f.operator),/chat/);
-  f.setEntry({sessionId:f.owner.tool.sessionId,chatType:'group'});
+  f.setAudience({kind:'conversation',agentId:'main',sessionKey:'agent:main:group',sessionId:randomUUID()});
   await assert.rejects(f.service.correct(input,f.owner),/unavailable/);
   await assert.rejects(f.service.withdraw(withdrawal(original),f.owner),/unavailable/);
   assert.equal((await f.service.mutation({requestId:input.requestId},f.owner)).receipt,null);
@@ -244,10 +244,10 @@ test('pre-upgrade withdrawal guards apply to records and counts even if only sta
 
 test('lifecycle writes recheck current authority before publishing accepted intent',async t=>{
   const f=await foundation(t), original=await f.service.create_claim(f.claim(),f.owner), input=correction(f,original);
-  const publisher=new Publisher(f.config,f.store,where=>{if(where==='after-accept')f.setEntry({sessionId:f.owner.tool.sessionId,chatType:'group'});});
+  const publisher=new Publisher(f.config,f.store,where=>{if(where==='after-accept')f.setAudience({kind:'conversation',agentId:'main',sessionKey:'agent:main:group',sessionId:randomUUID()});});
   await assert.rejects(publisher.correct(input,f.access(),'agent'),/authority/);
   assert.equal((await f.service.mutation({requestId:input.requestId},f.owner)).receipt,null);
-  f.setEntry({sessionId:f.owner.tool.sessionId,chatType:'direct'});
+  f.setAudience({kind:'owner-private',agentId:'main'});
   assert.equal((await f.service.correct(input,f.owner)).state,'published');
 });
 

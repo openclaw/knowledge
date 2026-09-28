@@ -1,12 +1,11 @@
-import { parseAgentSessionKey } from "openclaw/plugin-sdk/routing";
 import type { FeatureInvocationContext } from "openclaw/plugin-sdk/feature-plugin";
-import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 import type { MemoryCallerContext } from "./memory-provider-types.js";
 import type { Scope } from "./model.js";
 
 const denied = () => new Error("Knowledge access unavailable: trusted agent/session authority is required.");
 export type VaultAccess = { scope: Exclude<Scope, { visibility: "sample" }>; assertCurrent: () => void };
-type Resolution = { scope: VaultAccess["scope"]; lineage?: unknown[] };
+type Resolution = { scope: VaultAccess["scope"] };
+type MemoryAudience = NonNullable<Extract<MemoryCallerContext["authority"], { kind: "session" }>["audience"]>;
 
 function bindAccess(resolve: () => Resolution): VaultAccess {
   const initial = resolve(), identity = JSON.stringify(initial);
@@ -30,42 +29,22 @@ export function authorizeVault(context: FeatureInvocationContext, agentId: strin
     context.signal?.throwIfAborted();
     if (typeof tool.assertInvocationCurrent !== "function") throw denied();
     tool.assertInvocationCurrent();
-    return sessionScope(context.api, agentId, tool);
+    tool.assertMemoryAudienceCurrent?.();
+    return audienceScope(tool.memoryAudience, agentId);
   });
 }
 
-function sessionScope(api: OpenClawPluginApi, agentId: string, caller: {
-  agentId?: string; sessionKey?: string; sessionId?: string; senderIsOwner?: boolean;
-}): Resolution {
-  if (caller.agentId !== agentId) throw denied();
-  let { sessionKey, sessionId, senderIsOwner } = caller;
-  let parentLifecycleRevision: string | undefined;
-  const seen = new Set<string>(), lineage: unknown[] = [];
-  for (let depth = 0; depth < 64; depth++) {
-    if (!sessionKey || parseAgentSessionKey(sessionKey)?.agentId !== agentId || !sessionId || !/^[a-f0-9-]{36}$/.test(sessionId) || seen.has(sessionKey)) throw denied();
-    seen.add(sessionKey);
-    const entry = api.runtime.agent.session.getSessionEntry({ agentId, sessionKey, readConsistency: "latest" });
-    if (!entry || entry.sessionId !== sessionId || (depth > 0 && entry.lifecycleRevision !== parentLifecycleRevision)) throw denied();
-    lineage.push([sessionKey, sessionId, entry.lifecycleRevision, entry.chatType, entry.spawnedBy, entry.parentSessionKey, entry.parentSessionId, entry.parentSessionLifecycleRevision, entry.spawnedBySenderIsOwner]);
-    if (entry.spawnedBy !== undefined) {
-      // Spawn captures the parent's invocation owner bit and exact incarnation.
-      // The worker's launch identity and any copied chat metadata are not grants.
-      if (!entry.spawnedBy || entry.parentSessionKey !== entry.spawnedBy || !entry.parentSessionId || typeof entry.spawnedBySenderIsOwner !== "boolean") throw denied();
-      sessionKey = entry.spawnedBy;
-      sessionId = entry.parentSessionId;
-      parentLifecycleRevision = entry.parentSessionLifecycleRevision;
-      senderIsOwner = entry.spawnedBySenderIsOwner;
-      continue;
-    }
-    if (entry.chatType === "direct" && senderIsOwner === true) return { scope: { visibility: "agent-private", agentId }, lineage };
-    if (!["direct", "group", "channel"].includes(entry.chatType ?? "")) throw denied();
-    return { scope: { visibility: "conversation", agentId, sessionId }, lineage };
-  }
-  throw denied();
+function audienceScope(
+  audience: MemoryAudience | undefined,
+  agentId: string,
+): Resolution {
+  if (!audience || audience.agentId !== agentId) throw denied();
+  if (audience.kind === "owner-private") return { scope: { visibility: "agent-private", agentId } };
+  return { scope: { visibility: "conversation", agentId, sessionId: audience.sessionId } };
 }
 
 /** Provider runtime access is host-issued, not a fabricated feature/tool invocation. */
-export function authorizeMemoryAccess(api: OpenClawPluginApi, context: MemoryCallerContext,
+export function authorizeMemoryAccess(context: MemoryCallerContext,
   agentId: string, requestedAgent: string, operatorRead: boolean): VaultAccess {
   return bindAccess(() => {
     if (typeof context.assertCurrent !== "function" || requestedAgent !== agentId) throw denied();
@@ -76,9 +55,9 @@ export function authorizeMemoryAccess(api: OpenClawPluginApi, context: MemoryCal
       if (!operatorRead || !caller.connId || !caller.scopes.some(s => ["operator.read", "operator.write", "operator.admin"].includes(s))) throw denied();
       return { scope: { visibility: "agent-private", agentId } };
     }
-    // Background host calls are not session delegation. Keep the shared-memory
-    // sandbox boundary; native children use the same lineage resolver as tools.
-    if (caller.kind !== "session" || caller.sandboxed || parseAgentSessionKey(caller.sessionKey)?.agentId !== agentId) throw denied();
-    return sessionScope(api, agentId, { ...caller, agentId: requestedAgent });
+    // Background host calls are not session delegation. Session identity is a
+    // host-minted audience; providers consume it without reconstructing lineage.
+    if (caller.kind !== "session" || caller.sandboxed) throw denied();
+    return audienceScope(caller.audience, agentId);
   });
 }

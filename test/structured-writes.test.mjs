@@ -19,13 +19,13 @@ async function fixture(t) {
   const manifest = { format: 'knowledge-vault-v1', vaultId: randomUUID(), agentId: 'main', generation: 0, publicationId: randomUUID() };
   await writeFile(path.join(root, 'vault.json'), JSON.stringify(manifest));
   const config = { root, statePath: path.join(base, 'state.sqlite'), agentId: 'main', vaultId: manifest.vaultId, publicationId: manifest.publicationId, operatorRead: true, writesEnabled: true };
-  let entry = { sessionId: randomUUID(), chatType: 'direct' };
-  const api = { pluginConfig: { vault: config }, runtime: { agent: { session: { getSessionEntry: () => entry } } } };
-  const owner = { source: 'tool', api, tool: { agentId: 'main', sessionId: entry.sessionId, sessionKey: 'agent:main:write-test', senderIsOwner: true, assertInvocationCurrent() {} } };
+  const api = { pluginConfig: { vault: config } };
+  const owner = { source: 'tool', api, tool: { agentId: 'main', memoryAudience: { kind: 'owner-private', agentId: 'main' }, assertInvocationCurrent() {}, assertMemoryAudienceCurrent() {} } };
   const operator = { source: 'session-action', api, action: { client: { connId: 'test', scopes: ['operator.write'] } } };
   const store = new SqliteIdentityStore(config.statePath), service = createKnowledgeService(api);
   const access = () => authorizeVault(owner, 'main', true, true);
-  return { base, root, config, manifest, api, owner, operator, store, service, access, setEntry: v => { entry = v; } };
+  return { base, root, config, manifest, api, owner, operator, store, service, access,
+    setAudience: value => { owner.tool.memoryAudience = value; } };
 }
 const draft = () => ({ requestId: randomUUID(), title: 'Publication test', type: 'note', body: 'Authored text.\n' });
 const edit = (record, fields = {}) => ({ requestId: randomUUID(), id: record.id, expectedRevision: record.revision, expectedHash: record.hash, title: record.title, body: record.body, ...fields });
@@ -152,7 +152,7 @@ test('new mutations and connections obey scope, read-only authority and historic
   assert.equal((await f.service.connections({id:f.pages.project.id,historical:true},f.owner)).total,0);
   await writeFile(path.join(f.root,'private',receipt.path),original);
   assert.equal((await f.service.connections({id:f.pages.project.id,historical:true},f.owner)).total,0);
-  f.setEntry({sessionId:f.owner.tool.sessionId,chatType:'group'});
+  f.setAudience({kind:'conversation',agentId:'main',sessionKey:'agent:main:group',sessionId:randomUUID()});
   await assert.rejects(f.service.create_claim(f.claim(),f.owner),/unavailable/);
   await assert.rejects(f.service.create_relationship(f.edge(),f.owner),/unavailable/);
   assert.equal((await f.service.connections({id:f.pages.project.id,historical:true},f.owner)).total,0);

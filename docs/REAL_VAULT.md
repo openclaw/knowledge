@@ -87,31 +87,24 @@ Writable vaults use Git by default, without a separate enable flag. Scoped scans
 | Caller | Required trusted evidence | Scope |
 |---|---|---|
 | Control UI/operator | Authenticated connection ID, host `operator.read` (or its write/admin implication), configured `operatorRead: true` | Configured agent's private partition |
-| Agent, owner direct chat | Matching host agent, session key and UUID, latest stored session entry with `chatType: direct`, trusted `senderIsOwner: true`, live invocation guard | Agent-private partition |
-| Agent, other known direct/group/channel chat | Same current agent/session verification and live guard; known chat type | Exact host session UUID's conversation partition |
-| Spawned child of the configured agent | Current child invocation plus host-stamped parent key, UUID, lifecycle revision and parent sender-owner bit at every spawn hop; all ancestor sessions still current | Same partition as the originating parent: owner-direct private, otherwise the parent's conversation UUID |
-| Missing/unknown/stale context, command adapter, foreign agent | Insufficient authority | Denied |
+| Agent, owner-private audience | Host-minted `owner-private` memory audience for the configured agent, live invocation guard, current audience guard | Agent-private partition |
+| Agent, conversation audience | Host-minted `conversation` memory audience for the configured agent with its session key and UUID, live invocation guard, current audience guard | Exact audience session UUID's conversation partition |
+| Spawned child of the configured agent | The host validates every stamped parent incarnation and gives the child its root's audience | Same partition as the originating root: owner-private or the root conversation UUID |
+| Missing/stale audience, command adapter, foreign agent | Insufficient authority | Denied |
 
 A selected browser session is rejected on this first private-vault surface; it
 cannot impersonate conversation authority. Operator browsing of shared scopes is
-not exposed yet. An owner speaking in a group does not gain private access.
-Missing chat type is denied, except for a spawned child with complete trusted
-lineage. A worker's synthetic launch owner bit or copied chat type never upgrades
-its parent's access. Nested children follow the same rule. Cross-agent, missing,
-cyclic, or stale lineage is denied; older children without a host authority stamp
-must be respawned. A dashboard/navigation parent link alone is not a spawn grant.
-This applies to OpenClaw-created child sessions. Native runtime child threads
-still require that runtime's supported host-tool bridge; Knowledge cannot
-authorize a tool call that the host never dispatches.
-Resetting only a worker retains its inherited scope while its parent remains
-current; the worker's old invocation capabilities are still invalidated.
-Agent authority is re-evaluated after asynchronous reads, including session reset
-and invocation expiry, and includes every ancestor's incarnation and lineage.
+not exposed yet. Knowledge does not inspect chat metadata, read session entries,
+or reconstruct spawn lineage. OpenClaw resolves direct-owner, conversation, and
+spawn inheritance once and supplies the resulting audience to providers and
+plugin tools. A missing or foreign `memoryAudience` is denied. OpenClaw's
+`assertMemoryAudienceCurrent` guard revokes stale lineage; Knowledge calls it
+together with the invocation guard before and after asynchronous work.
 
-Conversation partition identity follows the SDK's `sessionId`. A host reset may
-retain that UUID while rotating its lifecycle revision; existing child grants
-are invalidated in either case. Cross-conversation recall, background host access
-and operator shared-scope browsing need explicit policy and are not silently granted.
+Conversation partition identity follows the host audience's `sessionId`.
+Cross-conversation recall, background host access and operator shared-scope
+browsing need explicit policy and are not silently granted. Sandbox state remains
+a separate provider restriction; Knowledge denies sandboxed provider calls.
 
 Real records retain the existing envelope and use exactly one of:
 
@@ -159,8 +152,8 @@ an unavailable vault is not reported as an empty successful result.
 ## Verification and remaining work
 
 `test/real-vault.test.mjs` exercises actual guarded filesystem operations and the
-shared service, with host-authority test doubles and a real plugin-owned SQLite identity store. It covers
-UI/tool read agreement, foreign/missing/stale authority, group-owner isolation,
+shared service, with host-audience test doubles and a real plugin-owned SQLite identity store. It covers
+UI/tool read agreement, foreign/missing/revoked authority, conversation isolation,
 all read surfaces, invisible-scope changes, empty conversation scopes, scope
 mismatches, file preservation, identity replacement/restart/move, post-read
 revocation, hardlinks/symlinks, and external edit/rename/delete observations.
