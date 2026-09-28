@@ -24,9 +24,9 @@ async function fixture(t, overrides = {}) {
   t.after(() => rm(api.pluginConfig.vault.statePath, { force: true }));
   const service = createKnowledgeService(api);
   const assertCurrent = () => { if (!active) throw Error('caller revoked'); };
-  const context = { version: 2, authority: { kind: 'session', sessionKey: 'agent:main:test', sessionId, senderIsOwner: true, sandboxed: false }, assertCurrent };
+  const context = { authority: { kind: 'session', sessionKey: 'agent:main:test', sessionId, senderIsOwner: true, sandboxed: false }, assertCurrent };
   const tool = { source: 'tool', api, tool: { ...context.authority, agentId: 'main', assertInvocationCurrent: assertCurrent } };
-  const open = (ctx = context, agentId = 'main') => capability.runtimeV2.open({ cfg: {}, agentId, context: ctx });
+  const open = (ctx = context, agentId = 'main') => capability.providerRuntime.open({ cfg: {}, agentId, context: ctx });
   const save = (title, body = 'Evidence-backed durable note', ctx = tool) => service.save_page({ requestId: randomUUID(), expectedVaultId: vaultId, type: 'note', title, body }, ctx);
   return { api, service, services, open, save, tool, context, sessionId, vaultId, root, capability,
     revoke() { active = false; }, setEntry(e) { entry = e; } };
@@ -36,6 +36,7 @@ test('shared search/get/health roundtrip uses native publication, provenance and
   const f = await fixture(t);
   const saved = await f.save('Orchid decision', 'Choose SQLite\nBecause local persistence matters.');
   const { provider } = await f.open();
+  assert.deepEqual(provider.capabilities, { sources: ['memory'], pagination: true, candidates: [], projectFilter: false });
   const result = await provider.search({ query: 'Orchid' });
   assert.equal(result.hits.length, 1);
   const hit = result.hits[0];
@@ -146,7 +147,7 @@ test('withdrawn records stay unavailable after external restoration; fixtures ar
 });
 
 test('retirement drains the shared lane, rollback resumes, close-all fences retained handles', async t => {
-  const f = await fixture(t), { provider } = await f.open(), runtime = f.capability.runtimeV2;
+  const f = await fixture(t), { provider } = await f.open(), runtime = f.capability.providerRuntime;
   const retirement = runtime.prepareReload({ retireRuntime: true, retiringEmbeddingProviders: [] });
   await assert.rejects(provider.health(), /retiring/); await retirement.drain();
   retirement.resume(); assert.equal((await provider.health()).status, 'ready');
@@ -158,7 +159,7 @@ test('sample is not memory; entry retains native tools and prompt honors missing
   let capability; const names = [], services = [];
   plugin.register({ id: 'knowledge', registerMemoryCapability(c) { capability = c; }, registerService(s) { services.push(s); }, registerSessionAction() {}, registerTool(_f, options) { names.push(options.name); } });
   assert.equal(names.length, Object.values(contract.operations).filter(o => o.tool).length);
-  assert.equal((await capability.runtimeV2.open({ cfg: {}, agentId: 'main', context: { version: 2 } })).provider, null);
+  assert.equal((await capability.providerRuntime.open({ cfg: {}, agentId: 'main', context: {} })).provider, null);
   assert.deepEqual(capability.promptBuilder({ availableTools: new Set(names) }), []);
   assert.equal(capability.flushPlanResolver({}), null);
   assert.deepEqual(buildKnowledgeMemoryPrompt({ availableTools: new Set() }), []);
@@ -185,7 +186,7 @@ test('index failure is not empty success and late backend results are fenced', a
   const api = { runtime: { agent: { session: { getSessionEntry() { return { sessionId, chatType: 'direct' }; } } } } };
   const storage = { config: { agentId: 'main', vaultId: randomUUID(), operatorRead: true }, async call(op) { assert.equal(op, 'search'); return reply(); } };
   const lane = { enqueue: operation => operation(), drain: async () => {}, fence: () => () => {} };
-  const context = { version: 2, authority: { kind: 'session', sessionKey: 'agent:main:test', sessionId, senderIsOwner: true, sandboxed: false }, assertCurrent() { if (!active) throw Error('caller revoked'); } };
+  const context = { authority: { kind: 'session', sessionKey: 'agent:main:test', sessionId, senderIsOwner: true, sandboxed: false }, assertCurrent() { if (!active) throw Error('caller revoked'); } };
   const { provider } = await createKnowledgeMemoryRuntime(api, storage, lane).open({ cfg: {}, agentId: 'main', context });
   reply = () => ({ index: { state: 'unavailable', message: 'Index unavailable; retry' } });
   await assert.rejects(provider.search({ query: 'Orchid' }), /Index unavailable/);

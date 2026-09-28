@@ -1,12 +1,18 @@
 # Knowledge as a memory provider
 
-This branch targets OpenClaw's unreleased provider-neutral Memory Runtime V2.
-It uses the public `openclaw/plugin-sdk/memory-host-search` contract, not host
-internals. The local development dependency points at `../openclaw-memory-runtime`;
-this is a branch integration requirement, not a claim about a published release.
-Build that checkout's SDK declarations before `npm run check` / `npm run build`.
-Older hosts without `getActiveMemoryProvider` are rejected at registration.
-The package's existing peer range is not sufficient to establish V2 support.
+This branch targets OpenClaw's unreleased provider-neutral memory runtime. It
+registers `providerRuntime` through the public `MemoryPluginCapability` contract
+from `openclaw/plugin-sdk/memory-host-core`; it does not import the private-local
+`memory-host-search` facade or host internals. Local types are derived from
+`NonNullable<MemoryPluginCapability["providerRuntime"]>` in
+`src/memory-provider-types.ts`.
+
+The local development dependency points at `../openclaw-memory-runtime`; this is
+a branch integration requirement, not a claim about a published release. Build
+that checkout's SDK declarations before `npm run check` / `npm run build`. An
+older host ignores `providerRuntime`, so it can still load Knowledge's native
+surfaces but cannot use Knowledge as the shared memory provider. The package's
+existing peer range does not establish provider-runtime support.
 
 ## Ownership and activation
 
@@ -36,9 +42,10 @@ fences retained leases; reload rollback can resume the drained old runtime.
 ## Shared reads
 
 - Search uses current, eligible, scope-filtered records and keyword BM25, not
-  embeddings. Scores are query-local. Source constraints never cause a search
-  of transcripts; a mixed request reports partial coverage, and session-only
-  requests fail explicitly. Curated project-key requests are unsupported.
+  embeddings. Scores are query-local and `minScore` is enforced. The provider
+  declares only the `memory` source, so the host rejects any request containing
+  `sessions` before calling Knowledge. Knowledge retains its own validation for
+  direct contract use. Curated project-key requests are unsupported.
 - Opaque references contain the provider, record ID, and revision plus content
   hash. They grant no access and remain valid through a rename only when the
   record bytes/revision remain unchanged. Changed revisions reject reads.
@@ -58,6 +65,11 @@ fences retained leases; reload rollback can resume the drained old runtime.
 - Health reports scoped vault/ontology validation; it does not invent embedding
   health or claim keyword-index readiness before a search.
 
+The handle declares `{ sources: ["memory"], pagination: true, candidates: [],
+projectFilter: false }`. The host rejects undeclared sources, project filters,
+and candidate kinds before dispatch. Search cursors are supported; automatic
+trigger/project selection is not.
+
 Operator reads require a current host capability, connection ID, read/write/admin
 scope, configured agent, and `operatorRead`. Session reads require current host
 session authority, session incarnation, and latest matching session metadata.
@@ -69,7 +81,7 @@ owner bit; stale or incomplete lineage fails closed. The same session-scope
 resolver and ancestor revalidation serve native tools. Host/background and
 sandboxed shared calls are denied rather than
 reconstructed as owner tool calls. Some host consumers lack sufficient authority;
-registering V2 does not make those consumers work automatically.
+registering the provider runtime does not make those consumers work automatically.
 
 ## Prompt and lifecycle boundaries
 

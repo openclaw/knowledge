@@ -21,7 +21,7 @@ function authority() {
   const current = () => { if (!active) throw Error('invocation revoked'); };
   const tool = { source: 'tool', api, tool: { agentId: 'main', sessionKey: childKey, sessionId: child.sessionId,
     senderIsOwner: true, assertInvocationCurrent: current } };
-  const memory = { version: 2, authority: { kind: 'session', sessionKey: childKey, sessionId: child.sessionId,
+  const memory = { authority: { kind: 'session', sessionKey: childKey, sessionId: child.sessionId,
     senderIsOwner: true, sandboxed: false }, assertCurrent: current };
   const access = () => authorizeVault(tool, 'main', true, true);
   return { parentKey, childKey, parent, child, entries, api, tool, memory, access, revoke() { active = false; } };
@@ -113,7 +113,7 @@ async function serviceFixture(t) {
   f.api.pluginConfig = { vault: { root: vault, statePath: path.join(root, 'knowledge.sqlite'), vaultId,
     publicationId, agentId: 'main', writesEnabled: true, operatorRead: true } };
   let memory;
-  f.api.registerMemoryCapability = c => { memory = c.runtimeV2; };
+  f.api.registerMemoryCapability = c => { memory = c.providerRuntime; };
   const service = createKnowledgeService(f.api);
   const parentTool = { ...f.tool, tool: { ...f.tool.tool, sessionKey: f.parentKey, sessionId: f.parent.sessionId } };
   const save = (title, context = f.tool) => service.save_page({ requestId: randomUUID(), expectedVaultId: vaultId,

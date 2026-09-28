@@ -1,7 +1,7 @@
 import { parseAgentSessionKey } from "openclaw/plugin-sdk/routing";
 import type { FeatureInvocationContext } from "openclaw/plugin-sdk/feature-plugin";
-import type { MemoryCallerContextV2 } from "openclaw/plugin-sdk/memory-host-search";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
+import type { MemoryCallerContext } from "./memory-provider-types.js";
 import type { Scope } from "./model.js";
 
 const denied = () => new Error("Knowledge access unavailable: trusted agent/session authority is required.");
@@ -64,11 +64,11 @@ function sessionScope(api: OpenClawPluginApi, agentId: string, caller: {
   throw denied();
 }
 
-/** V2 is a host-issued read capability, not a fabricated feature/tool invocation. */
-export function authorizeMemoryAccess(api: OpenClawPluginApi, context: MemoryCallerContextV2,
+/** Provider runtime access is host-issued, not a fabricated feature/tool invocation. */
+export function authorizeMemoryAccess(api: OpenClawPluginApi, context: MemoryCallerContext,
   agentId: string, requestedAgent: string, operatorRead: boolean): VaultAccess {
   return bindAccess(() => {
-    if (context.version !== 2 || typeof context.assertCurrent !== "function" || requestedAgent !== agentId) throw denied();
+    if (typeof context.assertCurrent !== "function" || requestedAgent !== agentId) throw denied();
     context.signal?.throwIfAborted();
     context.assertCurrent();
     const caller = context.authority;

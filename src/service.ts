@@ -1,4 +1,3 @@
-import * as memoryHost from "openclaw/plugin-sdk/memory-host-search";
 import { createKnowledgeMemoryRuntime } from "./memory-provider.js";
 import { buildKnowledgeMemoryPrompt } from "./memory-prompt.js";
 import { connections } from "./connections.js";
@@ -38,9 +37,8 @@ export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureE
     return result;
   };
   if (typeof api.registerMemoryCapability === "function") {
-    if (typeof memoryHost.getActiveMemoryProvider !== "function") throw Error("Knowledge memory requires the provider-neutral Memory Runtime V2 host branch.");
     api.registerMemoryCapability({
-      runtimeV2: createKnowledgeMemoryRuntime(api, storage, { enqueue, drain: () => pending, fence() {
+      providerRuntime: createKnowledgeMemoryRuntime(api, storage, { enqueue, drain: () => pending, fence() {
         const openedEpoch = epoch;
         return () => { assertCurrent(); if (openedEpoch !== epoch) throw Error("Knowledge service was reloaded."); };
       } }),

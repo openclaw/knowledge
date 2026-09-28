@@ -1,6 +1,6 @@
-import type { MemoryPluginRuntimeV2, MemoryReferenceV2, MemorySearchRequestV2, MemoryCitationV2 } from "openclaw/plugin-sdk/memory-host-search";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 import { authorizeMemoryAccess } from "./access.js";
+import type { MemoryCitation, MemoryProviderRuntime, MemoryReference, MemorySearchRequest } from "./memory-provider-types.js";
 import type { StorageClient } from "./storage-client.js";
 import { digest } from "./vault.js";
 import type { LoadedRecord } from "./model.js";
@@ -11,7 +11,7 @@ export type MemoryServiceLane = {
   fence(): () => void;
 };
 const revision = (r: Pick<LoadedRecord, "revision" | "hash">) => `${r.revision}:${r.hash}`;
-const reference = (r: Pick<LoadedRecord, "id" | "revision" | "hash">): MemoryReferenceV2 => ({ providerId: "knowledge", id: r.id, revision: revision(r) });
+const reference = (r: Pick<LoadedRecord, "id" | "revision" | "hash">): MemoryReference => ({ providerId: "knowledge", id: r.id, revision: revision(r) });
 const integer = (n: number | undefined, fallback: number, max: number) => {
   if (n === undefined) return fallback;
   if (!Number.isInteger(n) || n < 1 || n > max) throw Error(`Expected an integer from 1 to ${max}.`);
@@ -20,10 +20,9 @@ const integer = (n: number | undefined, fallback: number, max: number) => {
 const attribution = (origin?: string, who?: string) => `Origin: ${origin || "not recorded"}; attribution: ${who || "not recorded"}.`;
 
 /** Shares storage and the feature service's lane; never creates a second vault. */
-export function createKnowledgeMemoryRuntime(api: OpenClawPluginApi, storage: StorageClient | undefined, lane: MemoryServiceLane): MemoryPluginRuntimeV2 {
+export function createKnowledgeMemoryRuntime(api: OpenClawPluginApi, storage: StorageClient | undefined, lane: MemoryServiceLane): MemoryProviderRuntime {
   let generation = 0, retiring = false;
   return {
-    version: 2,
     async open({ agentId, context }) {
       if (!storage) return { provider: null, error: "Knowledge memory requires a configured real vault; sample records are not memory." };
       const serviceFence = lane.fence(), openedGeneration = generation;
@@ -37,8 +36,8 @@ export function createKnowledgeMemoryRuntime(api: OpenClawPluginApi, storage: St
       const guarded = { scope: access.scope, assertCurrent: check };
       const run = <T>(operation: () => Promise<T>) => lane.enqueue(async () => { check(); const result = await operation(); check(); return result; });
       return { provider: {
-        version: 2,
-        search: (request: MemorySearchRequestV2) => run(async () => {
+        capabilities: { sources: ["memory"], pagination: true, candidates: [], projectFilter: false },
+        search: (request: MemorySearchRequest) => run(async () => {
           if (request.sources && !request.sources.includes("memory")) throw Error("Knowledge does not search session transcripts; use conversation-history tools.");
           if (request.activeProjectKeys?.length) throw Error("Knowledge has no curated project-key selection capability.");
           const limit = integer(request.maxResults, 20, 50);
@@ -77,7 +76,7 @@ export function createKnowledgeMemoryRuntime(api: OpenClawPluginApi, storage: St
           const found = await storage.call("memoryGet", guarded, { id: request.reference.id, ...(request.reference.revision !== undefined ? { revision: request.reference.revision } : {}), from, count });
           if (found.status !== "ok") return { status: "not_found" as const };
           const r = found.record, ref = reference(r), nextFrom = from + found.lines;
-          const citations: MemoryCitationV2[] = [{ label: `${r.title} (${r.path})`, reference: ref }, ...found.evidence.map(e => ({ label: `${e.path} sha256:${e.sha256}${e.start_line ? ` lines ${e.start_line}–${e.end_line ?? e.start_line}` : ""}` }))];
+          const citations: MemoryCitation[] = [{ label: `${r.title} (${r.path})`, reference: ref }, ...found.evidence.map(e => ({ label: `${e.path} sha256:${e.sha256}${e.start_line ? ` lines ${e.start_line}–${e.end_line ?? e.start_line}` : ""}` }))];
           return { status: "ok" as const, reference: ref, text: found.text, citations, from, lines: found.lines, truncated: nextFrom <= found.total, ...(nextFrom <= found.total ? { nextFrom } : {}) };
         }),
         health: () => run(async () => {
