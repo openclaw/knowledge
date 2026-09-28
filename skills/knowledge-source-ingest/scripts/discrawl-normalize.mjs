@@ -19,7 +19,11 @@ for (let index = 0; index < argv.length; index += 2) {
 const need = name => { const value = options.get(name); if (!value) throw new Error('--' + name + ' is required'); return value; };
 const timestamp = (value, name) => {
   if (!/(?:Z|[+-]\d\d:\d\d)$/.test(value) || !Number.isFinite(Date.parse(value))) throw new Error('--' + name + ' must be RFC3339 with an explicit offset');
-  return value;
+  // Discrawl stores UTC timestamps with nine fractional digits. Comparing a
+  // caller's offset string directly in SQLite shifts the requested interval.
+  const fraction = value.match(/\.(\d+)(?:Z|[+-]\d\d:\d\d)$/)?.[1] ?? '';
+  if (fraction.length > 9) throw new Error('--' + name + ' supports at most nanosecond precision');
+  return new Date(value).toISOString().slice(0, 19) + '.' + fraction.padEnd(9, '0') + 'Z';
 };
 const config = need('config');
 const requestedChannel = need('channel');

@@ -123,6 +123,22 @@ test('Discrawl adapter resolves a stable channel and emits deterministic attachm
   assert.equal(row.payload.author_username, 'handle');
   assert.equal(row.payload.author_bot, 0);
   assert.equal(row.payload.attachments, 'a:aa:fetched|b:bb:fetched');
+
+  // Offset bounds must select the actual instants, including the exact lower
+  // boundary and excluding the upper boundary at archive nanosecond precision.
+  const boundaryDb = new DatabaseSync(dbPath);
+  const insert = boundaryDb.prepare('INSERT INTO messages VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)');
+  for (const [id, at] of [
+    ['before', '2026-09-27T06:59:59.999999999Z'],
+    ['start', '2026-09-27T07:00:00.000000000Z'],
+    ['last', '2026-09-28T06:59:59.999999999Z'],
+    ['end', '2026-09-28T07:00:00.000000000Z'],
+  ]) insert.run(id,'10','20','40','default',at,null,null,id,id,null,0,0);
+  boundaryDb.close();
+  run(discrawlScript, ['--config', path.join(dir, 'config.yaml'), '--channel', '20',
+    '--since', '2026-09-27T00:00:00-07:00', '--before', '2026-09-28T00:00:00-07:00', '--output', output],
+    { env: { ...process.env, PATH: bin + path.delimiter + process.env.PATH }, stdio: ['ignore', 'pipe', 'pipe'] });
+  assert.deepEqual((await readFile(output, 'utf8')).trim().split('\n').map(line => JSON.parse(line).id), ['start', '30', 'last']);
 });
 
 test('Discrawl adapter exposes usable help without requiring paired arguments', () => {
