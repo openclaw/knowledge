@@ -5,6 +5,7 @@ import { getToolPluginMetadata, toolPluginMetadataSymbol } from "openclaw/plugin
 import { contract } from "./contract.js";
 import { createKnowledgeService } from "./service.js";
 import { VaultConfig } from "./real-vault.js";
+import { STORES_CONFIG_PATH } from "./stores-config.js";
 
 const feature = defineFeaturePlugin({
   contract, name: "Knowledge", description: "Evidence-backed knowledge, inspectable in OpenClaw.",
@@ -13,7 +14,11 @@ const feature = defineFeaturePlugin({
 // This host's feature helper has no config option. Compose its shared adapters
 // with the public entry/config and build-metadata SDK, without duplicating them.
 const configSchema = Type.Object({ vault: Type.Optional(VaultConfig) }, { additionalProperties: false });
-const entry = definePluginEntry({ ...feature, configSchema: buildJsonPluginConfigSchema({ ...configSchema }) });
+// Membership edits must not reload the plugin: a hot plugin reload admits no
+// new model runs Gateway-wide while it drains. Knowledge applies membership
+// in-process; the host still publishes the new runtime config for no-op plans.
+const reload = { noopPrefixes: [STORES_CONFIG_PATH.join(".")] };
+const entry = definePluginEntry({ ...feature, reload, configSchema: buildJsonPluginConfigSchema({ ...configSchema }) });
 Object.defineProperty(entry, toolPluginMetadataSymbol, {
   value: { ...getToolPluginMetadata(feature), configSchema }, enumerable: false,
 });
