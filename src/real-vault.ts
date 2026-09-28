@@ -32,7 +32,7 @@ export function parseVaultConfig(config: Record<string, unknown> | undefined): V
 
 /** Manifest/checkpoint equality fences publication, replacement, and rollback. */
 export class RealVault {
-  constructor(readonly config: VaultConfig, private readonly identities: IdentityStore, private readonly observe?: (records: import("./model.js").LoadedRecord[], access: VaultAccess) => void) {}
+  constructor(readonly config: VaultConfig, private readonly identities: IdentityStore, private readonly observe?: (records: import("./model.js").LoadedRecord[], access: VaultAccess, evidence: import("./evidence-files.js").EvidenceInspector) => void) {}
   async identity() {
     try {
       const rootPath = await realpath(this.config.root), stat = await lstat(this.config.root);
@@ -73,7 +73,7 @@ export class RealVault {
       if ((e as NodeJS.ErrnoException).code === "ENOENT" && access.scope.visibility === "conversation") missing = true;
       else throw unavailable();
     }
-    const result = await operation(new SampleVault(scopedPath, access.scope, missing, this.observe ? records => this.observe!(records, access) : undefined));
+    const result = await operation(new SampleVault(scopedPath, access.scope, missing, this.observe ? (records, _, evidence) => this.observe!(records, access, evidence) : undefined));
     access.assertCurrent();
     const after = await this.identity();
     if (JSON.stringify(after) !== JSON.stringify(before) || (!missing && await inspectScope() !== scopeStamp) ||

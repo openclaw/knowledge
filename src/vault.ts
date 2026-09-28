@@ -6,7 +6,7 @@ import { eligible } from "./retrieval.js";
 import { temporalProblems } from "./temporal.js";
 import * as fs from "node:fs";
 import path from "node:path";
-import { inspectEvidence, withEvidenceFile } from "./evidence-files.js";
+import { EvidenceInspector, inspectEvidence, withEvidenceFile } from "./evidence-files.js";
 import { ATTACHMENT_DOWNLOAD_CHUNK_BYTES } from "./attachment-contract.js";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
@@ -28,10 +28,12 @@ export function sameScope(a: unknown, b: Scope): boolean {
 
 // Scope is selected by the service from trusted authority, never from operation inputs.
 export class SampleVault {
-  constructor(private readonly root = SAMPLE_ROOT, private readonly scope: Scope = { visibility: "sample" }, private readonly empty = false, private readonly observe?: (records: LoadedRecord[], scope: Scope) => void) {}
+  constructor(private readonly root = SAMPLE_ROOT, private readonly scope: Scope = { visibility: "sample" }, private readonly empty = false, private readonly observe?: (records: LoadedRecord[], scope: Scope, evidence: EvidenceInspector) => void) {}
   private read(relative: string) { return readText(this.root, relative); }
   async scan(overlay?: { record?: LoadedRecord; records?: LoadedRecord[]; artifacts: Record<string, string> }) {
     const issues: Issue[] = [];
+    // One read per retained file for this scan; observation reuses the same checks.
+    const evidence = new EvidenceInspector(this.root);
     const directory = this.empty ? null : await safeRoot(this.root);
     const records: LoadedRecord[] = [];
     const sources: OntologySource[] = [await bundledOntology(issues)];
@@ -126,12 +128,12 @@ export class SampleVault {
             const lines = content.split(/\r?\n/);
             if (e.start_line === undefined || e.end_line === undefined || e.end_line < e.start_line || e.end_line > lines.length) throw Error("Invalid evidence line range");
             if (e.quote && !lines.slice(e.start_line - 1, e.end_line).join("\n").includes(e.quote)) throw Error("Quote not found at evidence locator");
-          } else inspectEvidence(this.root, e);
+          } else evidence.inspect(e);
         } catch { problem("invalid-evidence", "Evidence is missing, unsafe, changed, or its locator/quote does not match: " + e.path); }
       }
     }
     if (bytes > 8 * 1024 * 1024) throw Error("Vault exceeds scan budget; no partial catalog returned.");
-    if (!overlay) this.observe?.(records, this.scope);
+    if (!overlay) this.observe?.(records, this.scope, evidence);
     const navigable = eligible({ records, ontology, sources, issues, checkedAt: "" }, undefined, false);
     for (const r of navigable) for (const link of resolveLinks(r, navigable)) if (link.status !== "resolved") add(r.path, `${link.status}-link`, `Document link is ${link.status}: ${link.href}`);
     records.sort((a,b) => a.path.localeCompare(b.path));
@@ -176,18 +178,18 @@ export class SampleVault {
     if (matches.length !== 1) return { record: null, issues: [], references: [], evidence: [] };
     const r = matches[0], refs = new Set([...(r.metadata.entities ?? []), ...(r.metadata.dependencies ?? []), ...[r.metadata.from, r.metadata.to, r.metadata.owner, r.metadata.source_page, ...(r.metadata.continuity ?? []).map(c => c.id), ...(r.metadata.identity?.candidates ?? []).map(c => c.id)].filter((x): x is string => Boolean(x))]);
     const references = eligible(data, undefined, false).filter(other => refs.has(other.id) || other.metadata.from === id || other.metadata.to === id || other.metadata.entities?.includes(id) || other.metadata.dependencies?.includes(id) || other.metadata.owner === id).map(summary);
-    const evidence = [];
+    const evidence = [], inspector = new EvidenceInspector(this.root);
     for (const e of (r.metadata.evidence ?? []).slice(evidenceOffset, evidenceOffset + evidenceLimit)) {
       let excerpt = "", verified = false, excerptTruncated = false;
       try {
         if (!e.path.startsWith("artifacts/")) throw Error("Unsafe evidence");
-        const inspected = inspectEvidence(this.root, e, 20000);
+        const inspected = inspector.inspect(e, 20000);
         excerpt = inspected.excerpt; excerptTruncated = inspected.excerptTruncated; verified = true;
       } catch { /* The diagnostic is attached to the record; no raw filesystem error escapes. */ }
       evidence.push({ ...e, excerpt: verified ? excerpt : "", verified, excerptTruncated });
     }
     const current = eligible(data, undefined, false);
-    const inspect = (e: Evidence) => { try { if (!e.path.startsWith("artifacts/")) throw Error("Unsafe evidence"); const result = inspectEvidence(this.root, e, 4000); return { ...e, ...result, verified: true }; } catch { return { ...e, excerpt: "", excerptTruncated: false, verified: false }; } };
+    const inspect = (e: Evidence) => { try { if (!e.path.startsWith("artifacts/")) throw Error("Unsafe evidence"); const result = inspector.inspect(e, 4000); return { ...e, ...result, verified: true }; } catch { return { ...e, excerpt: "", excerptTruncated: false, verified: false }; } };
     const identityEvidence = (r.metadata.identity?.candidates ?? []).map(candidate => ({ id: candidate.id, evidence: candidate.evidence.map(inspect) }));
     const files = new Map<string, { evidence: Evidence; citations: Set<string> }>();
     if (r.kind === "page") {

@@ -10,7 +10,7 @@ import type { Static } from "typebox";
 import path from "node:path";
 import { attachChunk } from "./attachments.js";
 import { AttachInput, ATTACHMENT_CHUNK_BYTES } from "./attachment-contract.js";
-import { inspectEvidence } from "./evidence-files.js";
+import { EvidenceInspector, inspectEvidence } from "./evidence-files.js";
 import { keywordSearch, verifyKeywordIndex, exactLookup, observeWithdrawals, withdrawnIds, eligible } from "./retrieval.js";
 import type { SearchInput, LookupInput } from "./retrieval-contract.js";
 import { GitHistory, GitUnavailable, type GitBatch, type GitChange } from "./git-history.js";
@@ -42,7 +42,7 @@ export class KnowledgeStorage {
   private readonly git: GitHistory;
   constructor(readonly config: VaultConfig, private readonly store = new SqliteIdentityStore(config.statePath), private readonly hook: PublicationHook = () => {}, git?: GitHistory) {
     this.git = git ?? new GitHistory(config.root);
-    this.real = new RealVault(config, store, (records, access) => this.observe(records, access));
+    this.real = new RealVault(config, store, (records, access, evidence) => this.observe(records, access, evidence));
   }
   async run<T>(access: VaultAccess, operation: (vault: SampleVault) => Promise<T>): Promise<T> {
     access.assertCurrent();
@@ -386,13 +386,15 @@ export class KnowledgeStorage {
       for (const source of prepared.data.sources.filter(s => !s.path.startsWith("bundled:"))) {
         if (files.read(`${scope}/${source.path}`) !== source.raw) throw Error("Ontology changed during validation.");
       }
-      for (const evidence of prepared.annotation || (prepared.lifecycle && !("replacement" in prepared.lifecycle)) ? [] : prepared.record.metadata.evidence ?? []) if (!(evidence.path in prepared.artifacts)) inspectEvidence(path.join(this.config.root, scope), evidence);
-      for (const record of prepared.batch ? (prepared.additional ?? []).map(c => c.after) : []) for (const evidence of record.metadata.evidence ?? []) inspectEvidence(path.join(this.config.root, scope), evidence);
+      // Batches cite the same retained transcript many times; read each file once.
+      const cited = new EvidenceInspector(path.join(this.config.root, scope));
+      for (const evidence of prepared.annotation || (prepared.lifecycle && !("replacement" in prepared.lifecycle)) ? [] : prepared.record.metadata.evidence ?? []) if (!(evidence.path in prepared.artifacts)) cited.inspect(evidence);
+      for (const record of prepared.batch ? (prepared.additional ?? []).map(c => c.after) : []) for (const evidence of record.metadata.evidence ?? []) cited.inspect(evidence);
       if (prepared.batch?.source) {
         const prior = this.sourceRow(db, scope, prepared.batch.source);
         if (prior?.request !== prepared.batch.expectedPreviousRequestId) throw Error("Source changed during validation; no batch accepted.");
       }
-      for (const evidence of prepared.annotationEvidence ?? []) inspectEvidence(path.join(this.config.root, scope), evidence);
+      for (const evidence of prepared.annotationEvidence ?? []) cited.inspect(evidence);
       const stillActive = eligible(prepared.data, withdrawnIds(db, this.retrievalBinding(access)), false);
       const m = prepared.record.metadata;
       const references = [...(m.dependencies ?? []), ...(m.entities ?? []), ...[m.from, m.to, m.owner].filter((id): id is string => Boolean(id))];
@@ -559,7 +561,7 @@ export class KnowledgeStorage {
     db.prepare("INSERT INTO history(scope,id,provenance,at,path,revision,hash,raw) VALUES (?,?,?,?,?,?,?,?)").run(scope, r.id, provenance, new Date().toISOString(), r.path, r.revision, r.hash, r.raw);
     db.prepare("INSERT OR REPLACE INTO observations VALUES (?,?,?,?,?,?)").run(scope, r.id, r.path, r.hash, r.revision, r.raw);
   }
-  private observe(records: LoadedRecord[], access: VaultAccess) {
+  private observe(records: LoadedRecord[], access: VaultAccess, evidence: EvidenceInspector) {
     const scope = access.scope;
     access.assertCurrent();
     this.transaction(db => {
@@ -580,15 +582,15 @@ export class KnowledgeStorage {
         }
         for (const r of records) {
           if (current.get(`${key}/${r.path}`) !== r.raw) throw Error("Vault changed during Git observation.");
-          for (const evidence of r.metadata.evidence ?? []) {
-            if (!evidence.path.startsWith("artifacts/")) continue;
-            const relative = `${key}/${evidence.path}`;
+          for (const file of r.metadata.evidence ?? []) {
+            if (!file.path.startsWith("artifacts/")) continue;
+            const relative = `${key}/${file.path}`;
             try {
-              const checked = inspectEvidence(path.join(this.config.root, key), evidence);
+              const checked = evidence.inspect(file);
               // Match gbrain's Git sidecar routing threshold; media/large originals
               // remain in the local vault, outside automatic Git snapshots.
-              const media = /^(image|audio|video)\//.test(evidence.mediaType ?? "") || /\.(png|jpe?g|gif|webp|mp[34]|mov|wav|ogg|flac)$/i.test(evidence.filename ?? evidence.path);
-              if (!media && checked.size < 100 * 1024 * 1024) originals.set(relative, evidence.sha256);
+              const media = /^(image|audio|video)\//.test(file.mediaType ?? "") || /\.(png|jpe?g|gif|webp|mp[34]|mov|wav|ogg|flac)$/i.test(file.filename ?? file.path);
+              if (!media && checked.size < 100 * 1024 * 1024) originals.set(relative, file.sha256);
             } catch { /* Validation already reports unsafe/missing evidence. */ }
           }
         }

@@ -57,3 +57,59 @@ export function inspectEvidence(root: string, e: Evidence, previewChars = 0) {
     return { size, sha256, excerpt: validText ? excerpt : "", excerptTruncated: validText && excerptChars > excerpt.length };
   });
 }
+
+// Files up to this size are read once and checked in memory; larger originals
+// keep the bounded-memory streaming check for every citation.
+const BUFFERED_EVIDENCE_BYTES = 16 * 1024 * 1024;
+type LoadedEvidence = { size: number; sha256: string; bytes: Buffer; text?: string | null; lines?: string[] };
+const isTextual = (e: Evidence) => e.start_line !== undefined || e.end_line !== undefined || /^text\//.test(e.mediaType ?? "") || /(?:json|xml|yaml|javascript)/.test(e.mediaType ?? "") || /\.(txt|md|csv|json|jsonl|ya?ml|log|xml|html|ts|js)$/i.test(e.filename ?? e.path);
+
+/** Verifies many citations within one operation. Each retained file is read,
+ * hashed and decoded at most once; every citation of it is then checked against
+ * that single read with the same rules and errors as `inspectEvidence`. An
+ * inspector holds file contents, so it must not outlive its operation. */
+export class EvidenceInspector {
+  private readonly files = new Map<string, LoadedEvidence | "stream" | Error>();
+  constructor(private readonly root: string) {}
+  inspect(e: Evidence, previewChars = 0): ReturnType<typeof inspectEvidence> {
+    const ranged = e.start_line !== undefined || e.end_line !== undefined;
+    if (ranged && (e.start_line === undefined || e.end_line === undefined || e.end_line < e.start_line)) throw Error("Invalid evidence line range");
+    const file = this.load(e.path);
+    if (file === "stream") return inspectEvidence(this.root, e, previewChars);
+    if (file.sha256 !== e.sha256 || (e.size !== undefined && e.size !== file.size)) throw Error("Evidence hash or size does not match");
+    if (!isTextual(e)) {
+      if (e.quote) throw Error("Evidence locator does not match");
+      return { size: file.size, sha256: file.sha256, excerpt: "", excerptTruncated: false };
+    }
+    // Same normalization as the streaming check: fatal UTF-8, CRLF read as LF.
+    if (file.text === undefined) { try { file.text = new TextDecoder("utf-8", { fatal: true }).decode(file.bytes).replace(/\r\n/g, "\n"); } catch { file.text = null; } }
+    if (file.text === null) {
+      if (ranged || e.quote) throw Error("Evidence locator does not match");
+      return { size: file.size, sha256: file.sha256, excerpt: "", excerptTruncated: false };
+    }
+    let cited = file.text;
+    if (ranged) {
+      file.lines ??= file.text.split("\n");
+      if (e.end_line! > file.lines.length) throw Error("Evidence locator does not match");
+      cited = file.lines.slice(e.start_line! - 1, e.end_line!).join("\n");
+    }
+    if (e.quote && !cited.includes(e.quote)) throw Error("Evidence locator does not match");
+    const excerpt = cited.slice(0, previewChars);
+    return { size: file.size, sha256: file.sha256, excerpt, excerptTruncated: cited.length > excerpt.length };
+  }
+  // Read and hash one retained file through the same link/identity guards.
+  private load(relative: string): LoadedEvidence | "stream" {
+    const known = this.files.get(relative);
+    if (known instanceof Error) throw known;
+    if (known) return known;
+    try {
+      const loaded = withEvidenceFile(this.root, relative, (fd, size): LoadedEvidence | "stream" => {
+        if (size > BUFFERED_EVIDENCE_BYTES) return "stream";
+        const bytes = Buffer.alloc(size);
+        for (let used = 0; used < size;) { const n = fs.readSync(fd, bytes, used, size - used, used); if (!n) throw Error("Evidence truncated"); used += n; }
+        return { size, sha256: createHash("sha256").update(bytes).digest("hex"), bytes };
+      });
+      this.files.set(relative, loaded); return loaded;
+    } catch (error) { const failure = error instanceof Error ? error : Error(String(error)); this.files.set(relative, failure); throw failure; }
+  }
+}
