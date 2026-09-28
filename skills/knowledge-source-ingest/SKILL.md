@@ -24,8 +24,8 @@ mailboxes where later runs can overlap prior coverage. Read
 
 ## Procedure
 
-1. Inspect `knowledge_ontology` for the `source` fields and search Knowledge for the canonical source and prior snapshots by provider/source key.
-2. Acquire a bounded export with an approved reader. For Discrawl, run `scripts/discrawl-normalize.mjs` with its configured read-only archive, exact channel ID when known, and `[since,before)` RFC3339 bounds.
+1. Inspect `knowledge_status` and `knowledge_ontology` for the intended vault scope and the `source` fields, then search Knowledge for the canonical source and prior snapshots by provider/source key. If an owner-private ingestion unexpectedly resolves to a conversation scope or an empty vault after a restart, stop before writing and restore the intended authorized scope; never infer that prior coverage is absent from the wrong scope.
+2. Acquire a bounded export with an approved reader. For Discrawl, run `scripts/discrawl-normalize.mjs` with its configured read-only archive, exact channel ID when known, and `[since,before)` RFC3339 bounds. The normalized payload includes stable author IDs plus archive-observed display fields. Preserve the raw JSONL, and create a separate line-stable readable transcript when human review or line citations are needed.
 3. Generate a deterministic manifest with `scripts/source-manifest.mjs snapshot`. Attach it before publishing the snapshot page; record the returned SHA-256.
 4. Download all overlapping prior manifests and run `scripts/source-manifest.mjs plan`. Inspect covered/uncovered intervals and the added/changed/deleted/unchanged/unresolved lists.
 5. Test 3–5 changed/new items, then ingest source content through the appropriate Knowledge workflow. Use stable external IDs in source citations/dependencies.

@@ -101,8 +101,9 @@ test('duplicate stable IDs reject a snapshot', async t => {
 test('Discrawl adapter resolves a stable channel and emits deterministic attachment state', async t => {
   const dir = await fixture(t), dbPath = path.join(dir, 'discrawl.sqlite');
   const db = new DatabaseSync(dbPath);
-  db.exec('CREATE TABLE channels(id TEXT,guild_id TEXT,name TEXT); CREATE TABLE messages(id TEXT,guild_id TEXT,channel_id TEXT,author_id TEXT,message_type TEXT,created_at TEXT,edited_at TEXT,deleted_at TEXT,content TEXT,normalized_content TEXT,reply_to_message_id TEXT,pinned INTEGER,has_attachments INTEGER); CREATE TABLE message_attachments(message_id TEXT,attachment_id TEXT,content_sha256 TEXT,fetch_status TEXT);');
+  db.exec('CREATE TABLE channels(id TEXT,guild_id TEXT,name TEXT); CREATE TABLE members(guild_id TEXT,user_id TEXT,username TEXT,global_name TEXT,display_name TEXT,nick TEXT,bot INTEGER); CREATE TABLE messages(id TEXT,guild_id TEXT,channel_id TEXT,author_id TEXT,message_type TEXT,created_at TEXT,edited_at TEXT,deleted_at TEXT,content TEXT,normalized_content TEXT,reply_to_message_id TEXT,pinned INTEGER,has_attachments INTEGER); CREATE TABLE message_attachments(message_id TEXT,attachment_id TEXT,content_sha256 TEXT,fetch_status TEXT);');
   db.prepare('INSERT INTO channels VALUES(?,?,?)').run('20','10','maintainers');
+  db.prepare('INSERT INTO members VALUES(?,?,?,?,?,?,?)').run('10','40','handle','Global Name','Display Name','Nick',0);
   db.prepare('INSERT INTO messages VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)').run('30','10','20','40','default','2026-09-27T10:00:00Z',null,null,'hello','hello',null,0,1);
   db.prepare('INSERT INTO message_attachments VALUES(?,?,?,?)').run('30','b','bb','fetched');
   db.prepare('INSERT INTO message_attachments VALUES(?,?,?,?)').run('30','a','aa','fetched');
@@ -118,5 +119,14 @@ test('Discrawl adapter resolves a stable channel and emits deterministic attachm
   assert.equal(stderr, '');
   const row = JSON.parse((await readFile(output, 'utf8')).trim());
   assert.equal(row.id, '30');
+  assert.equal(row.payload.author_name, 'Display Name');
+  assert.equal(row.payload.author_username, 'handle');
+  assert.equal(row.payload.author_bot, 0);
   assert.equal(row.payload.attachments, 'a:aa:fetched|b:bb:fetched');
+});
+
+test('Discrawl adapter exposes usable help without requiring paired arguments', () => {
+  const help = run(discrawlScript, ['--help']);
+  assert.match(help, /Usage: node discrawl-normalize\.mjs/);
+  assert.match(help, /half-open \[since,before\)/);
 });
