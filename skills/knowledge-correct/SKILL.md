@@ -46,6 +46,22 @@ locator. Use `assertion_origin: user_belief` to distinguish a user assertion fro
 an independently sourced statement; do not claim documentary verification.
 Agent inference still needs retained premise evidence, not an invented quote.
 
+## Resolve a handle or mistaken identity
+
+Use `knowledge-entities` to find and read the handle profile, the established
+person and their connected records. Retain the user's exact identification as
+evidence. Update supported aliases and identity context on the existing pages;
+preserve unrelated content and describe the connection to the established person.
+Use that person's existing ID for future enrichment. Aliases do not consolidate
+record IDs, and Knowledge has no identity-merge operation: keep separate pages
+explicitly linked rather than withdrawing one to simulate a merge.
+
+Inspect affected prose, claims, timelines and relationships within the correction
+scope. Correct mistaken attribution and unresolved identity where the new evidence
+supports it, using the page/assertion operations above; preserve source labels,
+verbatim quotes, event dates and correction provenance. A confirmed author identity
+does not independently verify that author's factual claims.
+
 Changes go through these tools, not manual Markdown edits, browser forms, SQL,
 or separate “create then withdraw” calls. No additional approval ritual applies
 to an unambiguous user-authorized correction. Follow publication retry/conflict

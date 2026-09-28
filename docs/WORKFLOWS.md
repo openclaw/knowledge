@@ -8,7 +8,7 @@ They are semantic ports, not a gbrain runtime dependency or a Workshop install.
 |---|---|
 | `knowledge-recall` | Answer from saved Knowledge with inspectable citations; read-only |
 | `knowledge-capture` | Save a short thought/snippet with exact source text |
-| `knowledge-ingest` | Documents/articles, assertions, entity propagation and back-links |
+| `knowledge-ingest` | Documents/articles/conversations, assertions, entity propagation and back-links |
 | `knowledge-meeting-ingest` | Transcripts, speaker uncertainty, structured decisions/actions, chronology |
 | `knowledge-entities` | Resolve identities; scoped, sourced profile creation/updates |
 | `knowledge-correct` | Exact-target correction/withdrawal, retained evidence and impact inspection |
@@ -137,6 +137,14 @@ connected claims/relationships before external escalation or asking the user.
 | No sync or manual vault Git commands | Publication/index reconciliation/local history already belong to the backend |
 
 For enumerable sources, `knowledge-source-ingest` uses ordinary `source` pages and retained attachments: one canonical provider/key identity plus bounded snapshots with exact coverage, observation time, manifest hash, item count, completeness and watermark. Its bundled generic manifest script performs scalable identity/hash comparison; the Discrawl adapter is read-only and config-driven. These are agent-run facilities, not a plugin-owned job, connector, scheduler or extraction state machine.
+
+Conversation snapshots route from `knowledge-source-ingest` through
+`knowledge-ingest` to `knowledge-entities`, following gbrain's general ingest and
+enrich behavior. Process substantive discussions with reply context, enrich
+notable contributors and subjects, and reuse retained sources when completing
+omitted enrichment. Stable provider author IDs and attributed identity corrections
+adapt that workflow to chat; meeting attendance rules do not apply to channel
+membership. No entity-accounting ledger or additional completion gate is added.
 
 The remaining real-content trial is a workflow acceptance check, not a prerequisite
 for inventing additional progress storage. No live user records are created by the

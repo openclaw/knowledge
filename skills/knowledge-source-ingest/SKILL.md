@@ -9,8 +9,11 @@ Use this for bounded collections such as chat channels, issue streams, feeds, or
 mailboxes where later runs can overlap prior coverage. Read
 [shared conventions](references/conventions.md),
 [publication](references/publication.md), and the
-[manifest protocol](references/source-manifest.md). Route ordinary documents to
-`knowledge-ingest` and meetings to `knowledge-meeting-ingest` after acquisition.
+[manifest protocol](references/source-manifest.md). After acquisition, route
+documents and conversations through `knowledge-ingest`, which uses
+`knowledge-entities` for entity enrichment. Route meetings through
+`knowledge-meeting-ingest`. This skill owns source identity and coverage; the
+ingestion workflows turn the retained content into useful connected knowledge.
 
 ## Contract
 
@@ -19,7 +22,7 @@ mailboxes where later runs can overlap prior coverage. Read
 - For each bounded observation, preserve the generated manifest as an attachment on a `source` page with `source_role: snapshot`, exact coverage, observation time, manifest hash, count, completeness, watermark, and dependency on the canonical source page.
 - Manifests retain stable item IDs and content hashes, not source text. Preserve original/exported content separately as evidence where authorized.
 - Query prior snapshot pages for the same provider/source key before planning. Download their manifests, verify attachment hashes, and pass all overlapping snapshots to the planner. Do not rely on conversation memory.
-- Reuse unchanged items. Ingest added items. Reconcile changed items against existing pages/claims. Treat deletion as observed source state, not permission to erase Knowledge; correct or withdraw only when the evidence warrants it.
+- Reuse unchanged source bytes and existing records. Continue previously omitted enrichment from those retained sources when requested; an unchanged manifest does not mean entity enrichment already happened. Ingest added items. Reconcile changed items against existing pages/claims. Treat deletion as observed source state, not permission to erase Knowledge; correct or withdraw only when the evidence warrants it.
 - A complete snapshot can establish absence inside its exact coverage. Partial or unknown snapshots cannot; unresolved missing IDs remain unresolved.
 
 ## Procedure
@@ -28,7 +31,7 @@ mailboxes where later runs can overlap prior coverage. Read
 2. Acquire a bounded export with an approved reader. For Discrawl, run `scripts/discrawl-normalize.mjs` with its configured read-only archive, exact channel ID when known, and `[since,before)` RFC3339 bounds. The normalized payload includes stable author IDs plus archive-observed display fields. Preserve the raw JSONL, and create a separate line-stable readable transcript when human review or line citations are needed.
 3. Generate a deterministic manifest with `scripts/source-manifest.mjs snapshot`. Attach it before publishing the snapshot page; record the returned SHA-256.
 4. Download all overlapping prior manifests and run `scripts/source-manifest.mjs plan`. Inspect covered/uncovered intervals and the added/changed/deleted/unchanged/unresolved lists.
-5. Test 3–5 changed/new items, then ingest source content through the appropriate Knowledge workflow. Use stable external IDs in source citations/dependencies.
+5. Test 3–5 substantive items or discussions, then ingest through `knowledge-ingest` (or `knowledge-meeting-ingest` for meetings). For chat, group related messages with their reply context; use `knowledge-entities` to enrich relevant people, companies, projects and concepts from their contributions. Carry supported developments into State, dated timelines and contextual back-links, not only a channel digest. Use stable external IDs in source citations and the retained snapshot as a dependency. Reuse its originals rather than uploading one copy per discussion.
 6. Publish or update derived records, then publish the snapshot page. A snapshot is `complete` only when acquisition and manifest creation covered the declared interval; derived extraction may still be partial and must be reported as such.
 7. Read back the canonical page, snapshot page, attachment, derived records, and source-dependent connections. Verify hashes and exact coverage.
 

@@ -45,6 +45,15 @@ not independent identity proof. Keep ambiguous candidates separate. An attendee
 roster is evidence of possible presence, not a mapping to a voice. Add spelling
 variants as aliases only after identity is established; aliases do not merge IDs.
 
+For chat authors, use provider-scoped stable author IDs to connect messages across
+display-name changes. Resolve handles against existing pages and retained identity
+evidence; display names, mentions and name similarity alone do not identify a real
+person. An explicit user identification is attributable evidence: use
+`knowledge-correct` to reconcile an earlier unresolved or mistaken profile, then
+reuse the established person's page for subsequent enrichment. Preserve original
+author labels and quotes in retained sources. Do not create another profile for
+an already resolved handle.
+
 ## Enrichment tiers
 
 | Tier | Who | Effort |
@@ -57,6 +66,9 @@ Actual, sufficiently identified meeting attendees get pages even with limited
 context: their sourced participation and contribution are meaningful content.
 For other mentions, apply notability: likely future interaction, work/interest
 relevance, or a reusable concept. Skip incidental names, spam and non-participants.
+Chat membership or a brief reply does not use the meeting-attendee exception.
+Enrich contributors whose substantive work, positions or ongoing interactions
+provide useful context, along with relevant organizations, projects and concepts.
 Do not repeat recent enrichment absent new signal. Unknown facts remain absent.
 
 ## Enrichment protocol
@@ -67,7 +79,9 @@ Do not repeat recent enrichment absent new signal. Unknown facts remain absent.
 3. **Extract signal.** Capture supported roles, projects, beliefs, open threads
    and relationship context—not just a bio scrape. Attribute beliefs to the
    speaker; an agent's assessment is not the person's belief. Do not infer
-   motivations from sparse context or propagate uncertain meeting claims.
+   motivations from sparse context or propagate uncertain source claims. In a
+   conversation, read the reply chain before assigning a position or commitment;
+   distinguish suggestions, questions, reported results and agreed decisions.
 4. **Look up missing material context.** Follow the resolution chain above and
    stop at the entity's appropriate tier. Unavailable APIs are not requirements.
 5. **Save raw data.** Retain used source/API responses with attribution and

@@ -1,11 +1,11 @@
 ---
 name: knowledge-ingest
-description: Ingest documents, articles, or supplied text into Knowledge with retained originals, sourced claims, entity updates, timelines, and cross-links. Routes meetings to knowledge-meeting-ingest and short thoughts to knowledge-capture.
+description: Ingest documents, articles, conversations, or supplied text into Knowledge with retained originals, sourced claims, entity updates, timelines, and cross-links. Routes meetings to knowledge-meeting-ingest and short thoughts to knowledge-capture.
 ---
 
 # Ingest Skill
 
-Ingest documents and articles into Knowledge. Follow gbrain's ingest workflow;
+Ingest documents, articles and conversations into Knowledge. Follow gbrain's ingest workflow;
 Knowledge's tools replace its storage, filing, linking, and sync operations.
 Read [shared conventions](references/conventions.md) and
 [publication](references/publication.md). Use `knowledge-entities` for resolution
@@ -46,6 +46,16 @@ and enrichment and `knowledge-meeting-ingest` for meeting transcripts.
   ingestion. Do not invent a Knowledge media tool or add a connector/service.
 - Social posts: retain available thread/context and a direct original URL in
   citations. Do not invent inaccessible replies or context.
+- Conversations/chat exports: use `knowledge-source-ingest` for acquisition and
+  overlap handling when needed, then continue here with the retained snapshot.
+  Read substantive discussions with replies and surrounding context; adjacent
+  messages may belong to different threads. Preserve stable message/author IDs,
+  dates and original labels. Distinguish authors, addressed participants and
+  third-party mentions; a mention or reaction is not a statement by that person.
+  File durable material by subject and reuse existing pages; do not create a
+  page per message or profile every channel member. A digest can orient the
+  reader, but apply the entity, assertion, timeline and linking phases below to
+  the underlying discussions too.
 
 ## Phases
 
@@ -54,10 +64,14 @@ and enrichment and `knowledge-meeting-ingest` for meeting transcripts.
    paywalls/truncation. Select exact passages for citations before summarizing.
 2. **Check for an existing source and page.** Search source identifiers, title,
    date and content; inspect hashes/evidence. An unchanged source reuses its
-   page. New coverage is reconciled into the existing page with retained versions,
+   page and evidence; fill in omitted enrichment without duplicating the source.
+   New coverage is reconciled into the existing page with retained versions,
    not automatically a duplicate or a correction of every old claim.
-3. **For each entity mentioned:** read its page, or apply the notability gate in
-   `knowledge-entities`. Resolve spelling variants before creating. Update State
+3. **For each entity mentioned:** run `knowledge-entities` to read and enrich its
+   page, or apply its notability gate before creating. Extract meaningful
+   contributions, positions, work and open threads into entity-focused synthesis;
+   a mention list or copied discussion summary is not enrichment.
+   Resolve spelling variants before creating. Update State
    only where material new evidence changes the picture. Leave uncertain
    identities explicit; do not create a guessed profile.
 4. **Preserve raw source and publish.** Retain original bytes, extracted text
