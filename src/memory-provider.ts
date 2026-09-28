@@ -1,8 +1,7 @@
 import type { MemoryPluginRuntimeV2, MemoryReferenceV2, MemorySearchRequestV2, MemoryCitationV2 } from "openclaw/plugin-sdk/memory-host-search";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 import { authorizeMemoryAccess } from "./access.js";
-import type { KnowledgeStorage } from "./storage.js";
-import { eligible } from "./retrieval.js";
+import type { StorageClient } from "./storage-client.js";
 import { digest } from "./vault.js";
 import type { LoadedRecord } from "./model.js";
 
@@ -21,7 +20,7 @@ const integer = (n: number | undefined, fallback: number, max: number) => {
 const attribution = (origin?: string, who?: string) => `Origin: ${origin || "not recorded"}; attribution: ${who || "not recorded"}.`;
 
 /** Shares storage and the feature service's lane; never creates a second vault. */
-export function createKnowledgeMemoryRuntime(api: OpenClawPluginApi, storage: KnowledgeStorage | undefined, lane: MemoryServiceLane): MemoryPluginRuntimeV2 {
+export function createKnowledgeMemoryRuntime(api: OpenClawPluginApi, storage: StorageClient | undefined, lane: MemoryServiceLane): MemoryPluginRuntimeV2 {
   let generation = 0, retiring = false;
   return {
     version: 2,
@@ -53,7 +52,7 @@ export function createKnowledgeMemoryRuntime(api: OpenClawPluginApi, storage: Kn
             if (!cursor || cursor.binding !== binding || typeof cursor.snapshot !== "string" || !Number.isInteger(cursor.offset) || cursor.offset < 0 || cursor.offset > 500) throw Error("Invalid Knowledge search cursor.");
             offset = cursor.offset; snapshot = cursor.snapshot;
           }
-          const result = await storage.search({ query: request.query, offset, limit }, guarded);
+          const result = await storage.call("search", guarded, { query: request.query, offset, limit });
           if (result.index.state !== "ready" || result.index.lag || !result.index.snapshot) throw Error(result.index.message);
           if (snapshot && snapshot !== result.index.snapshot) throw Error("Knowledge search snapshot changed; restart without a cursor.");
           const nextCursor = result.nextOffset === null ? undefined : Buffer.from(JSON.stringify({ binding, snapshot: result.index.snapshot, offset: result.nextOffset })).toString("base64url");
@@ -75,24 +74,18 @@ export function createKnowledgeMemoryRuntime(api: OpenClawPluginApi, storage: Kn
         get: request => run(async () => {
           if (request.reference.providerId !== "knowledge" || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{7,95}$/.test(request.reference.id) || request.reference.fragment !== undefined) throw Error("Invalid Knowledge record reference.");
           const from = integer(request.from, 1, 100000), count = integer(request.lines, 100, 200);
-          return storage.run(guarded, async vault => {
-            const data = await vault.scan();
-            const r = eligible(data, undefined, false).find(r => r.id === request.reference.id && r.lifecycle === "active");
-            if (!r) return { status: "not_found" as const };
-            if (request.reference.revision !== undefined && request.reference.revision !== revision(r)) throw Error("Knowledge record changed; search again before reading this revision.");
-            const ref = reference(r);
-            const text = `# ${r.title}\n${attribution(r.metadata.assertion_origin, r.metadata.attribution)}\n${r.body}`;
-            const all = text.split("\n"), chunk = all.slice(from - 1, from - 1 + count), nextFrom = from + chunk.length;
-            const citations: MemoryCitationV2[] = [{ label: `${r.title} (${r.path})`, reference: ref }, ...(r.metadata.evidence ?? []).slice(0, 20).map(e => ({ label: `${e.path} sha256:${e.sha256}${e.start_line ? ` lines ${e.start_line}–${e.end_line ?? e.start_line}` : ""}` }))];
-            return { status: "ok" as const, reference: ref, text: chunk.join("\n"), citations, from, lines: chunk.length, truncated: nextFrom <= all.length, ...(nextFrom <= all.length ? { nextFrom } : {}) };
-          });
+          const found = await storage.call("memoryGet", guarded, { id: request.reference.id, ...(request.reference.revision !== undefined ? { revision: request.reference.revision } : {}), from, count });
+          if (found.status !== "ok") return { status: "not_found" as const };
+          const r = found.record, ref = reference(r), nextFrom = from + found.lines;
+          const citations: MemoryCitationV2[] = [{ label: `${r.title} (${r.path})`, reference: ref }, ...found.evidence.map(e => ({ label: `${e.path} sha256:${e.sha256}${e.start_line ? ` lines ${e.start_line}–${e.end_line ?? e.start_line}` : ""}` }))];
+          return { status: "ok" as const, reference: ref, text: found.text, citations, from, lines: found.lines, truncated: nextFrom <= found.total, ...(nextFrom <= found.total ? { nextFrom } : {}) };
         }),
-        health: () => run(() => storage.run(guarded, async vault => {
-          const data = await vault.scan();
-          return { status: !data.ontology ? "unavailable" as const : data.issues.length ? "degraded" as const : "ready" as const,
+        health: () => run(async () => {
+          const facts = await storage.call("memoryHealth", guarded);
+          return { status: !facts.ontology ? "unavailable" as const : facts.issues ? "degraded" as const : "ready" as const,
             message: "Scoped vault validation; keyword index readiness is checked on search.",
-            details: { records: eligible(data, undefined, false).length, issues: data.issues.length, retrieval: "keyword", index: "checked-on-search", scope: access.scope.visibility } };
-        })),
+            details: { records: facts.records, issues: facts.issues, retrieval: "keyword", index: "checked-on-search", scope: access.scope.visibility } };
+        }),
         async close() { closed = true; },
       } };
     },

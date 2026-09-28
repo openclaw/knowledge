@@ -1,0 +1,89 @@
+import type { MessagePort } from "node:worker_threads";
+import { KnowledgeStorage } from "./storage.js";
+import { inspectRecord, inspectOntology } from "./inspection.js";
+import { eligible } from "./retrieval.js";
+import { catalogFacts } from "./catalog.js";
+import type { VaultAccess } from "./access.js";
+import type { VaultConfig } from "./real-vault.js";
+import type { LoadedRecord } from "./model.js";
+import { AUTHORITY_REVOKED, type HostMessage, type WorkerMessage } from "./storage-protocol.js";
+
+type Storage = KnowledgeStorage;
+type Access = VaultAccess;
+// Structured-clone boundary: operation inputs arrive as plain JSON values.
+type In<T> = T extends (input: infer I, ...rest: never[]) => unknown ? I : never;
+
+const revision = (r: Pick<LoadedRecord, "revision" | "hash">) => `${r.revision}:${r.hash}`;
+const attribution = (origin?: string, who?: string) => `Origin: ${origin || "not recorded"}; attribution: ${who || "not recorded"}.`;
+
+/** Every storage operation the main thread may request, by name. Each runs
+ * entirely in the worker; `access.assertCurrent` calls back to the main thread. */
+export const operations = {
+  verify: (s: Storage, a: Access, input: In<Storage["verify"]>) => s.verify(input, a),
+  sourceCheck: (s: Storage, a: Access, input: In<Storage["sourceCheck"]>) => s.sourceCheck(input, a),
+  batch: (s: Storage, a: Access, input: In<Storage["batch"]>) => s.batch(input, a, "agent"),
+  annotate: (s: Storage, a: Access, input: In<Storage["annotate"]>) => s.annotate(input, a, "agent"),
+  recent: (s: Storage, a: Access, input: In<Storage["recent"]>) => s.recent(input, a),
+  attach: (s: Storage, a: Access, input: In<Storage["attach"]>) => s.attach(input, a),
+  save: (s: Storage, a: Access, input: { value: In<Storage["save"]>; actor: string }) => s.save(input.value, a, input.actor),
+  createClaim: (s: Storage, a: Access, input: { value: In<Storage["createClaim"]>; actor: string }) => s.createClaim(input.value, a, input.actor),
+  createRelationship: (s: Storage, a: Access, input: { value: In<Storage["createRelationship"]>; actor: string }) => s.createRelationship(input.value, a, input.actor),
+  correct: (s: Storage, a: Access, input: In<Storage["correct"]>) => s.correct(input, a, "agent"),
+  withdraw: (s: Storage, a: Access, input: In<Storage["withdraw"]>) => s.withdraw(input, a, "agent"),
+  connections: (s: Storage, a: Access, input: In<Storage["connections"]>) => s.connections(input, a),
+  resume: (s: Storage, a: Access, input: { requestId: string }) => s.resume(a, input.requestId),
+  revision: (s: Storage, a: Access, input: { sequence: number }) => s.revision(a, input.sequence),
+  mutation: (s: Storage, a: Access, input: Parameters<Storage["mutation"]>[2] & { requestId: string }) => s.mutation(a, input.requestId, input),
+  history: async (s: Storage, a: Access, input: Parameters<Storage["history"]>[1]) => { await s.initialize(a); return s.history(a, input); },
+  search: (s: Storage, a: Access, input: In<Storage["search"]>) => s.search(input, a),
+  lookup: (s: Storage, a: Access, input: In<Storage["lookup"]>) => s.lookup(input, a),
+  attachment: (s: Storage, a: Access, input: { id: string; path: string; sha256: string; offset?: number }) => s.run(a, vault => vault.attachment(input)),
+  records: (s: Storage, a: Access, input: Parameters<import("./vault.js").SampleVault["list"]>[0]) => s.run(a, vault => vault.list(input)),
+  record: (s: Storage, a: Access, input: Parameters<typeof inspectRecord>[1]) => s.run(a, vault => inspectRecord(vault, input)),
+  ontology: (s: Storage, a: Access, input: Parameters<typeof inspectOntology>[1]) => s.run(a, vault => inspectOntology(vault, input)),
+  diagnostics: (s: Storage, a: Access) => s.run(a, async vault => {
+    const data = await vault.scan();
+    return { issues: data.issues.slice(0, 1000), total: data.issues.length, truncated: data.issues.length > 1000, checkedAt: data.checkedAt };
+  }),
+  // Catalog facts for the status operation; service-level fields stay on the main thread.
+  catalog: (s: Storage, a: Access) => s.run(a, async vault => catalogFacts(await vault.scan())),
+  memoryGet: (s: Storage, a: Access, input: { id: string; revision?: string; from: number; count: number }) => s.run(a, async vault => {
+    const data = await vault.scan();
+    const r = eligible(data, undefined, false).find(r => r.id === input.id && r.lifecycle === "active");
+    if (!r) return { status: "not_found" as const };
+    if (input.revision !== undefined && input.revision !== revision(r)) throw Error("Knowledge record changed; search again before reading this revision.");
+    const text = `# ${r.title}\n${attribution(r.metadata.assertion_origin, r.metadata.attribution)}\n${r.body}`;
+    const all = text.split("\n"), chunk = all.slice(input.from - 1, input.from - 1 + input.count);
+    return { status: "ok" as const, record: { id: r.id, title: r.title, path: r.path, revision: r.revision, hash: r.hash }, evidence: (r.metadata.evidence ?? []).slice(0, 20), text: chunk.join("\n"), lines: chunk.length, total: all.length };
+  }),
+  memoryHealth: (s: Storage, a: Access) => s.run(a, async vault => {
+    const data = await vault.scan();
+    return { ontology: Boolean(data.ontology), issues: data.issues.length, records: eligible(data, undefined, false).length };
+  }),
+};
+export type StorageOperations = typeof operations;
+
+
+/** Serve storage calls one at a time. Authority checks block this worker on a
+ * shared flag while the main thread re-evaluates the caller's live authority. */
+export function serve(port: MessagePort, init: { config: VaultConfig; signal: SharedArrayBuffer }) {
+  const storage = new KnowledgeStorage(init.config), signal = new Int32Array(init.signal);
+  let queue: Promise<void> = Promise.resolve();
+  port.on("message", (message: HostMessage) => {
+    if (message.type !== "call") return;
+    queue = queue.then(async () => {
+      const access: Access = { scope: message.scope, assertCurrent() {
+        Atomics.store(signal, 0, 0);
+        port.postMessage({ type: "assert", id: message.id } satisfies WorkerMessage);
+        if (Atomics.wait(signal, 0, 0, 120_000) === "timed-out") throw Error("Knowledge authority check timed out.");
+        if (Atomics.load(signal, 1) !== 1) throw Error(AUTHORITY_REVOKED);
+      } };
+      try {
+        const run = operations[message.op] as (s: Storage, a: Access, input: unknown) => unknown;
+        port.postMessage({ type: "done", id: message.id, ok: true, value: await run(storage, access, message.input) } satisfies WorkerMessage);
+      } catch (error) {
+        port.postMessage({ type: "done", id: message.id, ok: false, message: error instanceof Error ? error.message : String(error) } satisfies WorkerMessage);
+      }
+    });
+  });
+}

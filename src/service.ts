@@ -3,23 +3,26 @@ import { createKnowledgeMemoryRuntime } from "./memory-provider.js";
 import { buildKnowledgeMemoryPrompt } from "./memory-prompt.js";
 import { connections } from "./connections.js";
 import { DatabaseSync } from "node:sqlite";
-import { keywordSearch, exactLookup, eligible } from "./retrieval.js";
+import { keywordSearch, exactLookup } from "./retrieval.js";
 import { randomUUID } from "node:crypto";
 import type { FeatureHandlers, FeatureEventEmitter, FeatureInvocationContext } from "openclaw/plugin-sdk/feature-plugin";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 import { contract } from "./contract.js";
-import { SampleVault, digest } from "./vault.js";
+import { SampleVault } from "./vault.js";
+import { catalogFacts } from "./catalog.js";
 import { authorizeVault } from "./access.js";
 import { parseVaultConfig } from "./real-vault.js";
 
 import { inspectRecord, inspectOntology } from "./inspection.js";
 import { LiveState } from "./live-state.js";
-import { KnowledgeStorage } from "./storage.js";
+import { StorageClient } from "./storage-client.js";
 
 export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureEventEmitter<typeof contract>): FeatureHandlers<typeof contract> {
   const instanceId = randomUUID(), startedAt = new Date().toISOString();
   const config = parseVaultConfig(api.pluginConfig);
-  const storage = config ? new KnowledgeStorage(config) : undefined;
+  // Storage runs in a worker thread; this thread authorizes and answers its
+  // authority checks. The sample vault stays in-process for tests and demos.
+  const storage = config ? new StorageClient(config) : undefined;
   let current = true, epoch = 0;
   const assertCurrent = () => { if (!current) throw Error("Knowledge service was reloaded; reconnect and retry the same request."); };
   let pending: Promise<void> = Promise.resolve();
@@ -56,87 +59,80 @@ export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureE
   const live = config?.operatorRead ? new LiveState(config.root, () => {
     try { events?.emit("changed", {}); } catch { /* Reload/reconnect snapshots recover missed hints. */ }
   }) : undefined;
-  api.registerService?.({ id: "knowledge:live-state", start() { ++epoch; current = true; live?.start(); }, stop() { ++epoch; current = false; live?.stop(); } });
-  const run = async <T>(context: FeatureInvocationContext, operation: (vault: SampleVault, scope: string) => Promise<T>): Promise<T> => {
-    assertCurrent();
-    if (!storage || !config) return operation(new SampleVault(), "sample");
-    const access = accessFor(context);
-    return storage.run(access, vault => operation(vault, access.scope.visibility === "conversation" ? `conversation:${access.scope.sessionId}` : "agent-private"));
-  };
+  api.registerService?.({ id: "knowledge:live-state", start() { ++epoch; current = true; live?.start(); }, stop() {
+    const stopped = ++epoch; current = false; live?.stop();
+    // Release the worker once queued work settles, unless the service restarted.
+    void pending.finally(() => { if (epoch === stopped) storage?.close(); });
+  } });
+  const sample = () => { assertCurrent(); return new SampleVault(); };
   const authority = (context: FeatureInvocationContext, write = false) => {
     if (!config || !storage) throw Error("Sample vault is read-only; connect a real vault first.");
     if (write && !config.writesEnabled) throw Error("Knowledge writes are disabled.");
     return accessFor(context, write);
   };
   const handlers: FeatureHandlers<typeof contract> = {
-    verify: (input, context) => { const access = authority(context); return storage!.verify(input, access); },
-    source_check: (input, context) => { const access = authority(context); return storage!.sourceCheck(input, access); },
+    verify: (input, context) => storage!.call("verify", authority(context), input),
+    source_check: (input, context) => storage!.call("sourceCheck", authority(context), input),
     publish_batch: async (input, context) => {
       if (context.source !== "tool") throw Error("Knowledge changes must be requested through chat and agent tools.");
       const access = authority(context, true);
-      try { return await storage!.batch(input, access, "agent"); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); }
+      try { return await storage!.call("batch", access, input); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); }
     },
     annotate: async (input, context) => {
       if (context.source !== "tool") throw Error("Knowledge changes must be requested through chat and agent tools.");
       const access = authority(context, true);
-      try { return await storage!.annotate(input, access, "agent"); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); }
+      try { return await storage!.call("annotate", access, input); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); }
     },
-    recent: async (input, context) => storage ? storage.recent(input, authority(context)) : { items: [], upperSequence: 0, nextBefore: null },
-    attach: async (input, context) => { const access = authority(context, true); return storage!.attach(input, access); },
-    attachment: (input, context) => run(context, vault => vault.attachment(input)),
-    save_page: async (input, context) => { const access = authority(context, true); try { return await storage!.save(input, access, context.source === "tool" ? "agent" : "operator"); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); } },
-    create_claim: async (input, context) => { const access = authority(context, true); try { return await storage!.createClaim(input, access, context.source === "tool" ? "agent" : "operator"); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); } },
-    create_relationship: async (input, context) => { const access = authority(context, true); try { return await storage!.createRelationship(input, access, context.source === "tool" ? "agent" : "operator"); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); } },
+    recent: async (input, context) => storage ? storage.call("recent", authority(context), input) : { items: [], upperSequence: 0, nextBefore: null },
+    attach: async (input, context) => storage!.call("attach", authority(context, true), input),
+    attachment: (input, context) => storage ? storage.call("attachment", accessFor(context), input) : sample().attachment(input),
+    save_page: async (input, context) => { const access = authority(context, true); try { return await storage!.call("save", access, { value: input, actor: context.source === "tool" ? "agent" : "operator" }); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); } },
+    create_claim: async (input, context) => { const access = authority(context, true); try { return await storage!.call("createClaim", access, { value: input, actor: context.source === "tool" ? "agent" : "operator" }); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); } },
+    create_relationship: async (input, context) => { const access = authority(context, true); try { return await storage!.call("createRelationship", access, { value: input, actor: context.source === "tool" ? "agent" : "operator" }); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); } },
     correct: async (input, context) => {
       if (context.source !== "tool") throw Error("Knowledge changes must be requested through chat and agent tools.");
       const access = authority(context, true);
-      try { return await storage!.correct(input, access, "agent"); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); }
+      try { return await storage!.call("correct", access, input); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); }
     },
     withdraw: async (input, context) => {
       if (context.source !== "tool") throw Error("Knowledge changes must be requested through chat and agent tools.");
       const access = authority(context, true);
-      try { return await storage!.withdraw(input, access, "agent"); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); }
+      try { return await storage!.call("withdraw", access, input); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); }
     },
-    connections: (input, context) => storage ? storage.connections(input, authority(context)) : run(context, async vault => connections(await vault.scan(), input)),
-    resume: async (input, context) => { const access = authority(context, true); try { return await storage!.resume(access, input.requestId); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); } },
-    revision: async (input, context) => { const access = authority(context); return storage!.revision(access, input.sequence); },
-    mutation: async (input, context) => { const access = authority(context); return storage!.mutation(access, input.requestId, input); },
+    connections: async (input, context) => storage ? storage.call("connections", authority(context), input) : connections(await sample().scan(), input),
+    resume: async (input, context) => { const access = authority(context, true); try { return await storage!.call("resume", access, { requestId: input.requestId }); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); } },
+    revision: async (input, context) => storage!.call("revision", authority(context), { sequence: input.sequence }),
+    mutation: async (input, context) => storage!.call("mutation", authority(context), input),
     history: async (input, context) => {
       if (!storage) return { entries: [], mutations: [], nextOffset: null, git: { state: "read-only", pending: 0, message: "Sample vault; no Git changes." } };
-      const access = authority(context);
-      await storage.initialize(access);
-      return storage.history(access, input);
+      return storage.call("history", authority(context), input);
     },
-    status: (_, context) => run(context, async (vault, scope) => {
+    status: async (_, context) => {
+      const access = storage ? accessFor(context) : undefined;
+      const scope = !access ? "sample" : access.scope.visibility === "conversation" ? `conversation:${access.scope.sessionId}` : "agent-private";
       if (scope === "agent-private") live?.ensureWatching();
-      const data = await vault.scan();
-      const active = eligible(data, undefined, false);
+      const catalog = access ? await storage!.call("catalog", access) : catalogFacts(await sample().scan());
       return {
         service: "knowledge", phase: config?.writesEnabled ? "structured-writes" : "read-only-explorer", backendRevision: "memory-provider-v2-1", instanceId, startedAt,
-        checkedAt: data.checkedAt, vault: config?.vaultId ?? "bundled-sample", agent: config?.agentId ?? "none — synthetic sample", scope, sample: !config, writesEnabled: Boolean(config?.writesEnabled && (() => { try { authority(context, true); return true; } catch { return false; } })()),
+        checkedAt: catalog.checkedAt, vault: config?.vaultId ?? "bundled-sample", agent: config?.agentId ?? "none — synthetic sample", scope, sample: !config, writesEnabled: Boolean(config?.writesEnabled && (() => { try { authority(context, true); return true; } catch { return false; } })()),
         live: scope === "agent-private" ? live?.state ?? "stopped" : "stopped",
-        // Content, evidence validation, ontology and time-based eligibility can
-        // change without changing the record count. checkedAt is not a revision.
-        snapshot: digest(JSON.stringify([data.records.map(r => [r.id, r.path, r.hash, r.valid]), active.map(r => r.id), data.ontology?.fingerprint, data.issues])),
-        records: active.length, validRecords: active.length,
-        definitions: data.ontology?.definitions.length ?? 0, ontologyAvailable: Boolean(data.ontology), ontologyFingerprint: data.ontology?.fingerprint ?? "", issues: data.issues.length,
+        snapshot: catalog.snapshot, records: catalog.records, validRecords: catalog.records,
+        definitions: catalog.definitions, ontologyAvailable: catalog.ontologyAvailable, ontologyFingerprint: catalog.ontologyFingerprint, issues: catalog.issues,
       } as const;
-    }),
-    grep: async (input, context) => {
-      if (storage) return storage.search(input, authority(context));
-      return run(context, async vault => {
-        const data = await vault.scan(), db = new DatabaseSync(":memory:");
-        try { return keywordSearch(db, data, input, "sample", "sample"); } finally { db.close(); }
-      });
     },
-    lookup: async (input, context) => storage ? storage.lookup(input, authority(context)) : run(context, async vault => exactLookup(await vault.scan(), input)),
-    records: (input, context) => run(context, vault => vault.list(input)),
-    record: (input, context) => run(context, vault => inspectRecord(vault, input)),
-    ontology: (input, context) => run(context, vault => inspectOntology(vault, input)),
-    diagnostics: (_, context) => run(context, async vault => {
-      const data = await vault.scan();
-      return { issues: data.issues.slice(0, 1000), total: data.issues.length, truncated: data.issues.length > 1000, checkedAt: data.checkedAt };
-    }),
+    grep: async (input, context) => {
+      if (storage) return storage.call("search", authority(context), input);
+      const data = await sample().scan(), db = new DatabaseSync(":memory:");
+      try { return keywordSearch(db, data, input, "sample", "sample"); } finally { db.close(); }
+    },
+    lookup: async (input, context) => storage ? storage.call("lookup", authority(context), input) : exactLookup(await sample().scan(), input),
+    records: async (input, context) => storage ? storage.call("records", accessFor(context), input) : sample().list(input),
+    record: async (input, context) => storage ? storage.call("record", accessFor(context), input) : inspectRecord(sample(), input),
+    ontology: async (input, context) => storage ? storage.call("ontology", accessFor(context), input) : inspectOntology(sample(), input),
+    diagnostics: async (_, context) => {
+      const data = storage ? undefined : await sample().scan();
+      return storage ? storage.call("diagnostics", accessFor(context)) : { issues: data!.issues.slice(0, 1000), total: data!.issues.length, truncated: data!.issues.length > 1000, checkedAt: data!.checkedAt };
+    },
   };
   // RealVault fences an operation's manifest/checkpoint snapshot. A sibling
   // publication advances that snapshot, so reads as well as writes must share

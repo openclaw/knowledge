@@ -8,7 +8,6 @@ import { createKnowledgeService } from '../dist/service.js';
 import { buildKnowledgeMemoryPrompt } from '../dist/memory-prompt.js';
 import { contract } from '../dist/contract.js';
 import plugin from '../dist/index.js';
-import { KnowledgeStorage } from '../dist/storage.js';
 
 async function fixture(t, overrides = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'knowledge-memory-'));
@@ -178,14 +177,18 @@ test('prompt routes all workflows, obeys citation settings and omits disabled sa
 });
 
 
-test('index failure is not empty success and late backend results are fenced', async t => {
-  const f = await fixture(t); await f.save('Orchid'); const { provider } = await f.open();
-  const original = KnowledgeStorage.prototype.search;
-  const failure = t.mock.method(KnowledgeStorage.prototype, 'search', async () => ({ index: { state: 'unavailable', message: 'Index unavailable; retry' } }));
+// Storage runs in a worker, so this drives the provider with a stub storage
+// client: its own fencing is what must reject failures and late results.
+test('index failure is not empty success and late backend results are fenced', async () => {
+  const { createKnowledgeMemoryRuntime } = await import('../dist/memory-provider.js');
+  const sessionId = randomUUID(); let active = true, reply;
+  const api = { runtime: { agent: { session: { getSessionEntry() { return { sessionId, chatType: 'direct' }; } } } } };
+  const storage = { config: { agentId: 'main', vaultId: randomUUID(), operatorRead: true }, async call(op) { assert.equal(op, 'search'); return reply(); } };
+  const lane = { enqueue: operation => operation(), drain: async () => {}, fence: () => () => {} };
+  const context = { version: 2, authority: { kind: 'session', sessionKey: 'agent:main:test', sessionId, senderIsOwner: true, sandboxed: false }, assertCurrent() { if (!active) throw Error('caller revoked'); } };
+  const { provider } = await createKnowledgeMemoryRuntime(api, storage, lane).open({ cfg: {}, agentId: 'main', context });
+  reply = () => ({ index: { state: 'unavailable', message: 'Index unavailable; retry' } });
   await assert.rejects(provider.search({ query: 'Orchid' }), /Index unavailable/);
-  failure.mock.restore();
-  t.mock.method(KnowledgeStorage.prototype, 'search', async function(...args) {
-    const result = await original.apply(this, args); f.revoke(); return result;
-  });
+  reply = () => { active = false; return { index: { state: 'ready', snapshot: 's', message: '' }, hits: [], total: 0, nextOffset: null, coverage: { complete: true, message: '' } }; };
   await assert.rejects(provider.search({ query: 'Orchid' }), /revoked/);
 });

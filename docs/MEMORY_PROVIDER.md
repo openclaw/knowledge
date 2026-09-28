@@ -18,6 +18,14 @@ read-only UI, and memory adapter are registered together, sharing one storage
 instance and one serialized operation lane. No second publisher, watcher or
 write API is created. Per-request close releases a lease, not the service.
 
+That storage instance runs in a worker thread: vault scans, evidence checks,
+SQLite and Git never block the Gateway's main thread. Authorization stays on the
+main thread; the worker receives only the resolved scope and asks the main thread
+to re-check the caller's live authority each time storage revalidates before a
+side effect. The worker keeps one scan per scope and reuses it only while every
+record, ontology and cited file still has the same file stamp (inode, size,
+mtime and ctime); any change rescans and observes as before.
+
 Build/validation does not select the plugin or change the live configuration.
 Before switching, preserve existing configuration, verify the compatible running
 Gateway, and use supported plugin activation. Merely selecting Knowledge does
