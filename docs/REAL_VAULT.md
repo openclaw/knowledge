@@ -89,19 +89,29 @@ Writable vaults use Git by default, without a separate enable flag. Scoped scans
 | Control UI/operator | Authenticated connection ID, host `operator.read` (or its write/admin implication), configured `operatorRead: true` | Configured agent's private partition |
 | Agent, owner direct chat | Matching host agent, session key and UUID, latest stored session entry with `chatType: direct`, trusted `senderIsOwner: true`, live invocation guard | Agent-private partition |
 | Agent, other known direct/group/channel chat | Same current agent/session verification and live guard; known chat type | Exact host session UUID's conversation partition |
+| Spawned child of the configured agent | Current child invocation plus host-stamped parent key, UUID, lifecycle revision and parent sender-owner bit at every spawn hop; all ancestor sessions still current | Same partition as the originating parent: owner-direct private, otherwise the parent's conversation UUID |
 | Missing/unknown/stale context, command adapter, foreign agent | Insufficient authority | Denied |
 
 A selected browser session is rejected on this first private-vault surface; it
 cannot impersonate conversation authority. Operator browsing of shared scopes is
 not exposed yet. An owner speaking in a group does not gain private access.
-Missing chat type is denied, not guessed from a session key or sender ownership.
+Missing chat type is denied, except for a spawned child with complete trusted
+lineage. A worker's synthetic launch owner bit or copied chat type never upgrades
+its parent's access. Nested children follow the same rule. Cross-agent, missing,
+cyclic, or stale lineage is denied; older children without a host authority stamp
+must be respawned. A dashboard/navigation parent link alone is not a spawn grant.
+This applies to OpenClaw-created child sessions. Native runtime child threads
+still require that runtime's supported host-tool bridge; Knowledge cannot
+authorize a tool call that the host never dispatches.
+Resetting only a worker retains its inherited scope while its parent remains
+current; the worker's old invocation capabilities are still invalidated.
 Agent authority is re-evaluated after asynchronous reads, including session reset
-and invocation expiry.
+and invocation expiry, and includes every ancestor's incarnation and lineage.
 
-Conversation identity currently follows the SDK's `sessionId`: `/new` or `/reset`
-creates a new scope. Cross-reset channel continuity, cross-conversation recall,
-background/delegated private access, and operator shared-scope browsing need
-explicit policy and are not silently granted.
+Conversation partition identity follows the SDK's `sessionId`. A host reset may
+retain that UUID while rotating its lifecycle revision; existing child grants
+are invalidated in either case. Cross-conversation recall, background host access
+and operator shared-scope browsing need explicit policy and are not silently granted.
 
 Real records retain the existing envelope and use exactly one of:
 
