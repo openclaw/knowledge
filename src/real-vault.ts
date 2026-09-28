@@ -3,7 +3,7 @@ import { lstat, realpath } from "node:fs/promises";
 import { Type, type Static } from "typebox";
 import { Check } from "typebox/value";
 import { readText } from "./files.js";
-import { SampleVault } from "./vault.js";
+import { SampleVault, type ScanCache } from "./vault.js";
 import type { VaultAccess } from "./access.js";
 
 const uuid = Type.String({ pattern: "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$" });
@@ -32,6 +32,9 @@ export function parseVaultConfig(config: Record<string, unknown> | undefined): V
 
 /** Manifest/checkpoint equality fences publication, replacement, and rollback. */
 export class RealVault {
+  // One scan cache per scope directory. Entries self-validate against file
+  // stamps, so a replaced vault or scope simply misses and rescans.
+  private readonly scans = new Map<string, ScanCache>();
   constructor(readonly config: VaultConfig, private readonly identities: IdentityStore, private readonly observe?: (records: import("./model.js").LoadedRecord[], access: VaultAccess, evidence: import("./evidence-files.js").EvidenceInspector) => void) {}
   async identity() {
     try {
@@ -73,7 +76,9 @@ export class RealVault {
       if ((e as NodeJS.ErrnoException).code === "ENOENT" && access.scope.visibility === "conversation") missing = true;
       else throw unavailable();
     }
-    const result = await operation(new SampleVault(scopedPath, access.scope, missing, this.observe ? (records, _, evidence) => this.observe!(records, access, evidence) : undefined));
+    let cache = this.scans.get(scopedPath);
+    if (!cache) this.scans.set(scopedPath, cache = {});
+    const result = await operation(new SampleVault(scopedPath, access.scope, missing, this.observe ? (records, _, evidence) => this.observe!(records, access, evidence) : undefined, cache));
     access.assertCurrent();
     const after = await this.identity();
     if (JSON.stringify(after) !== JSON.stringify(before) || (!missing && await inspectScope() !== scopeStamp) ||

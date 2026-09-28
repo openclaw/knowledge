@@ -6,7 +6,7 @@ import { eligible } from "./retrieval.js";
 import { temporalProblems } from "./temporal.js";
 import * as fs from "node:fs";
 import path from "node:path";
-import { EvidenceInspector, inspectEvidence, withEvidenceFile } from "./evidence-files.js";
+import { EvidenceInspector, fileStamp, inspectEvidence, withEvidenceFile } from "./evidence-files.js";
 import { ATTACHMENT_DOWNLOAD_CHUNK_BYTES } from "./attachment-contract.js";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
@@ -26,11 +26,49 @@ export function sameScope(a: unknown, b: Scope): boolean {
       (scope.visibility !== "conversation" || (b.visibility === "conversation" && scope.sessionId === b.sessionId))));
 }
 
+export type ScanResult = { records: LoadedRecord[]; ontology: ReturnType<typeof resolveOntology>; sources: OntologySource[]; issues: Issue[]; checkedAt: string };
+/** Holds one scope's last scan. The owner (RealVault) keeps it across operations;
+ * an entry is reused only while every file the scan read still has its stamp. */
+export type ScanCache = { entry?: { tree: string; evidence: Map<string, string>; data: ScanResult } };
+type Overlay = { record?: LoadedRecord; records?: LoadedRecord[]; artifacts: Record<string, string> };
+
 // Scope is selected by the service from trusted authority, never from operation inputs.
 export class SampleVault {
-  constructor(private readonly root = SAMPLE_ROOT, private readonly scope: Scope = { visibility: "sample" }, private readonly empty = false, private readonly observe?: (records: LoadedRecord[], scope: Scope, evidence: EvidenceInspector) => void) {}
+  constructor(private readonly root = SAMPLE_ROOT, private readonly scope: Scope = { visibility: "sample" }, private readonly empty = false, private readonly observe?: (records: LoadedRecord[], scope: Scope, evidence: EvidenceInspector) => void, private readonly cache?: ScanCache) {}
   private read(relative: string) { return readText(this.root, relative); }
-  async scan(overlay?: { record?: LoadedRecord; records?: LoadedRecord[]; artifacts: Record<string, string> }) {
+  /** Current catalog. Reuses the cached scan when no record, ontology or cited
+   * file changed; otherwise scans, observes and caches a frozen result. Overlay
+   * scans validate unpublished writes and are never cached. */
+  async scan(overlay?: Overlay): Promise<ScanResult> {
+    if (overlay || !this.cache || this.empty) return (await this.load(overlay)).data;
+    // Stamp before reading so a change during the scan forces the next rescan.
+    const tree = this.treeStamp(), hit = this.cache.entry;
+    if (tree && hit?.tree === tree && [...hit.evidence].every(([file, stamp]) => fileStamp(this.root, file) === stamp)) return hit.data;
+    const { data, evidence } = await this.load();
+    if (tree) this.cache.entry = { tree, evidence: evidence.stamps, data: freeze(data) };
+    else this.cache.entry = undefined;
+    return data;
+  }
+  // Stamp every entry the scan walk visits. Null when the tree exceeds scan
+  // limits; the scan itself then reports the failure and nothing is cached.
+  private treeStamp(): string | null {
+    const entries: string[] = []; let visited = 0;
+    const walk = (dir: string, depth: number): boolean => {
+      if (depth > 8) return false;
+      let names: string[];
+      try { names = fs.readdirSync(path.join(this.root, dir)).sort(); } catch { return false; }
+      for (const name of names) {
+        if (++visited > MAX_FILES) return false;
+        const file = dir + name, stamp = fileStamp(this.root, file);
+        entries.push(`${file}|${stamp}`);
+        if (!dir && (name === "artifacts" || name === ".knowledge-history")) continue;
+        if (fs.lstatSync(path.join(this.root, file)).isDirectory() && !walk(file + "/", depth + 1)) return false;
+      }
+      return true;
+    };
+    try { return walk("", 0) ? digest(entries.join("\n")) : null; } catch { return null; }
+  }
+  private async load(overlay?: Overlay): Promise<{ data: ScanResult; evidence: EvidenceInspector }> {
     const issues: Issue[] = [];
     // One read per retained file for this scan; observation reuses the same checks.
     const evidence = new EvidenceInspector(this.root);
@@ -137,7 +175,7 @@ export class SampleVault {
     const navigable = eligible({ records, ontology, sources, issues, checkedAt: "" }, undefined, false);
     for (const r of navigable) for (const link of resolveLinks(r, navigable)) if (link.status !== "resolved") add(r.path, `${link.status}-link`, `Document link is ${link.status}: ${link.href}`);
     records.sort((a,b) => a.path.localeCompare(b.path));
-    return { records, ontology, sources, issues, checkedAt: new Date().toISOString() };
+    return { data: { records, ontology, sources, issues, checkedAt: new Date().toISOString() }, evidence };
   }
   async list(input: { assertionOrigin?: string; includeCards?: boolean; includeEndpoints?: boolean; offset?: number; limit?: number; kind?: string; type?: string; query?: string; lifecycle?: "active" | "all" }) {
     const data = await this.scan();
@@ -223,4 +261,11 @@ export class SampleVault {
     });
   }
 
+}
+
+// Cached scans are shared by later operations; freezing makes any accidental
+// mutation by a reader fail loudly instead of leaking into the next request.
+function freeze<T>(value: T): T {
+  if (value && typeof value === "object" && !Object.isFrozen(value)) { Object.freeze(value); for (const child of Object.values(value)) freeze(child); }
+  return value;
 }

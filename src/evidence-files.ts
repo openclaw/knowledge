@@ -70,6 +70,8 @@ const isTextual = (e: Evidence) => e.start_line !== undefined || e.end_line !== 
  * inspector holds file contents, so it must not outlive its operation. */
 export class EvidenceInspector {
   private readonly files = new Map<string, LoadedEvidence | "stream" | Error>();
+  /** File stamps taken before each file was read, for callers that reuse results. */
+  readonly stamps = new Map<string, string>();
   constructor(private readonly root: string) {}
   inspect(e: Evidence, previewChars = 0): ReturnType<typeof inspectEvidence> {
     const ranged = e.start_line !== undefined || e.end_line !== undefined;
@@ -102,6 +104,7 @@ export class EvidenceInspector {
     const known = this.files.get(relative);
     if (known instanceof Error) throw known;
     if (known) return known;
+    this.stamps.set(relative, fileStamp(this.root, relative));
     try {
       const loaded = withEvidenceFile(this.root, relative, (fd, size): LoadedEvidence | "stream" => {
         if (size > BUFFERED_EVIDENCE_BYTES) return "stream";
@@ -112,4 +115,11 @@ export class EvidenceInspector {
       this.files.set(relative, loaded); return loaded;
     } catch (error) { const failure = error instanceof Error ? error : Error(String(error)); this.files.set(relative, failure); throw failure; }
   }
+}
+
+/** Identity and change stamp of one path, without following links. Any rewrite
+ * changes ctime, so equal stamps mean the bytes read earlier are still current. */
+export function fileStamp(root: string, relative: string): string {
+  try { const s = fs.lstatSync(`${root}/${relative}`, { bigint: true }); return `${s.mode}:${s.dev}:${s.ino}:${s.size}:${s.mtimeNs}:${s.ctimeNs}`; }
+  catch (e) { return `error:${(e as NodeJS.ErrnoException).code ?? "unknown"}`; }
 }
