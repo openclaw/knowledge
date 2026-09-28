@@ -13,6 +13,8 @@ export const markdown = new Marked({ gfm: true, async: false, renderer: {
   },
   renderer: token => `<a href="${escapeHtml(wikiHref(token.target))}">${escapeHtml(token.label)}</a>`,
 }] });
+// Link extraction parses Markdown; reuse a record's parse while its body is unchanged.
+const extracted = new WeakMap<object, { body: string; hrefs: string[] }>();
 export function extractLinks(body: string): string[] {
   // Generated backlinks must not recursively create their own backlinks.
   const tokens = markdown.lexer(body).filter((() => {
@@ -41,10 +43,29 @@ function cleanPath(value: string): string | undefined {
   }
   return parts.join("/");
 }
+type LinkIndex = { byPath: Map<string, Set<LinkRecord>>; byId: Map<string, Set<LinkRecord>>; byName: Map<string, Set<LinkRecord>> };
+// Normalized lookup tables for one candidate list, built once instead of
+// normalizing every candidate for every link.
+const indexes = new WeakMap<LinkRecord[], LinkIndex>();
+function linkIndex(records: LinkRecord[]): LinkIndex {
+  let index = indexes.get(records);
+  if (index) return index;
+  index = { byPath: new Map(), byId: new Map(), byName: new Map() };
+  const add = (map: Map<string, Set<LinkRecord>>, key: string, r: LinkRecord) => { let set = map.get(key); if (!set) map.set(key, set = new Set()); set.add(r); };
+  for (const r of records) {
+    add(index.byPath, normalize(r.path.replace(/\.md$/i, "")), r);
+    add(index.byId, r.id, r);
+    for (const name of [r.title, r.path.split("/").at(-1)!.replace(/\.md$/i, ""), ...(r.metadata.aliases ?? [])]) add(index.byName, normalize(name), r);
+  }
+  indexes.set(records, index); return index;
+}
 /** Input records must already be authorized and lifecycle-filtered. Never guess ambiguous names. */
 export function resolveLinks(record: LinkRecord, records: LinkRecord[]): LinkResolution[] {
-  const results: LinkResolution[] = [];
-  for (const href of extractLinks(record.body)) {
+  const results: LinkResolution[] = [], index = linkIndex(records);
+  let parsed = extracted.get(record);
+  if (parsed?.body !== record.body) { parsed = { body: record.body, hrefs: extractLinks(record.body) }; extracted.set(record, parsed); }
+  const hrefs = parsed.hrefs;
+  for (const href of hrefs) {
     const wiki = href.startsWith("#wiki=");
     if (!wiki && (/^(?:[a-z][a-z0-9+.-]*:|\/|#)/i.test(href) || !/\.md(?:#.*)?$/i.test(href))) continue;
     let target: string;
@@ -52,11 +73,13 @@ export function resolveLinks(record: LinkRecord, records: LinkRecord[]): LinkRes
     if (!target || /[\\\x00-\x1f]/.test(target) || /^(?:[a-z][a-z0-9+.-]*:|\/)/i.test(target)) { results.push({ href, status: "missing" }); continue; }
     const bare = target.replace(/\.md$/i, ""), parent = record.path.split("/").slice(0, -1).join("/");
     const paths = wiki && !target.startsWith(".") ? [cleanPath(target), cleanPath(`${parent}/${target}`)] : [cleanPath(`${parent}/${target}`)];
-    let matches = records.filter(r => paths.some(p => p && normalize(r.path.replace(/\.md$/i, "")) === normalize(p.replace(/\.md$/i, ""))));
+    let matches = new Set<LinkRecord>();
+    for (const p of paths) if (p) for (const r of index.byPath.get(normalize(p.replace(/\.md$/i, ""))) ?? []) matches.add(r);
     // Old UUID paths survive renames. IDs remain authoritative, not inferred from filenames.
-    if (!matches.length) matches = records.filter(r => r.id === bare.split("/").at(-1));
-    if (!matches.length && wiki && !target.includes("/")) matches = records.filter(r => [r.title, r.path.split("/").at(-1)!.replace(/\.md$/i, ""), ...(r.metadata.aliases ?? [])].some(name => normalize(name) === normalize(bare)));
-    results.push({ href, status: matches.length === 1 ? "resolved" : matches.length ? "ambiguous" : "missing", ...(matches.length === 1 ? { id: matches[0].id } : {}) });
+    if (!matches.size) matches = new Set(index.byId.get(bare.split("/").at(-1)!) ?? []);
+    if (!matches.size && wiki && !target.includes("/")) matches = new Set(index.byName.get(normalize(bare)) ?? []);
+    const [only] = matches;
+    results.push({ href, status: matches.size === 1 ? "resolved" : matches.size ? "ambiguous" : "missing", ...(matches.size === 1 ? { id: only.id } : {}) });
   }
   return results;
 }

@@ -19,13 +19,16 @@ export function connections(data: Awaited<ReturnType<SampleVault["scan"]>>, inpu
       ...(r.kind === "relationship" ? { from: m.from!, to: m.to!, label: m.label! } : {}),
       evidence: (m.evidence ?? []).slice(0, 3), evidenceTruncated: (m.evidence?.length ?? 0) > 3 });
   }
+  // Document links are only resolved when the caller asks for them. Only the
+  // current record's own links and links pointing at it produce rows.
   const current = records.find(r => r.id === input.id);
-  if (current) for (const source of records) {
+  const wantsLinks = !input.direction || input.direction === "links", wantsBacklinks = !input.direction || input.direction === "backlinks";
+  if (current && (wantsLinks || wantsBacklinks)) for (const source of records) {
+    if (source.id === current.id ? !wantsLinks : !wantsBacklinks) continue;
     const targets = new Set(resolveLinks(source, records).flatMap(link => link.id ? [link.id] : []));
-    for (const target of records) if (targets.has(target.id) && source.id !== target.id) {
-      const direction = source.id === current.id ? "links" : target.id === current.id ? "backlinks" : undefined;
-      if (direction && (!input.direction || direction === input.direction)) rows.push({ direction, record: recordSummary(direction === "links" ? target : source), label: direction === "links" ? "References" : "Referenced by", evidence: [], evidenceTruncated: false });
-    }
+    if (source.id === current.id) {
+      for (const target of records) if (targets.has(target.id) && target.id !== source.id) rows.push({ direction: "links", record: recordSummary(target), label: "References", evidence: [], evidenceTruncated: false });
+    } else if (targets.has(current.id)) rows.push({ direction: "backlinks", record: recordSummary(source), label: "Referenced by", evidence: [], evidenceTruncated: false });
   }
   const offset = input.offset ?? 0, limit = input.limit ?? 20;
   const page = rows.slice(offset, offset + limit);
