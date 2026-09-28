@@ -46,6 +46,12 @@ export function recentActivity(db: DatabaseSync, scope: string, active: LoadedRe
           AND h.provenance=json_extract(m.plan,'$.actor')) AS sequence
       FROM mutations m, json_each(COALESCE(json_extract(m.plan,'$.records'), json_array(json_extract(m.plan,'$.record')))) j
       WHERE m.scope=? AND m.state='published'
+    ), plain AS MATERIALIZED (
+      -- Sequence sets for the history branch. Joining history to the wide
+      -- published rows scanned every published record per history event.
+      SELECT sequence FROM published WHERE sequence IS NOT NULL AND json_extract(receipt,'$.operation') IS NULL
+    ), any_published AS MATERIALIZED (
+      SELECT sequence FROM published WHERE sequence IS NOT NULL
     ), events AS (
       SELECT MAX(sequence) AS sequence, json_extract(receipt,'$.targetId') AS id,
         json_extract(receipt,'$.at') AS at,
@@ -58,19 +64,23 @@ export function recentActivity(db: DatabaseSync, scope: string, active: LoadedRe
       FROM published WHERE json_extract(receipt,'$.operation') IN ('correct','withdraw') GROUP BY request
       UNION ALL
       SELECT h.sequence, h.id, h.at,
-        CASE WHEN p.request IS NOT NULL THEN CASE h.revision WHEN 1 THEN 'created' ELSE 'updated' END
-          WHEN h.provenance='external-edit' THEN 'external' ELSE 'observed' END,
+        CASE WHEN h.sequence IN (SELECT sequence FROM plain) THEN CASE h.revision WHEN 1 THEN 'created' ELSE 'updated' END
+          WHEN h.provenance='external-edit' THEN 'external' ELSE 'observed' END AS change,
         NULL, NULL, NULL, NULL, NULL
-      FROM history h LEFT JOIN published p ON p.sequence=h.sequence
+      FROM history h
       WHERE h.scope=? AND h.id IN (SELECT value FROM json_each(?))
-        AND (p.request IS NULL OR json_extract(p.receipt,'$.operation') IS NULL)
+        AND (h.sequence IN (SELECT sequence FROM plain) OR h.sequence NOT IN (SELECT sequence FROM any_published))
     ), visible AS (
       SELECT * FROM events WHERE sequence<=? AND id NOT IN (SELECT value FROM json_each(?))
     )
     ${input.groupBySource ? `, ranked AS (
       SELECT *, ROW_NUMBER() OVER (PARTITION BY CASE WHEN change IN ('corrected','withdrawn') THEN 'event:'||sequence ELSE 'record:'||id END ORDER BY sequence DESC) AS rank FROM visible
+    ), source_map AS MATERIALIZED (
+      -- Parse the record-to-source map once; json_extract on the parameter per
+      -- row reparsed the whole map for every history event.
+      SELECT key AS id, value AS source FROM json_each(?)
     ), keyed AS (
-      SELECT *, CASE WHEN change IN ('corrected','withdrawn') THEN 'event:'||sequence WHEN change='external' THEN 'external:'||id ELSE COALESCE('source:'||json_extract(?, '$.'||id), 'record:'||id) END AS group_key FROM ranked WHERE rank=1
+      SELECT r.*, CASE WHEN r.change IN ('corrected','withdrawn') THEN 'event:'||r.sequence WHEN r.change='external' THEN 'external:'||r.id ELSE COALESCE('source:'||s.source, 'record:'||r.id) END AS group_key FROM ranked r LEFT JOIN source_map s ON s.id=r.id WHERE r.rank=1
     ), grouped AS (
       SELECT MAX(sequence) AS sequence, json_group_array(json_object('sequence',sequence,'id',id,'at',at,'change',change,'kind',kind,'type',type,'reason',reason,'replacementId',replacementId,'title',title)) AS members FROM keyed WHERE (? IS NULL OR group_key='source:'||?) GROUP BY group_key
     ) SELECT * FROM grouped WHERE sequence<? ORDER BY sequence DESC LIMIT ?` : 'SELECT * FROM visible WHERE sequence<? ORDER BY sequence DESC LIMIT ?'}
