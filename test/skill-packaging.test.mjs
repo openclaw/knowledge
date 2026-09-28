@@ -8,7 +8,7 @@ import { parse } from 'yaml';
 import { contract } from '../dist/contract.js';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-const names = ['knowledge-capture', 'knowledge-correct', 'knowledge-entities', 'knowledge-ingest', 'knowledge-meeting-ingest', 'knowledge-recall'];
+const names = ['knowledge-capture', 'knowledge-correct', 'knowledge-entities', 'knowledge-ingest', 'knowledge-meeting-ingest', 'knowledge-recall', 'knowledge-source-ingest'];
 
 test('packaged skills have discoverable metadata and self-contained readable references', async () => {
   execFileSync(process.execPath, ['scripts/sync-skill-references.mjs', '--check'], { cwd: root });
@@ -51,6 +51,11 @@ test('npm payload includes all skill entrypoints, references and upstream attrib
     assert.ok(files.has(`skills/${name}/SKILL.md`));
     assert.ok(files.has(`skills/${name}/references/conventions.md`));
     if (name !== 'knowledge-recall') assert.ok(files.has(`skills/${name}/references/publication.md`));
+    if (name === 'knowledge-source-ingest') {
+      assert.ok(files.has(`skills/${name}/references/source-manifest.md`));
+      assert.ok(files.has(`skills/${name}/scripts/source-manifest.mjs`));
+      assert.ok(files.has(`skills/${name}/scripts/discrawl-normalize.mjs`));
+    }
   }
   assert.ok(files.has('THIRD_PARTY_NOTICES.md'));
   assert.ok(files.has('docs/WORKFLOWS.md'));

@@ -23,7 +23,7 @@ Evidence-backed knowledge vault and native explorer for OpenClaw.
 | Document/meeting ingestion | Gbrain-aligned agent workflows over page, evidence, claim and relationship tools; [workflow guide](docs/WORKFLOWS.md) |
 | Structured claims, relationships and entity metadata | Implemented through agent tools, with evidence, temporal validation and retry recovery; inspected in native UI |
 | Correction/withdrawal | Agent-only exact-target operations, recoverable two-record correction, durable lifecycle safeguards and dependency impact; [contract](docs/CORRECTIONS.md) |
-| Ingestion continuation | Agent work log plus existing records and individual-write receipts; no separate ingestion system |
+| Ingestion continuation | Agent work log plus existing records and receipts; enumerable sources can retain discoverable coverage snapshots and manifests without a separate ingestion service |
 | Live refresh | Private-vault filesystem invalidations, authorized snapshot refresh, reconnect and 30-second visible-page fallback; retired services are fenced |
 | Full backup/restore | Not implemented |
 
@@ -32,10 +32,10 @@ See [setup and authority](docs/REAL_VAULT.md), [model-facing API](docs/MODEL_API
 ## Bundled skills
 
 `knowledge-recall`, `knowledge-capture`, `knowledge-ingest`,
-`knowledge-meeting-ingest`, `knowledge-entities`, and `knowledge-correct` ship with the plugin. They
+`knowledge-meeting-ingest`, `knowledge-entities`, `knowledge-correct`, and `knowledge-source-ingest` ship with the plugin. They
 retain sources, resolve identities conservatively, and verify published pages, claims, relationships and entity propagation.
 They are agent workflows, not an autonomous ingestion engine; host extraction
-and structured claim/relationship mutation have explicit limits. See the
+and structured claim/relationship mutation have explicit limits. Source ingestion adds optional canonical source/snapshot provenance plus local diff scripts; it is not a connector daemon or scheduler. See the
 [upstream operation map and verification boundaries](docs/WORKFLOWS.md).
 
 ## Local file history

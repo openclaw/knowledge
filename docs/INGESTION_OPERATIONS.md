@@ -50,6 +50,8 @@ interruption may leave installed files, but no partial catalog is exposed. Confl
 preserve recovery material and block reads, with no automatic overwrite/rollback.
 No new database migration; existing mutation journals remain compatible.
 
+For enumerable external sources, the optional `knowledge-source-ingest` workflow adds ordinary canonical/snapshot `source` pages and retained `knowledge-source-manifest-v1` attachments. Future runs discover prior coverage through Knowledge, then use the bundled local script to compare stable item IDs and hashes. Complete snapshots can support in-range deletion observations; partial/unknown snapshots cannot. This does not change journal semantics or create a plugin-owned job/checkpoint service.
+
 A source binding covers only its batch, not the entire ingestion. For large or
 split ingestions, retain separate stable publication-unit keys/receipts and use
 existing connections to reconcile later enrichment. Do not use one source key for

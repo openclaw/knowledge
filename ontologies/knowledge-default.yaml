@@ -187,7 +187,58 @@ definitions:
     behaviors:
       extractable: true
       expert_routing: false
-    fields: []
+    fields:
+      - name: source_role
+        label: Source role
+        type: string
+        required: false
+        values:
+          - canonical
+          - snapshot
+      - name: provider
+        label: Provider
+        type: string
+        required: false
+      - name: source_key
+        label: Source key
+        type: string
+        required: false
+      - name: coverage_start
+        label: Coverage start
+        type: string
+        required: false
+      - name: coverage_end
+        label: Coverage end
+        type: string
+        required: false
+      - name: observed_at
+        label: Observed at
+        type: string
+        required: false
+      - name: source_revision
+        label: Source revision
+        type: string
+        required: false
+      - name: manifest_sha256
+        label: Manifest SHA-256
+        type: string
+        required: false
+      - name: item_count
+        label: Item count
+        type: number
+        required: false
+      - name: completeness
+        label: Completeness
+        type: string
+        required: false
+        values:
+          - complete
+          - partial
+          - unknown
+      - name: watermark
+        label: Watermark
+        type: string
+        required: false
   - name: deal
     label: Deal
     description: An investment opportunity, agreement, or transaction in progress.

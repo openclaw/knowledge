@@ -1,3 +1,13 @@
+# Enumerable source ingestion facilities — 2026-09-28
+
+- Added optional canonical/snapshot provenance fields to the existing `source` page type; no new page type, job API, connector service, scheduler or database migration.
+- Added the repository-owned `knowledge-source-ingest` skill, a source-agnostic deterministic manifest/diff script, and a configured read-only Discrawl normalization adapter.
+- Focused checks cover deterministic gzip manifests, content-private identity/hash inventories, overlap coverage, changed/added/deleted/unchanged planning, partial-snapshot deletion safety, duplicate IDs, newest-observation selection, and Discrawl stable channel/attachment ordering.
+- `npm run check`, all **210 tests**, `npm run build`, `npm run validate`, and `git diff --check` passed. The linked OpenClaw checkout first required regenerating its missing plugin-SDK declaration artifacts with its existing `build:plugin-sdk:dts` script; no dependency declaration changed.
+- Live skill discovery reports `knowledge-source-ingest` visible. Two typesafe Knowledge hot-reload attempts timed out while draining retained admitted work, so the previous backend generation remains active and live ontology inspection still shows the old source fields. No vault content or configuration changed. A Gateway restart was not forced after the OpenClaw control route became unavailable; backend activation remains the only verification blocker.
+
+---
+
 # Ingestion skill alignment: post-refresh verification — 2026-09-23
 
 - The preceding implementation pass completed six focused workflow/packaging

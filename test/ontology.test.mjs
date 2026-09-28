@@ -69,6 +69,20 @@ test('custom local extension participates in inspection, aliases, filing, fields
   assert.ok((await vault.scan()).issues.some(i=>i.path==='notes/misfiled.md'&&i.code==='filing'));
 });
 
+test('default source type exposes optional canonical and snapshot provenance fields', async t => {
+  const { vault } = await fixture(t);
+  const report = await vault.inspectOntology();
+  const source = report.definitions.find(definition => definition.name === 'source');
+  assert.deepEqual(source.fields.map(field => field.name), [
+    'source_role', 'provider', 'source_key', 'coverage_start', 'coverage_end',
+    'observed_at', 'source_revision', 'manifest_sha256', 'item_count',
+    'completeness', 'watermark',
+  ]);
+  assert.deepEqual(source.fields.find(field => field.name === 'source_role').values, ['canonical', 'snapshot']);
+  assert.deepEqual(source.fields.find(field => field.name === 'completeness').values, ['complete', 'partial', 'unknown']);
+  assert.ok(source.fields.every(field => field.required === false));
+});
+
 test('whole-definition overrides, nearest-first path precedence, and root positions match gbrain composition',()=>{
   const base=manifest('base',[page('person',{directory:'people/',behaviors:{extractable:true,expert_routing:true},fields:[{name:'role',label:'Role',type:'string',required:true}]}),page('note',{primitive:'concept',directory:'notes/'})]);
   const parent=manifest('parent',[page('researcher',{directory:'notes/'}),page('person',{directory:'persons/'})],{extends:'base'});

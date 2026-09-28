@@ -82,7 +82,7 @@ Baseline: actual `gbrain-base-v2` at the reviewed commit, with **19**, not 15, p
 | analysis | media | Retain |
 | atom | annotation | Retain as a page, **not** a replacement for independently attributed portable claims |
 | concept | concept | Retain |
-| source | media | Retain |
+| source | media | Retain; optional canonical/snapshot provenance fields support stable external-source identity and bounded coverage manifests without adding a new page type |
 | deal | temporal | Retain vocabulary; no investment workflow implied |
 | email | temporal | Retain vocabulary; no email connector implied |
 | slack | temporal | Retain vocabulary; no Slack connector implied |
@@ -93,6 +93,8 @@ Baseline: actual `gbrain-base-v2` at the reviewed commit, with **19**, not 15, p
 | note | concept | Retain; no unknown-type fallback or automatic retyping |
 | event | temporal | Retain; no life-chronicle processor implied |
 | diary | temporal | Retain; no journaling automation implied |
+
+The `source` fields are optional because one type represents both a canonical external source and individual observations. The source-ingest skill requires role-specific combinations: canonical pages use provider/source key; snapshot pages additionally use exact coverage, observation time, manifest hash, count, completeness and watermark. Ontology validation still preserves legacy source pages.
 
 The optional project status deliberately relaxes the old fixture's requiredness: there is no supported workflow that needs to reject an otherwise useful project page solely for lacking status. All shipped typed fields are optional; user extensions can require fields.
 

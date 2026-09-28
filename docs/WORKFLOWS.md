@@ -1,6 +1,6 @@
 # Bundled workflows
 
-Knowledge ships six automatically discoverable, repository-owned skills through
+Knowledge ships seven automatically discoverable, repository-owned skills through
 `openclaw.plugin.json` (`skills: ["./skills"]`) and the package file allow-list.
 They are semantic ports, not a gbrain runtime dependency or a Workshop install.
 
@@ -12,6 +12,7 @@ They are semantic ports, not a gbrain runtime dependency or a Workshop install.
 | `knowledge-meeting-ingest` | Transcripts, speaker uncertainty, structured decisions/actions, chronology |
 | `knowledge-entities` | Resolve identities; scoped, sourced profile creation/updates |
 | `knowledge-correct` | Exact-target correction/withdrawal, retained evidence and impact inspection |
+| `knowledge-source-ingest` | Canonical source identity, retained coverage snapshots and overlap-aware manifest diffing |
 
 Read the selected SKILL.md, then its linked references. Shared guidance is authored
 once in `skills/shared/`; `npm run skills:sync` embeds copies inside each skill.
@@ -132,8 +133,10 @@ connected claims/relationships before external escalation or asking the user.
 | Conditional host research; no ambient inbound capture, paid enrichment or automatic profile merging | Requested ingestion and trusted host scope do not authorize unrelated acquisition, background capture or identity consolidation |
 | Preserve ambiguous identity and source conflicts; accept explicit user corrections as new evidence | Knowledge distinguishes source/user/inference attribution and corrections from conflicting accounts; similar names or old synthesis cannot override evidence automatically |
 | Verify narrated chronology, not thematic heading order | Knowledge permits topic-organized prose; missing transit narration is not itself evidence of impossible travel |
-| Individual/batch receipts and agent work log, exact-payload retry and active/historical reconciliation | No required ingestion manifest, workflow engine or rollback. Reruns must not resurrect superseded/withdrawn assertions |
+| Individual/batch receipts and agent work log, exact-payload retry and active/historical reconciliation | No globally required ingestion manifest, workflow engine or rollback. Enumerable external sources may opt into retained source snapshots/manifests; reruns must not resurrect superseded/withdrawn assertions |
 | No sync or manual vault Git commands | Publication/index reconciliation/local history already belong to the backend |
+
+For enumerable sources, `knowledge-source-ingest` uses ordinary `source` pages and retained attachments: one canonical provider/key identity plus bounded snapshots with exact coverage, observation time, manifest hash, item count, completeness and watermark. Its bundled generic manifest script performs scalable identity/hash comparison; the Discrawl adapter is read-only and config-driven. These are agent-run facilities, not a plugin-owned job, connector, scheduler or extraction state machine.
 
 The remaining real-content trial is a workflow acceptance check, not a prerequisite
 for inventing additional progress storage. No live user records are created by the
