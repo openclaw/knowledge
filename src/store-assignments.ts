@@ -54,7 +54,7 @@ export function createStoreOperations(stores: Stores) {
     await countRecords(entries, registry, context);
     const canChange = canChangeAssignments(context) && writable() && !failure && !registry?.pending;
     return {
-      revision: membership.revision, defaultAgent: stores.defaultAgent(),
+      revision: membership.revision, ...(stores.defaultAgent() ? { defaultAgent: stores.defaultAgent() } : {}),
       agents: agents.map(id => {
         const supported = agentIdPattern.test(id), binding = supported ? effectiveBinding(membership, id) : undefined;
         return { id, name: names.get(id) ?? id, supported, ...(binding ? { binding } : {}),

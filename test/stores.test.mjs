@@ -321,3 +321,15 @@ test('operator provider reads never create storage', async t => {
   assert.deepEqual(await f.storesDir(), []);
   void service;
 });
+
+test('several agents without a default: operators must choose; tools are unaffected', async t => {
+  const f = await fixture(t);
+  // No agent entry is marked default, as on installs with several agents.
+  for (const agent of f.host.config.agents.list) delete agent.default;
+  await f.save('research', 'Research note');
+  const snap = await f.snapshot();
+  assert.equal(snap.defaultAgent, undefined);
+  await assert.rejects(f.service.status({}, f.reader), /choose which agent/);
+  assert.equal((await f.service.agent_query({ agent: 'research', operation: 'records', input: {} }, f.reader)).total, 1);
+  assert.equal((await f.service.status({}, f.as('main'))).store, 'unprovisioned');
+});

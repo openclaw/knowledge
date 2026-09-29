@@ -808,9 +808,20 @@ export default defineControlUiPlugin({
         refreshing = true;
         const n = ++statusGeneration, observedGeneration = generation;
         try {
-          const [report, stores] = await Promise.all([feature.invoke("status", {}), base.invoke("stores_snapshot", {}).catch(() => undefined)]);
+          // Store facts first: with several agents and no default, the view
+          // must name an agent before reading anything.
+          const stores = await base.invoke("stores_snapshot", {}).catch(() => undefined);
           if (disposed || n !== statusGeneration || !context.host.connection.connected) return;
-          if (stores) { storesSnapshot = stores; renderStoreContext(); }
+          if (stores) {
+            storesSnapshot = stores;
+            if (!viewing && !stores.defaultAgent) {
+              const supported = stores.agents.filter(a => a.supported), selected = context.host.agents.selectedId;
+              viewing = supported.find(a => a.id === selected)?.id ?? supported[0]?.id;
+            }
+            renderStoreContext();
+          }
+          const report = await feature.invoke("status", {});
+          if (disposed || n !== statusGeneration || !context.host.connection.connected) return;
           const nextIdentity = JSON.stringify([report.agent, report.vault, report.scope]);
           if (identity && identity !== nextIdentity) {
             // The viewed agent's store changed (an assignment or recovery). Never

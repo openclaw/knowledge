@@ -1,5 +1,5 @@
 import path from "node:path";
-import { listAgentIds, resolveDefaultAgentId } from "openclaw/plugin-sdk/agent-scope-runtime";
+import { listAgentIds, tryResolveDefaultAgentId } from "openclaw/plugin-sdk/agent-scope-runtime";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 import { pinPrincipal, type Principal, type VaultAccess } from "./access.js";
 import { RegistryClient } from "./registry-client.js";
@@ -41,7 +41,9 @@ export class Stores {
   hostConfig() { return this.api.runtime.config.current(); }
   /** Host agents, as configured. Knowledge binds only IDs it can represent. */
   agents(): string[] { return listAgentIds(this.hostConfig() as Parameters<typeof listAgentIds>[0]); }
-  defaultAgent(): string { return resolveDefaultAgentId(this.hostConfig() as Parameters<typeof resolveDefaultAgentId>[0]); }
+  /** The configured default agent, or undefined when several agents are
+   * configured without one (operators must then choose an agent explicitly). */
+  defaultAgent(): string | undefined { return tryResolveDefaultAgentId(this.hostConfig() as Parameters<typeof tryResolveDefaultAgentId>[0]); }
   /** The membership Knowledge enforces: the registry's reconciled section. */
   membership(): Membership {
     const reconciled = this.registry.current?.reconciled;

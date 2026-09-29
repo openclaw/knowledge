@@ -20,7 +20,7 @@ const OPERATOR_READ = ["operator.read", "operator.write", "operator.admin"], OPE
  * tools use the host-minted memory audience; operators use `operatorAgent`,
  * which the service chooses (the default agent or an operator-only selector).
  * The returned function re-evaluates live authority on every call. */
-export function featurePrincipal(context: FeatureInvocationContext, operatorRead: boolean, write: boolean, operatorAgent: string): () => Principal {
+export function featurePrincipal(context: FeatureInvocationContext, operatorRead: boolean, write: boolean, operatorAgent: string | undefined): () => Principal {
   return () => {
     if (context.source === "session-action") {
       const { client, sessionKey } = context.action;
@@ -29,6 +29,7 @@ export function featurePrincipal(context: FeatureInvocationContext, operatorRead
       // Operators inspect an agent's private store; a session target would be
       // conversation impersonation.
       if (sessionKey) throw denied();
+      if (!operatorAgent) throw Error("Several agents are configured and none is the default; choose which agent's knowledge to view.");
       return { agentId: operatorAgent, scope: { visibility: "private" } };
     }
     if (context.source !== "tool") throw denied();

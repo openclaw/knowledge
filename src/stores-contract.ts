@@ -45,7 +45,8 @@ export type AgentEntry = Static<typeof AgentEntry>;
 
 export const StoresSnapshot = Type.Object({
   revision,
-  defaultAgent: Type.String({ maxLength: 120 }),
+  /** Absent when several agents are configured without a default. */
+  defaultAgent: Type.Optional(Type.String({ maxLength: 120 })),
   agents: Type.Array(AgentEntry, { maxItems: 200 }),
   stores: Type.Array(StoreEntry, { maxItems: 500 }),
   /** Whether this caller may change assignments, and why not. */
