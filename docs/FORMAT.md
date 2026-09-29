@@ -63,6 +63,38 @@ Optional assertion fields:
 | `valid_from`, `valid_until` | Claim/relationship | UTC validity interval, inclusive start/exclusive end |
 | `expires_at` | Claim/relationship | UTC instant excluding this assertion from active retrieval |
 
+## Curated automatic recall
+
+An active record may carry a service-issued `recall` block:
+
+```yaml
+recall:
+  summary: "The short text approved for automatic prompt injection."
+  triggers: ["standing preference", "recurring phrase"]
+  importance: 8
+  projects: ["github.com/openclaw/knowledge"]
+  approved_by: owner-private
+  approved_at: 2026-09-28T18:30:00.000Z
+```
+
+`summary` is required and contains 1–500 characters. It is the only record text
+that automatic recall may inject. `triggers` contains at most 20 phrases of
+1–100 characters; phrases cannot contain a newline, semicolon, or pipe because
+the host uses those characters as trigger separators. `importance` is an integer
+from 1 through 10. `projects` contains at most 20 nonempty host project keys;
+keys cannot contain a newline or angle bracket.
+
+`approved_by` is always `owner-private`, and `approved_at` is an ISO timestamp.
+The service writes both fields. Caller input cannot supply or override them.
+Unknown fields, invalid values, and incomplete approval metadata produce an
+`invalid-recall` diagnostic. The record remains available to ordinary inspection
+and retrieval, but its recall block is ineligible and never auto-injected.
+
+`knowledge_recall` sets or clears this block through the revision-fenced
+publication journal. A correction creates a new record and does not copy recall
+approval to the replacement. Withdrawal and supersession make the old record
+ineligible even though its historical metadata remains inspectable.
+
 Occurrence/due values accept a real `YYYY-MM-DD` calendar date or timestamp with
 seconds, optional 1–3 fractional digits, and explicit `Z` or numeric timezone
 offset. No inferred midnight/timezone is persisted. Validity/expiry accept UTC

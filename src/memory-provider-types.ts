@@ -12,5 +12,7 @@ export type MemoryCallerContext = Parameters<MemoryProviderRuntime["open"]>[0]["
 export type MemoryReference = Parameters<MemoryProviderHandle["get"]>[0]["reference"];
 /** Search request accepted by the provider-neutral Knowledge runtime. */
 export type MemorySearchRequest = Parameters<MemoryProviderHandle["search"]>[0];
+/** Curated automatic-recall candidate request accepted by Knowledge. */
+export type MemoryCandidateRequest = Parameters<NonNullable<MemoryProviderHandle["candidates"]>>[0];
 /** Citation returned by a provider-neutral Knowledge read. */
 export type MemoryCitation = NonNullable<MemorySearchPage["hits"][number]["citations"]>[number];

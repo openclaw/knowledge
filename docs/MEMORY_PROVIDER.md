@@ -45,7 +45,7 @@ fences retained leases; reload rollback can resume the drained old runtime.
   embeddings. Scores are query-local and `minScore` is enforced. The provider
   declares only the `memory` source, so the host rejects any request containing
   `sessions` before calling Knowledge. Knowledge retains its own validation for
-  direct contract use. Curated project-key requests are unsupported.
+  direct contract use. Knowledge does not apply project filters during search.
 - Opaque references contain the provider, record ID, and revision plus content
   hash. They grant no access and remain valid through a rename only when the
   record bytes/revision remain unchanged. Changed revisions reject reads.
@@ -69,10 +69,28 @@ fences retained leases; reload rollback can resume the drained old runtime.
   Doctor and CLI status use this handle. Storage failures report `unavailable`
   without exposing their error details; caller and lease revocation still reject.
 
-The handle declares `{ sources: ["memory"], pagination: true, candidates: [],
-projectFilter: false }`. The host rejects undeclared sources, project filters,
-and candidate kinds before dispatch. Search cursors are supported; automatic
-trigger/project selection remains unavailable until curated recall is implemented.
+The handle declares `{ sources: ["memory"], pagination: true, candidates:
+["trigger", "project"], projectFilter: false }`. Search cursors are supported.
+The host applies the all-of active-project-key check because Knowledge declares
+`projectFilter: false`.
+
+`candidates({kind, limit})` is available only to an owner-private audience and
+shares the search/get serialization and authority fences. The default limit is
+48 and the maximum is 200. Results are active, valid, available records in the
+agent-private partition with a complete service-issued `recall` block. Trigger
+candidates require at least one trigger; project candidates require at least one
+project key. Results sort by descending `importance`, then stable record ID.
+
+Each candidate excerpt is exactly `recall.summary`. Record bodies, ingested
+source text, and other metadata never enter the automatic excerpt. The hit marks
+`automaticRecall.eligible: true`, joins trigger phrases with newlines, carries
+optional importance/project keys, and cites the record revision/hash. Ordinary
+search hits retain their existing excerpt and always mark eligibility false.
+
+A conversation audience receives no candidates and the warning `Automatic recall
+uses only owner-approved private records.` Operators cannot enumerate candidates,
+and host status handles remain health-only. Invalid, superseded, withdrawn,
+expired, fixture, ambiguous, or dependency-ineligible records are excluded.
 
 The memory capability declares `knowledge_grep`, `knowledge_lookup`, and
 `knowledge_record` in `recallToolNames`. Active Memory defaults deep recall to
@@ -103,9 +121,10 @@ mode is explicit. The host exposes tools but no enabled-skill inventory, so skil
 references are conditional on availability and associated tools, not a guarantee
 that disabled skills were delivered.
 
-Trigger/project candidates and automatic-injection eligibility remain unavailable
-until curated recall is implemented. Keyword search is not a trusted-instruction
-selection mechanism. No pre-compaction save plan is supplied; an explicit null
+Automatic injection uses only the summary explicitly approved through
+`knowledge_recall`; keyword search is not a trusted-instruction selection
+mechanism. Corrections require a new approval on the replacement record. No
+pre-compaction save plan is supplied; an explicit null
 resolver prevents a Memory Core sidecar from donating its file flush plan.
 Workspace bootstrap files, reset hooks,
 consolidation/dreaming, standing intents, standard Memory Core tools/CLI, and

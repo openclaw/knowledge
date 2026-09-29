@@ -1,10 +1,30 @@
 import { Type, type Static } from "typebox";
+import { Check } from "typebox/value";
 
 export const text = (max = 200) => Type.String({ maxLength: max });
 export const name = Type.String({ pattern: "^[a-z][a-z0-9_-]{0,63}$" });
 export const id = Type.String({ pattern: "^[a-zA-Z0-9][a-zA-Z0-9_-]{7,95}$" });
 export const timestamp = Type.String({ pattern: "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$" });
 export const strings = Type.Array(text(), { maxItems: 100 });
+export const Recall = Type.Object({
+  summary: Type.String({ minLength: 1, maxLength: 500, pattern: "^(?=.*\\S)[\\s\\S]+$" }),
+  triggers: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 100, pattern: "^(?=.*\\S)[^\\r\\n;|]+$" }), { maxItems: 20 })),
+  importance: Type.Optional(Type.Integer({ minimum: 1, maximum: 10 })),
+  projects: Type.Optional(Type.Array(Type.String({ minLength: 1, pattern: "^(?=.*\\S)[^\\r\\n<>]+$" }), { maxItems: 20 })),
+  approved_by: Type.Literal("owner-private"),
+  approved_at: timestamp,
+}, { additionalProperties: false });
+export type Recall = Static<typeof Recall>;
+
+/** Returns only complete service-issued recall approvals. Invalid authored blocks fail closed. */
+export function approvedRecall(value: unknown): Recall | undefined {
+  if (!Check(Recall, value)) return undefined;
+  const parts = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/.exec(value.approved_at);
+  const parsed = new Date(value.approved_at);
+  if (!parts || !Number.isFinite(parsed.getTime())) return undefined;
+  const observed = [parsed.getUTCFullYear(), parsed.getUTCMonth() + 1, parsed.getUTCDate(), parsed.getUTCHours(), parsed.getUTCMinutes(), parsed.getUTCSeconds()];
+  return observed.every((part, index) => part === Number(parts[index + 1])) ? value : undefined;
+}
 export const Evidence = Type.Object({
   path: text(500), sha256: Type.String({ pattern: "^[a-f0-9]{64}$" }),
   start_line: Type.Optional(Type.Integer({ minimum: 1 })), end_line: Type.Optional(Type.Integer({ minimum: 1 })),
@@ -62,6 +82,8 @@ export const Envelope = Type.Object({
   valid_from: Type.Optional(timestamp), valid_until: Type.Optional(timestamp), expires_at: Type.Optional(timestamp),
   owner: Type.Optional(id), due_at: Type.Optional(Type.String({ maxLength: 40 })),
   attribution: Type.Optional(text(1000)), entities: Type.Optional(Type.Array(id, { maxItems: 100 })),
+  // Preserve malformed authored blocks for diagnostics while automatic recall validates separately.
+  recall: Type.Optional(Type.Unknown()),
   from: Type.Optional(id), to: Type.Optional(id), label: Type.Optional(name),
   evidence: Type.Optional(Type.Array(Evidence)),
   dependencies: Type.Optional(Type.Array(id, { maxItems: 100 })),

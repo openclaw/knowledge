@@ -30,6 +30,7 @@ export const operations = {
   createRelationship: (s: Storage, a: Access, input: { value: In<Storage["createRelationship"]>; actor: string }) => s.createRelationship(input.value, a, input.actor),
   correct: (s: Storage, a: Access, input: In<Storage["correct"]>) => s.correct(input, a, "agent"),
   withdraw: (s: Storage, a: Access, input: In<Storage["withdraw"]>) => s.withdraw(input, a, "agent"),
+  recall: (s: Storage, a: Access, input: In<Storage["recall"]>) => s.recall(input, a, "agent"),
   connections: (s: Storage, a: Access, input: In<Storage["connections"]>) => s.connections(input, a),
   resume: (s: Storage, a: Access, input: { requestId: string }) => s.resume(a, input.requestId),
   revision: (s: Storage, a: Access, input: { sequence: number }) => s.revision(a, input.sequence),
@@ -56,6 +57,7 @@ export const operations = {
     const all = text.split("\n"), chunk = all.slice(input.from - 1, input.from - 1 + input.count);
     return { status: "ok" as const, record: { id: r.id, title: r.title, path: r.path, revision: r.revision, hash: r.hash }, evidence: (r.metadata.evidence ?? []).slice(0, 20), text: chunk.join("\n"), lines: chunk.length, total: all.length };
   }),
+  memoryCandidates: (s: Storage, a: Access, input: { kind: "trigger" | "project"; limit: number }) => s.memoryCandidates(input, a),
   memoryHealth: (s: Storage, a: Access) => s.run(a, async vault => {
     const data = await vault.scan();
     return { ontology: Boolean(data.ontology), issues: data.issues.length, records: eligible(data, undefined, false).length };

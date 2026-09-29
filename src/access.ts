@@ -8,7 +8,7 @@ type Resolution = { scope: VaultAccess["scope"] };
 type MemoryAudience = NonNullable<Extract<MemoryCallerContext["authority"], { kind: "session" }>["audience"]>;
 
 /** Provider access distinguishes partition reads from host-only readiness checks. */
-export type MemoryAccess = VaultAccess & { healthOnly: boolean; assertContentAccess: () => void };
+export type MemoryAccess = VaultAccess & { healthOnly: boolean; ownerPrivate: boolean; assertContentAccess: () => void };
 
 function bindAccess(resolve: () => Resolution): VaultAccess {
   const initial = resolve(), identity = JSON.stringify(initial);
@@ -16,7 +16,7 @@ function bindAccess(resolve: () => Resolution): VaultAccess {
 }
 
 // Fence both the partition and the health-only restriction for the lease lifetime.
-function bindMemoryAccess(resolve: () => Resolution & { healthOnly: boolean }): MemoryAccess {
+function bindMemoryAccess(resolve: () => Resolution & { healthOnly: boolean; ownerPrivate: boolean }): MemoryAccess {
   const initial = resolve(), identity = JSON.stringify(initial);
   return { ...initial, assertCurrent() { if (JSON.stringify(resolve()) !== identity) throw denied(); },
     assertContentAccess() { if (initial.healthOnly) throw denied(); } };
@@ -65,15 +65,15 @@ export function authorizeMemoryAccess(context: MemoryCallerContext,
     if (caller.kind === "host") {
       if (purpose !== "status") throw denied();
       // The scope is internal to validation; this lease cannot release its content.
-      return { scope: { visibility: "agent-private", agentId }, healthOnly: true };
+      return { scope: { visibility: "agent-private", agentId }, healthOnly: true, ownerPrivate: false };
     }
     if (caller.kind === "operator") {
       if (!operatorRead || !caller.connId || !caller.scopes.some(s => ["operator.read", "operator.write", "operator.admin"].includes(s))) throw denied();
-      return { scope: { visibility: "agent-private", agentId }, healthOnly: false };
+      return { scope: { visibility: "agent-private", agentId }, healthOnly: false, ownerPrivate: false };
     }
     // Background host calls are not session delegation. Session identity is a
     // host-minted audience; providers consume it without reconstructing lineage.
     if (caller.kind !== "session" || caller.sandboxed) throw denied();
-    return { ...audienceScope(caller.audience, agentId), healthOnly: false };
+    return { ...audienceScope(caller.audience, agentId), healthOnly: false, ownerPrivate: caller.audience?.kind === "owner-private" };
   });
 }

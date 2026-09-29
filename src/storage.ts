@@ -23,9 +23,9 @@ import { parseYaml } from "./files.js";
 import { Manifest, RealVault, type VaultConfig } from "./real-vault.js";
 import { SqliteIdentityStore } from "./identity-store.js";
 import { PublicationFiles, type FileChange } from "./publication-files.js";
-import { AnnotateInput, SavePage, ClaimInput, RelationshipInput, CorrectInput, WithdrawInput, type WriteInput, type WriteKind, type Receipt } from "./mutation-contract.js";
+import { AnnotateInput, SavePage, ClaimInput, RelationshipInput, CorrectInput, WithdrawInput, RecallInput, type WriteInput, type WriteKind, type Receipt } from "./mutation-contract.js";
 import { digest } from "./vault.js";
-import { Envelope, RecordAnnotations, type LoadedRecord, type Scope } from "./model.js";
+import { approvedRecall, Envelope, RecordAnnotations, type LoadedRecord, type Recall, type Scope } from "./model.js";
 import { lifecycleRecord, lifecycleImpact, assertLifecycleTarget, applyLifecycleGuards } from "./lifecycle.js";
 import type { VaultAccess } from "./access.js";
 
@@ -33,7 +33,7 @@ const canonical = (x: unknown): string => JSON.stringify(x, (_, v) => v && typeo
 export const scopeKey = (scope: Scope) => scope.visibility === "conversation" ? `conversations/${scope.sessionId}` : "private";
 const blocked = () => Error("Knowledge publication pending or conflicted; inspect mutation history and retry the original request. No partial catalog returned.");
 type Plan = { rootIdentity: string; before: Manifest; after: Manifest; changes: FileChange[]; actor: string; scope: string; record: LoadedRecord; records?: LoadedRecord[]; source?: SourceIdentity };
-type Prepared = { record: LoadedRecord; artifacts: Record<string, string>; previous?: LoadedRecord; data: Awaited<ReturnType<SampleVault["scan"]>>; snapshot: string; additional?: { before?: LoadedRecord; after: LoadedRecord }[]; batch?: { items: NonNullable<Receipt["items"]>; source?: SourceIdentity; expectedPreviousRequestId?: string }; lifecycle?: CorrectInput | WithdrawInput; annotation?: boolean; annotationEvidence?: import("./model.js").Evidence[] };
+type Prepared = { record: LoadedRecord; artifacts: Record<string, string>; previous?: LoadedRecord; data: Awaited<ReturnType<SampleVault["scan"]>>; snapshot: string; additional?: { before?: LoadedRecord; after: LoadedRecord }[]; batch?: { items: NonNullable<Receipt["items"]>; source?: SourceIdentity; expectedPreviousRequestId?: string }; lifecycle?: CorrectInput | WithdrawInput; annotation?: boolean; metadataOnly?: boolean; annotationEvidence?: import("./model.js").Evidence[] };
 type Row = { scope: string; request: string; intent: string; state: Receipt["state"]; plan: string; receipt: string };
 export type PublicationHook = (stage: string) => void;
 
@@ -81,6 +81,23 @@ export class KnowledgeStorage {
       const data = await vault.scan();
       access.assertCurrent();
       return this.store.withDatabase(db => connections(data, input, withdrawnIds(db, this.retrievalBinding(access))));
+    });
+  }
+  /** Enumerates approved automatic-recall projections without returning record bodies. */
+  async memoryCandidates(input: { kind: "trigger" | "project"; limit: number }, access: VaultAccess) {
+    return this.run(access, async vault => {
+      const data = await vault.scan();
+      const records = this.store.withDatabase(db => eligible(data, withdrawnIds(db, this.retrievalBinding(access)), false))
+        .filter(record => record.lifecycle === "active")
+        .flatMap(record => {
+          const recall = approvedRecall(record.metadata.recall);
+          if (!recall || (input.kind === "trigger" ? !recall.triggers?.length : !recall.projects?.length)) return [];
+          return [{ id: record.id, title: record.title, path: record.path, revision: record.revision, hash: record.hash, recall }];
+        })
+        .sort((a, b) => (b.recall.importance ?? 0) - (a.recall.importance ?? 0) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+        .slice(0, input.limit);
+      access.assertCurrent();
+      return records;
     });
   }
   async recent(input: Static<typeof RecentInput>, access: VaultAccess) {
@@ -264,6 +281,45 @@ export class KnowledgeStorage {
     });
     return this.accept(input.requestId, intent, prepared, access, actor);
   }
+  /** Publishes or clears one owner-approved recall block through the normal journal. */
+  async recall(input: Static<typeof RecallInput>, access: VaultAccess, actor: string): Promise<Receipt> {
+    if (!Check(RecallInput, input)) throw Error("Invalid automatic recall input.");
+    access.assertCurrent();
+    if (!this.config.writesEnabled) throw Error("Knowledge writes are disabled.");
+    const scope = scopeKey(access.scope), intent = digest(canonical({ operation: "recall", input }));
+    const prior = this.store.withDatabase(db => this.row(db, scope, input.requestId));
+    if (prior) { this.checkReplay(prior, intent); return this.resume(access, input.requestId); }
+    this.assertReadable();
+    const prepared = await this.real.run(access, async vault => {
+      const snapshot = new PublicationFiles(this.config.root).snapshot(scope), data = await vault.scan();
+      // Recall can repair a malformed recall block, but not an otherwise ineligible record.
+      const allowed = this.store.withDatabase(db => eligible(data, withdrawnIds(db, this.retrievalBinding(access)), false));
+      const previous = allowed.find(record => record.id === input.id && record.lifecycle === "active");
+      if (!previous || previous.hash !== input.expectedHash || previous.revision !== input.expectedRevision) throw Error("Automatic recall conflict: target is unavailable, inactive, invalid, or changed.");
+      if ("set" in input && previous.kind === "claim" && ["source", "agent_inference"].includes(previous.metadata.assertion_origin ?? "")) {
+        throw Error("Automatic recall cannot approve externally sourced or agent-inferred claim text as owner context.");
+      }
+      const now = new Date().toISOString();
+      const metadata: Envelope = { ...previous.metadata, revision: previous.revision + 1, updated_at: now };
+      // Approval provenance is host-derived. The closed caller schema cannot supply these fields.
+      if ("set" in input) metadata.recall = { ...input.set, approved_by: "owner-private", approved_at: now } satisfies Recall;
+      else delete metadata.recall;
+      // Preserve authored YAML ordering, comments, and every unrelated unknown field.
+      const match = /^(?:\uFEFF)?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(previous.raw)!;
+      const doc = parseDocument(match[1]);
+      doc.set("revision", metadata.revision);
+      doc.set("updated_at", metadata.updated_at);
+      if (metadata.recall) doc.set("recall", doc.createNode(metadata.recall, { aliasDuplicateObjects: false }));
+      else doc.delete("recall");
+      parseYaml(doc.toString());
+      const raw = `---\n${doc.toString()}---\n${previous.body}`;
+      if (Buffer.byteLength(raw) > 65536 || !Check(Envelope, metadata) || (metadata.recall !== undefined && !approvedRecall(metadata.recall))) throw Error("Automatic recall metadata exceeds record limits or is invalid.");
+      const record: LoadedRecord = { ...previous, metadata, raw, hash: digest(raw), revision: metadata.revision };
+      if (new PublicationFiles(this.config.root).snapshot(scope) !== snapshot) throw Error("Edit conflict: vault changed during automatic recall validation.");
+      return { record, previous, data, snapshot, artifacts: {}, metadataOnly: true };
+    });
+    return this.accept(input.requestId, intent, prepared, access, actor);
+  }
   private async publish(payload: WriteInput, kind: WriteKind, access: VaultAccess, actor: string, correction?: CorrectInput): Promise<Receipt> {
     const schema = kind === "page" ? SavePage : kind === "claim" ? ClaimInput : RelationshipInput;
     if (!Check(schema, payload)) throw Error("Invalid structured write input.");
@@ -388,7 +444,7 @@ export class KnowledgeStorage {
       }
       // Batches cite the same retained transcript many times; read each file once.
       const cited = new EvidenceInspector(path.join(this.config.root, scope));
-      for (const evidence of prepared.annotation || (prepared.lifecycle && !("replacement" in prepared.lifecycle)) ? [] : prepared.record.metadata.evidence ?? []) if (!(evidence.path in prepared.artifacts)) cited.inspect(evidence);
+      for (const evidence of prepared.annotation || prepared.metadataOnly || (prepared.lifecycle && !("replacement" in prepared.lifecycle)) ? [] : prepared.record.metadata.evidence ?? []) if (!(evidence.path in prepared.artifacts)) cited.inspect(evidence);
       for (const record of prepared.batch ? (prepared.additional ?? []).map(c => c.after) : []) for (const evidence of record.metadata.evidence ?? []) cited.inspect(evidence);
       if (prepared.batch?.source) {
         const prior = this.sourceRow(db, scope, prepared.batch.source);
@@ -398,7 +454,7 @@ export class KnowledgeStorage {
       const stillActive = eligible(prepared.data, withdrawnIds(db, this.retrievalBinding(access)), false);
       const m = prepared.record.metadata;
       const references = [...(m.dependencies ?? []), ...(m.entities ?? []), ...[m.from, m.to, m.owner].filter((id): id is string => Boolean(id))];
-      if (!prepared.batch && !prepared.annotation && (!prepared.lifecycle || "replacement" in prepared.lifecycle) && references.some(id => !stillActive.some(r => r.id === id))) throw Error("Reference unavailable or inactive in this scope.");
+      if (!prepared.batch && !prepared.annotation && !prepared.metadataOnly && (!prepared.lifecycle || "replacement" in prepared.lifecycle) && references.some(id => !stillActive.some(r => r.id === id))) throw Error("Reference unavailable or inactive in this scope.");
       const after = { ...before, generation: before.generation + 1, publicationId: randomUUID() };
       const changes: FileChange[] = [];
       const add = (target: string, old: string | null, raw: string) => {

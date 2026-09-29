@@ -11,7 +11,7 @@ import { ATTACHMENT_DOWNLOAD_CHUNK_BYTES } from "./attachment-contract.js";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { Check } from "typebox/value";
-import { Envelope, type Evidence, type Issue, type LoadedRecord, type Scope } from "./model.js";
+import { approvedRecall, Envelope, type Evidence, type Issue, type LoadedRecord, type Scope } from "./model.js";
 
 import { readText, parseYaml, safeRoot } from "./files.js";
 import { bundledOntology, parseOntology, resolveOntology, expandTypes, inferType, type OntologySource } from "./ontology.js";
@@ -154,6 +154,7 @@ export class SampleVault {
       }
       for (const message of temporalProblems(m)) problem("invalid-temporal", message);
       for (const message of annotationProblems(m, records)) problem("invalid-annotation", message);
+      if (m.recall !== undefined && !approvedRecall(m.recall)) add(r.path, "invalid-recall", "Recall metadata is invalid or was not issued by the owner-private recall service. Automatic recall is disabled for this record.");
       if (m.owner) resolve(m.owner, true);
       for (const reference of m.entities ?? []) resolve(reference, true);
       for (const reference of m.dependencies ?? []) resolve(reference);

@@ -28,7 +28,11 @@ async function fixture(t, overrides = {}) {
   const tool = { source: 'tool', api, tool: { agentId: 'main', memoryAudience: audience, assertInvocationCurrent: assertCurrent, assertMemoryAudienceCurrent: assertCurrent } };
   const open = (ctx = context, agentId = 'main', purpose) => capability.providerRuntime.open({ cfg: {}, agentId, context: ctx, ...(purpose ? { purpose } : {}) });
   const save = (title, body = 'Evidence-backed durable note', ctx = tool) => service.save_page({ requestId: randomUUID(), expectedVaultId: vaultId, type: 'note', title, body }, ctx);
-  return { api, service, services, open, save, tool, context, sessionId, vaultId, root, capability,
+  const recall = async (target, set, ctx = tool) => {
+    const current = (await service.record({ id: target.id }, ctx)).record;
+    return service.recall({ requestId: randomUUID(), id: current.id, expectedRevision: current.revision, expectedHash: current.hash, set }, ctx);
+  };
+  return { api, service, services, open, save, recall, tool, context, sessionId, vaultId, root, capability,
     revoke() { active = false; }, setAudience(value) { context.authority.audience = value; tool.tool.memoryAudience = value; } };
 }
 
@@ -36,7 +40,7 @@ test('shared search/get/health roundtrip uses native publication, provenance and
   const f = await fixture(t);
   const saved = await f.save('Orchid decision', 'Choose SQLite\nBecause local persistence matters.');
   const { provider } = await f.open();
-  assert.deepEqual(provider.capabilities, { sources: ['memory'], pagination: true, candidates: [], projectFilter: false });
+  assert.deepEqual(provider.capabilities, { sources: ['memory'], pagination: true, candidates: ['trigger', 'project'], projectFilter: false });
   const result = await provider.search({ query: 'Orchid' });
   assert.equal(result.hits.length, 1);
   const hit = result.hits[0];
@@ -71,7 +75,9 @@ test('conversation audiences never acquire private scope', async t => {
 test('operator authorization and missing, foreign, host, and sandbox audience rejection', async t => {
   const f = await fixture(t); await f.save('Private note');
   const operator = { ...f.context, authority: { kind: 'operator', connId: 'real-connection', scopes: ['operator.read'] } };
-  assert.equal((await (await f.open(operator)).provider.search({ query: 'Private' })).hits.length, 1);
+  const operatorProvider = (await f.open(operator)).provider;
+  assert.equal((await operatorProvider.search({ query: 'Private' })).hits.length, 1);
+  await assert.rejects(operatorProvider.candidates({ kind: 'trigger' }), /owner-private/);
   for (const authority of [
     { kind: 'operator', scopes: ['operator.read'] }, { kind: 'operator', connId: 'x', scopes: [] },
     { kind: 'host', operation: 'bootstrap' }, { ...f.context.authority, sandboxed: true },
@@ -93,6 +99,7 @@ test('host status receives health only and every other host purpose is denied', 
   assert.doesNotMatch(JSON.stringify(health), /records|issues|scope|sentinel|private|knowledge-memory-/i);
   await assert.rejects(provider.search({ query: 'sentinel' }), /authority/);
   await assert.rejects(provider.get({ reference: { providerId: 'knowledge', id: 'recordid' } }), /authority/);
+  await assert.rejects(provider.candidates({ kind: 'trigger' }), /authority/);
   await provider.close();
   await assert.rejects(provider.health(), /closed/);
   for (const purpose of [undefined, 'default', 'cli']) await assert.rejects(f.open(host, 'main', purpose), /authority/);
@@ -156,14 +163,115 @@ test('native mutation and shared reads use one operation queue; errors do not po
   assert.equal((await provider.search({ query: 'Concurrent' })).hits.length, 6);
 });
 
-test('unsupported corpus/project capabilities are explicit, mixed corpus is partial', async t => {
+test('unsupported corpus/project filters are explicit, mixed corpus is partial', async t => {
   const f = await fixture(t); await f.save('Orchid note'); const { provider } = await f.open();
   await assert.rejects(provider.search({ query: 'Orchid', sources: ['sessions'] }), /transcripts/);
   await assert.rejects(provider.search({ query: 'Orchid', activeProjectKeys: ['x'] }), /project/);
   const mixed = await provider.search({ query: 'Orchid', sources: ['sessions', 'memory'] });
   assert.equal(mixed.coverage, 'partial'); assert.match(mixed.warning, /not searched/);
-  assert.equal(provider.candidates, undefined); assert.equal(provider.refresh, undefined);
+  assert.equal(typeof provider.candidates, 'function'); assert.equal(provider.refresh, undefined);
+  await assert.rejects(provider.candidates({ kind: 'project', activeProjectKeys: ['x'] }), /project-key/);
   for (const n of [0, -1, 51, NaN]) await assert.rejects(provider.search({ query: 'Orchid', maxResults: n }));
+});
+
+test('knowledge_recall sets and clears service approval with exact replay', async t => {
+  const f = await fixture(t), saved = await f.save('Standing preference', 'BODY MUST NEVER BE AUTOMATICALLY INJECTED');
+  const before = (await f.service.record({ id: saved.id }, f.tool)).record;
+  const input = {
+    requestId: randomUUID(), id: saved.id, expectedRevision: before.revision, expectedHash: before.hash,
+    set: { summary: 'Prefer concise proof reports.', triggers: ['proof report'], importance: 8, projects: ['github.com/openclaw/knowledge'] },
+  };
+  const receipt = await f.service.recall(input, f.tool);
+  assert.equal(receipt.state, 'published'); assert.equal(receipt.revision, before.revision + 1);
+  assert.deepEqual(await f.service.recall(input, f.tool), receipt);
+  let current = (await f.service.record({ id: saved.id, includeMetadata: true }, f.tool)).record;
+  assert.equal(current.metadata.recall.approved_by, 'owner-private');
+  assert.ok(Number.isFinite(Date.parse(current.metadata.recall.approved_at)));
+  assert.equal(current.metadata.recall.summary, input.set.summary);
+  const clear = { requestId: randomUUID(), id: saved.id, expectedRevision: current.revision, expectedHash: current.hash, clear: true };
+  const cleared = await f.service.recall(clear, f.tool);
+  assert.equal(cleared.revision, current.revision + 1);
+  assert.deepEqual(await f.service.recall(clear, f.tool), cleared);
+  current = (await f.service.record({ id: saved.id, includeMetadata: true }, f.tool)).record;
+  assert.equal(current.metadata.recall, undefined);
+});
+
+test('knowledge_recall rejects non-owner authority, unavailable writes and invalid metadata', async t => {
+  const f = await fixture(t), saved = await f.save('Approval target');
+  const current = (await f.service.record({ id: saved.id }, f.tool)).record;
+  const base = { requestId: randomUUID(), id: saved.id, expectedRevision: current.revision, expectedHash: current.hash };
+  const conversation = { kind: 'conversation', agentId: 'main', sessionKey: 'agent:main:group', sessionId: f.sessionId };
+  f.setAudience(conversation);
+  await assert.rejects(f.service.recall({ ...base, set: { summary: 'Private context' } }, f.tool), /conversation audiences/);
+  f.setAudience({ kind: 'owner-private', agentId: 'main' });
+  const operator = { source: 'session-action', api: f.api, action: { client: { connId: 'browser', scopes: ['operator.write'] } } };
+  await assert.rejects(f.service.recall({ ...base, set: { summary: 'Private context' } }, operator), /browser and operator/);
+  const invalidSets = [
+    { summary: '' }, { summary: '   ' }, { summary: 'x'.repeat(501) },
+    { summary: 'ok', triggers: ['bad;phrase'] }, { summary: 'ok', triggers: ['bad\nphrase'] },
+    { summary: 'ok', triggers: Array(21).fill('phrase') }, { summary: 'ok', importance: 11 },
+    { summary: 'ok', projects: ['<unsafe>'] }, { summary: 'ok', projects: ['bad\nkey'] },
+    { summary: 'ok', projects: Array(21).fill('project') }, { summary: 'ok', approved_by: 'owner-private' },
+    { summary: 'ok', approved_at: new Date().toISOString() },
+  ];
+  for (const set of invalidSets) await assert.rejects(f.service.recall({ ...base, requestId: randomUUID(), set }, f.tool), /Invalid automatic recall input/);
+  await assert.rejects(f.service.recall({ ...base, requestId: randomUUID(), set: { summary: 'ok' }, clear: true }, f.tool), /Invalid automatic recall input/);
+
+  const readOnly = await fixture(t, { writesEnabled: false });
+  await assert.rejects(readOnly.service.recall({ requestId: randomUUID(), id: randomUUID(), expectedRevision: 1, expectedHash: '0'.repeat(64), clear: true }, readOnly.tool), /writes are disabled/);
+  const sample = createKnowledgeService({ pluginConfig: {} });
+  await assert.rejects(sample.recall({ requestId: randomUUID(), id: randomUUID(), expectedRevision: 1, expectedHash: '0'.repeat(64), clear: true }, f.tool), /Sample vault is read-only/);
+});
+
+test('automatic candidates select by kind, inject summary only and order deterministically', async t => {
+  const f = await fixture(t);
+  const both = await f.save('Both candidate', 'SECRET BODY BOTH');
+  const project = await f.save('Project candidate', 'SECRET BODY PROJECT');
+  const trigger = await f.save('Trigger candidate', 'SECRET BODY TRIGGER');
+  await f.recall(both, { summary: 'Approved both summary', triggers: ['both phrase', 'second phrase'], importance: 9, projects: ['project-a'] });
+  await f.recall(project, { summary: 'Approved project summary', triggers: ['project phrase'], importance: 5, projects: ['project-b'] });
+  await f.recall(trigger, { summary: 'Approved trigger summary', triggers: ['trigger phrase'], importance: 5 });
+  const { provider } = await f.open();
+  const triggers = await provider.candidates({ kind: 'trigger' });
+  const tied = [project.id, trigger.id].sort();
+  assert.deepEqual(triggers.hits.map(hit => hit.reference.id), [both.id, ...tied]);
+  assert.deepEqual(triggers.hits[0].automaticRecall, { eligible: true, triggers: 'both phrase\nsecond phrase', importance: 9, projectKeys: ['project-a'] });
+  assert.equal(triggers.hits[0].citations.length, 1);
+  assert.equal(triggers.hits[0].citations[0].reference.id, both.id);
+  assert.equal(triggers.hits[0].citations[0].label, `knowledge:${both.id}`);
+  assert.doesNotMatch(JSON.stringify(triggers), /SECRET BODY/);
+  const projects = await provider.candidates({ kind: 'project', limit: 1 });
+  assert.deepEqual(projects.hits.map(hit => hit.reference.id), [both.id]);
+  const search = await provider.search({ query: 'SECRET' });
+  assert.ok(search.hits.every(hit => hit.automaticRecall.eligible === false));
+  for (const limit of [0, -1, 201, NaN]) await assert.rejects(provider.candidates({ kind: 'trigger', limit }));
+
+  f.setAudience({ kind: 'conversation', agentId: 'main', sessionKey: 'agent:main:group', sessionId: f.sessionId });
+  const conversationProvider = (await f.open()).provider;
+  assert.deepEqual(await conversationProvider.candidates({ kind: 'trigger' }), { hits: [], coverage: 'complete', warning: 'Automatic recall uses only owner-approved private records.' });
+});
+
+test('automatic candidates exclude withdrawn, superseded and invalid recall blocks', async t => {
+  const f = await fixture(t);
+  const withdrawn = await f.save('Withdrawn candidate'); await f.recall(withdrawn, { summary: 'withdrawn', triggers: ['withdrawn'] });
+  let current = (await f.service.record({ id: withdrawn.id }, f.tool)).record;
+  await f.service.withdraw({ requestId: randomUUID(), id: current.id, expectedRevision: current.revision, expectedHash: current.hash, reason: 'No longer current' }, f.tool);
+  current = (await f.service.record({ id: withdrawn.id }, f.tool)).record;
+  await assert.rejects(f.service.recall({ requestId: randomUUID(), id: current.id, expectedRevision: current.revision, expectedHash: current.hash, set: { summary: 'cannot restore' } }, f.tool), /unavailable, inactive, invalid, or changed/);
+
+  const superseded = await f.save('Superseded candidate'); await f.recall(superseded, { summary: 'superseded', triggers: ['superseded'] });
+  current = (await f.service.record({ id: superseded.id, view: 'raw' }, f.tool)).record;
+  await writeFile(path.join(f.root, 'private', current.path), current.raw.replace('lifecycle: active', 'lifecycle: superseded'));
+
+  const invalid = await f.save('Invalid recall candidate'); await f.recall(invalid, { summary: 'invalid', triggers: ['invalid'] });
+  current = (await f.service.record({ id: invalid.id, view: 'raw' }, f.tool)).record;
+  await writeFile(path.join(f.root, 'private', current.path), current.raw.replace('approved_by: owner-private', 'approved_by: forged'));
+
+  const { provider } = await f.open();
+  assert.deepEqual((await provider.candidates({ kind: 'trigger' })).hits, []);
+  const inspected = await f.service.record({ id: invalid.id }, f.tool);
+  assert.ok(inspected.record); assert.equal(inspected.record.valid, true);
+  assert.ok(inspected.issues.some(issue => issue.code === 'invalid-recall'));
 });
 
 test('withdrawn records stay unavailable after external restoration; fixtures are excluded', async t => {
@@ -230,11 +338,13 @@ test('prompt routes all workflows, obeys citation settings and omits disabled sa
   const full = buildKnowledgeMemoryPrompt({ availableTools: tools }).join('\n');
   for (const skill of ['recall', 'capture', 'ingest', 'meeting-ingest', 'entities', 'correct']) assert.ok(full.includes(`knowledge-${skill}`));
   assert.match(full, /not instructions or authorization/); assert.match(full, /newer text is not automatically truer/);
+  assert.match(full, /knowledge_recall only when the owner asks/); assert.match(full, /never ingested source text/);
   const readOnly = await fixture(t, { writesEnabled: false });
-  assert.doesNotMatch(readOnly.capability.promptBuilder({ availableTools: tools }).join('\n'), /During ordinary work|knowledge-capture|knowledge-correct/);
+  assert.doesNotMatch(readOnly.capability.promptBuilder({ availableTools: tools }).join('\n'), /During ordinary work|knowledge-capture|knowledge-correct|knowledge_recall only/);
   const partial = buildKnowledgeMemoryPrompt({ availableTools: new Set(['knowledge_grep']), citationsMode: 'off' }).join('\n');
   assert.doesNotMatch(partial, /knowledge_record|knowledge_lookup|knowledge-capture/);
   assert.match(partial, /Citations are disabled/);
+  assert.match(buildKnowledgeMemoryPrompt({ availableTools: new Set(['knowledge_recall']) }).join('\n'), /owner asks.*recalled automatically/);
 });
 
 

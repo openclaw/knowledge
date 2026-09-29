@@ -205,3 +205,22 @@ semantic retrieval, unconditional transcript capture, or implicit external resea
 Knowledge retains ambiguity and obeys its actual keyword and authority contracts.
 Remembering is best effort, not proof that every durable fact was captured.
 See [MEMORY_PROVIDER.md](MEMORY_PROVIDER.md) for runtime and acceptance boundaries.
+
+## Automatic recall alignment
+
+The gbrain checkout at `e78f1c38b947b053f3a46881340f74f316be855a`
+provides two related context mechanisms. `context_pack` reloads entity cards,
+open threads, and hot facts for window-selected or session-banked standing
+entities at session boundaries. Its push path is world-only. The
+`compile-context` tag explicitly pins a page into a deterministic compiled view,
+which injects a world-visible synopsis derived from the page body.
+
+Neither mechanism records an owner-private approval for a bounded summary,
+explicit trigger phrases, or host project keys. A gbrain compiled synopsis is
+derived from stored page text, while Knowledge records may contain ingested or
+inferred text that cannot cross the automatic prompt-injection trust boundary.
+Knowledge therefore uses a separate `recall` block and `knowledge_recall` action.
+Only the owner-approved summary is injectable; source and agent-inference claims
+cannot be approved, and conversation/operator authority cannot create approval.
+The field names follow OpenClaw's trigger/project candidate contract because
+gbrain has no equivalent record-level metadata to reuse.

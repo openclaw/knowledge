@@ -8,7 +8,7 @@ import { defineFeatureContract } from "openclaw/plugin-sdk/feature-contract";
 import { text } from "./model.js";
 import { RecordInput, RecordOutput, OntologyInput, OntologyOutput, CardSummary, Summary } from "./inspection-contract.js";
 
-import { AnnotateInput, SavePage, ClaimInput, RelationshipInput, CorrectInput, WithdrawInput, Receipt, HistoryEntry, GitStatus, requestId } from "./mutation-contract.js";
+import { AnnotateInput, SavePage, ClaimInput, RelationshipInput, CorrectInput, WithdrawInput, RecallInput, Receipt, HistoryEntry, GitStatus, requestId } from "./mutation-contract.js";
 
 const empty = Type.Object({}, { additionalProperties: false });
 const issue = Type.Object({ path: text(500), code: text(80), message: text(1000) });
@@ -65,6 +65,11 @@ export const contract = defineFeatureContract({
     withdraw: {
       kind: "action", description: "Agent-only withdrawal of one exact page, claim, or explicit relationship by ID, observed revision/hash, and reason. Preserves original/evidence/history; not physical erasure. A durable tombstone prevents stale restores from resurrecting the record. Active retrieval excludes known dependents without rewriting them. Withdraw an edge by its record ID, never by endpoint pair. Reuse identical request/payload for retries.",
       input: WithdrawInput, output: Receipt, tool: { name: "knowledge_withdraw", label: "Withdraw knowledge" },
+    },
+    recall: {
+      kind: "action", description: "Owner-private agent tool for explicit automatic-recall approval. Set a short summary plus optional trigger phrases, importance and host project keys on one exact active record; the service supplies approval identity/time. Source and agent-inference claims cannot be approved. Clear removes recall metadata. Revision/hash preconditions and exact request replay use the normal publication receipt and local Git checkpoint path. Corrections do not inherit approval.",
+      input: RecallInput, output: Receipt,
+      tool: { name: "knowledge_recall", label: "Curate automatic recall" },
     },
     connections: {
       kind: "query", description: "Inspect explicit incoming/outgoing relationships, reverse dependencies, and entity/owner claims. Access and active validity/expiry filtering precede counts and pagination. historical=true includes inactive/superseded but never withdrawn records. Follow nextOffset and compare snapshot across pages. Evidence here is a bounded preview; inspect each record for complete evidence. No inferred Markdown backlinks.",

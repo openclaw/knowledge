@@ -92,6 +92,41 @@ request just to make a misleading error true.
 
 `knowledge_history` adds a scoped `git: {state, pending, message}` summary. States also include `idle` (no content observed yet) and `read-only`. Neither counts nor retries include other scopes. Normal scoped scans also retry queued history. No GitHub or remote operations are exposed. See [local-history details](LOCAL_HISTORY.md).
 
+## Automatic recall approval
+
+`knowledge_recall` is an owner-private agent action. It accepts one exact target:
+
+```json
+{
+  "requestId": "lowercase-uuid",
+  "id": "record-id",
+  "expectedRevision": 3,
+  "expectedHash": "sha256",
+  "set": {
+    "summary": "Prefer concise implementation reports with exact proof.",
+    "triggers": ["implementation report"],
+    "importance": 8,
+    "projects": ["github.com/openclaw/knowledge"]
+  }
+}
+```
+
+Use `"clear": true` in place of `set` to remove recall metadata. The two forms
+are mutually exclusive. Set requests require an active, valid, available target.
+Claims with `assertion_origin: source` or `agent_inference` are rejected because
+externally sourced or inferred text is not approved owner context. Clear remains
+available for any eligible target.
+
+The action requires writes to be enabled, `context.source: tool`, and a current
+owner-private host audience. Conversation audiences, browser/session actions,
+operators, and sample mode cannot approve automatic recall. The service writes
+`approved_by: owner-private` and `approved_at`; neither is accepted from the
+caller. The action uses the standard publication journal, exact-payload replay,
+revision/hash conflict checks, receipt, and local Git checkpoint behavior.
+
+Corrections do not inherit approval. Inspect the replacement and issue a new
+`knowledge_recall` request only after the owner approves its summary.
+
 ## Keyword retrieval and exact identity lookup
 
 `knowledge_grep({query})` ranks titles, aliases and authored bodies with local

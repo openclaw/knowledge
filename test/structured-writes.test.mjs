@@ -77,6 +77,19 @@ test('all claim kinds roundtrip; contradictions and uncertain attribution are no
   assert.equal((await f.service.record({id:opposite.id},f.owner)).record.body,'Speaker 2 rejects option B.');
 });
 
+test('automatic recall approval rejects source and agent-inference claims',async t=>{
+  const f=await foundation(t);
+  for(const assertion_origin of ['source','agent_inference']) {
+    const receipt=await f.service.create_claim(f.claim({assertion_origin}),f.owner);
+    const record=(await f.service.record({id:receipt.id},f.owner)).record;
+    await assert.rejects(f.service.recall({requestId:randomUUID(),id:record.id,expectedRevision:record.revision,expectedHash:record.hash,set:{summary:'Do not approve this claim automatically.'}},f.owner),/externally sourced or agent-inferred/);
+  }
+  const receipt=await f.service.create_claim(f.claim({assertion_origin:'user_belief',attribution:'Josh, direct owner statement'}),f.owner);
+  const record=(await f.service.record({id:receipt.id},f.owner)).record;
+  const approved=await f.service.recall({requestId:randomUUID(),id:record.id,expectedRevision:record.revision,expectedHash:record.hash,set:{summary:'Josh prefers option B.',triggers:['option B']}},f.owner);
+  assert.equal(approved.state,'published');
+});
+
 for(const operation of ['create_claim','create_relationship']) for(const stage of ['after-accept','after-link:vault.json','before-receipt']) test(`${operation}: interrupted ${stage}, replacement retry and changed payload`,async t=>{
   const f=await foundation(t), input=operation==='create_claim'?f.claim():f.edge();
   const publisher=new Publisher(f.config,f.store,where=>{if(where===stage)throw Error('crash');});

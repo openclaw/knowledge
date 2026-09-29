@@ -44,7 +44,7 @@ export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureE
       } }),
       recallToolNames: ["knowledge_grep", "knowledge_lookup", "knowledge_record"],
       promptBuilder: params => config && (!params.agentId || params.agentId === config.agentId)
-        ? buildKnowledgeMemoryPrompt({ ...params, availableTools: config.writesEnabled ? params.availableTools : new Set([...params.availableTools].filter(t => !["knowledge_save_page", "knowledge_correct", "knowledge_withdraw"].includes(t))) }) : [],
+        ? buildKnowledgeMemoryPrompt({ ...params, availableTools: config.writesEnabled ? params.availableTools : new Set([...params.availableTools].filter(t => !["knowledge_save_page", "knowledge_correct", "knowledge_withdraw", "knowledge_recall"].includes(t))) }) : [],
       // A Memory Core sidecar must not donate its append-only file flush plan.
       flushPlanResolver: () => null,
     });
@@ -98,6 +98,12 @@ export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureE
       const access = authority(context, true);
       try { return await storage!.call("withdraw", access, input); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); }
     },
+    recall: async (input, context) => {
+      if (context.source !== "tool") throw Error("Automatic recall approval is available only through an owner-private agent tool call; browser and operator actions are not allowed.");
+      if (context.tool.memoryAudience?.kind !== "owner-private") throw Error("Automatic recall approval requires the owner's private memory audience; conversation audiences are not allowed.");
+      const access = authority(context, true);
+      try { return await storage!.call("recall", access, input); } finally { live?.invalidate(); }
+    },
     connections: async (input, context) => storage ? storage.call("connections", authority(context), input) : connections(await sample().scan(), input),
     resume: async (input, context) => { const access = authority(context, true); try { return await storage!.call("resume", access, { requestId: input.requestId }); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); } },
     revision: async (input, context) => storage!.call("revision", authority(context), { sequence: input.sequence }),
@@ -112,7 +118,7 @@ export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureE
       if (scope === "agent-private") live?.ensureWatching();
       const catalog = access ? await storage!.call("catalog", access) : catalogFacts(await sample().scan());
       return {
-        service: "knowledge", phase: config?.writesEnabled ? "structured-writes" : "read-only-explorer", backendRevision: "memory-provider-v2-1", instanceId, startedAt,
+        service: "knowledge", phase: config?.writesEnabled ? "structured-writes" : "read-only-explorer", backendRevision: "memory-provider-v2-2", instanceId, startedAt,
         checkedAt: catalog.checkedAt, vault: config?.vaultId ?? "bundled-sample", agent: config?.agentId ?? "none — synthetic sample", scope, sample: !config, writesEnabled: Boolean(config?.writesEnabled && (() => { try { authority(context, true); return true; } catch { return false; } })()),
         live: scope === "agent-private" ? live?.state ?? "stopped" : "stopped",
         snapshot: catalog.snapshot, records: catalog.records, validRecords: catalog.records,

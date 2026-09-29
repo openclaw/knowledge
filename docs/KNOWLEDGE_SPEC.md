@@ -186,7 +186,7 @@ Signatures below are compact design schemas, not final JSON Schema. `?` means op
 
 | Tool | Proposed inputs | Behavior |
 |---|---|---|
-| `knowledge_recall` | `query?`, `entity_id?`, `kinds?`, `since?`, `limit?`, `budget_tokens?` | Ranked facts, page snippets, matched entities, evidence, and match reasons. Keyword retrieval in v1; no generated answer or query expansion. Semantic retrieval is deferred. |
+| `knowledge_grep` | `query`, `kind?`, `type?`, `tag?`, `mode?`, `limit?`, `offset?` | Ranked title, alias, and body matches with evidence locators. Keyword retrieval is the implemented baseline; no generated answer or query expansion. Semantic retrieval is deferred. |
 | `knowledge_get` | `id`, `revision?`, `offset?`, `max_chars?`, evidence locator where applicable | Exact record or historical revision; bounded page/artifact text and continuation. Binary artifacts use authorized host artifact access. |
 | `knowledge_list` | `record_type?`, `entity_type?`, `entity_id?`, `tags?`, lifecycle filters, `updated_since?`, occurrence-time filters, `session?`, origin/import filters, `sort?`, `limit?`, `cursor?` | Deterministic exhaustive enumeration across authorized records and evidence, with explicit continuation and completion. Ranked recall does not establish completeness. |
 | `knowledge_entity` | `name_or_id` | `found`, `ambiguous`, or `missing`; bounded entity card, aliases, facts, relationships, and dated views. A miss never creates a record. |
@@ -405,10 +405,10 @@ These are intended integrations, not a cross-harness compatibility guarantee. Re
 | Status | Hook | Intended behavior |
 |---|---|---|
 | Required guidance | `before_prompt_build` | Append short stable instructions through `appendSystemContext`: tools, capture policy, citations, skill routing, and separation from legacy memory. Never replace the system prompt or put changing knowledge facts in the static prefix. |
-| Follow-up: ambient recall | `before_prompt_build` with `requiresToolAuthority` | Use reliable current-request text and the same retrieval path as `knowledge_recall`; prepend a small evidence block only if the finalized turn authority permits it. Not part of v1. |
+| Automatic recall | Provider `search` and `candidates` | The host scores trigger candidates and selects project candidates. Knowledge marks ordinary search hits ineligible and supplies only owner-private, explicitly approved summaries as eligible candidates. |
 | Optional write follow-through | `before_agent_finalize` | For a known retryable failed Knowledge write, request one bounded repair pass with a stable retry key and `maxAttempts=1`. |
 
-If implemented as a follow-up, ambient recall must respect authorized scope, budgets, cancellation, repetition suppression, and the lifetime of host authority. Missing authority or missing reliable current-request context skips enrichment. An explicitly empty current request must not fall back to reconstructed history. Hook failure must not make the ordinary turn unusable or appear as a successful empty search.
+Automatic recall respects authorized scope, budgets, cancellation, and the lifetime of host authority. Conversation audiences return no candidates. Missing authority rejects content access, and provider failure does not appear as a successful empty search.
 
 Finalization assistance does not infer write success from assistant prose, blindly retry conflicts/access denials, or guarantee persistence on cancellation. It is not a substitute for tool commits or ingestion verification. Support differs by harness and requires validation.
 

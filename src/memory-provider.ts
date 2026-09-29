@@ -35,7 +35,7 @@ export function createKnowledgeMemoryRuntime(storage: StorageClient | undefined,
       const guarded = { scope: access.scope, assertCurrent: check };
       const run = <T>(operation: () => Promise<T>) => lane.enqueue(async () => { check(); const result = await operation(); check(); return result; });
       return { provider: {
-        capabilities: { sources: ["memory"], pagination: true, candidates: [], projectFilter: false },
+        capabilities: { sources: ["memory"], pagination: true, candidates: ["trigger", "project"], projectFilter: false },
         search: (request: MemorySearchRequest) => run(async () => {
           access.assertContentAccess();
           if (request.sources && !request.sources.includes("memory")) throw Error("Knowledge does not search session transcripts; use conversation-history tools.");
@@ -79,6 +79,31 @@ export function createKnowledgeMemoryRuntime(storage: StorageClient | undefined,
           const r = found.record, ref = reference(r), nextFrom = from + found.lines;
           const citations: MemoryCitation[] = [{ label: `${r.title} (${r.path})`, reference: ref }, ...found.evidence.map(e => ({ label: `${e.path} sha256:${e.sha256}${e.start_line ? ` lines ${e.start_line}–${e.end_line ?? e.start_line}` : ""}` }))];
           return { status: "ok" as const, reference: ref, text: found.text, citations, from, lines: found.lines, truncated: nextFrom <= found.total, ...(nextFrom <= found.total ? { nextFrom } : {}) };
+        }),
+        candidates: request => run(async () => {
+          access.assertContentAccess();
+          if (access.scope.visibility === "conversation") return { hits: [], coverage: "complete" as const, warning: "Automatic recall uses only owner-approved private records." };
+          if (!access.ownerPrivate) throw Error("Automatic recall requires an owner-private memory audience.");
+          if (request.kind !== "trigger" && request.kind !== "project") throw Error("Knowledge candidates kind must be trigger or project.");
+          if (request.activeProjectKeys?.length) throw Error("Knowledge relies on the host to apply project-key filtering.");
+          const limit = integer(request.limit, 48, 200);
+          const records = await storage.call("memoryCandidates", guarded, { kind: request.kind, limit });
+          return {
+            hits: records.map(record => ({
+              reference: reference(record),
+              excerpt: record.recall.summary,
+              source: "memory",
+              // Citation framing is stable metadata; no unapproved title/path text enters the prompt.
+              citations: [{ label: `knowledge:${record.id}`, reference: reference(record) }],
+              automaticRecall: {
+                eligible: true,
+                ...(record.recall.triggers?.length ? { triggers: record.recall.triggers.join("\n") } : {}),
+                ...(record.recall.importance !== undefined ? { importance: record.recall.importance } : {}),
+                ...(record.recall.projects?.length ? { projectKeys: record.recall.projects } : {}),
+              },
+            })),
+            coverage: "complete" as const,
+          };
         }),
         health: () => run(async () => {
           let facts;

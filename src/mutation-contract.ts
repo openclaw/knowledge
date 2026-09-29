@@ -1,5 +1,5 @@
 import { Type, type Static } from "typebox";
-import { text, name, Evidence, Envelope, id, strings, RecordAnnotations } from "./model.js";
+import { text, name, Evidence, Envelope, id, strings, RecordAnnotations, Recall } from "./model.js";
 export const requestId = Type.String({ pattern: "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$" });
 export const SavePage = Type.Object({
   ...RecordAnnotations.properties,
@@ -53,6 +53,21 @@ export const AnnotateInput = Type.Object({
 export type AnnotateInput = Static<typeof AnnotateInput>;
 export const WithdrawInput = Type.Object(target, { additionalProperties: false });
 export type WithdrawInput = Static<typeof WithdrawInput>;
+const recallTarget = {
+  requestId, id, expectedRevision: Type.Integer({ minimum: 1 }),
+  expectedHash: Type.String({ pattern: "^[a-f0-9]{64}$" }),
+};
+export const RecallSet = Type.Object({
+  summary: Recall.properties.summary,
+  triggers: Recall.properties.triggers,
+  importance: Recall.properties.importance,
+  projects: Recall.properties.projects,
+}, { additionalProperties: false });
+export const RecallInput = Type.Union([
+  Type.Object({ ...recallTarget, set: RecallSet }, { additionalProperties: false }),
+  Type.Object({ ...recallTarget, clear: Type.Literal(true) }, { additionalProperties: false }),
+]);
+export type RecallInput = Static<typeof RecallInput>;
 export const CorrectInput = Type.Object({
   ...target, expectedOntologyFingerprint: common.expectedOntologyFingerprint,
   replacement: Type.Union([
