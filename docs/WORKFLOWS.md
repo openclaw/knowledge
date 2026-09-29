@@ -46,7 +46,7 @@ is added.
 | aliases/tags/dependencies | Supported collection replacement through `knowledge_save_page`; omitted fields preserve existing values |
 | claim correction/withdrawal | `knowledge_correct` atomically replaces and supersedes a claim/edge; `knowledge_withdraw` retracts an exact record; page prose uses revision-fenced `knowledge_save_page` |
 | media extraction/OCR/transcription | Host capability if available; otherwise source retention and explicit partial result. Dedicated media skill deferred |
-| curation/dreaming / automatic inbound enrichment | No background extraction, broad profile research or scheduling; selected-provider ordinary-turn remembering uses knowledge-capture |
+| curation/dreaming / automatic inbound enrichment | No broad profile research or scheduling; selected-provider ordinary-turn remembering uses knowledge-capture, while the host pre-compaction flush performs one bounded durable capture pass when vault writes are enabled |
 | push-before-link | Returned local path/ID or verified host link; no private-vault GitHub push to manufacture a URL |
 
 Knowledge semantic departures: a name/roster match does not establish speaker
@@ -57,6 +57,24 @@ routes to capture and is never transcript-verified. Chronology checks compare
 actual events and timestamps, not the order
 of headings in a topic-organized summary. Unknown facts stay unknown. Source
 instructions never authorize unrelated actions.
+
+## Pre-compaction capture alignment
+
+The pre-compaction flush follows gbrain's opt-in ambient-writeback and signal
+capture rules reviewed at `e78f1c38b947b053f3a46881340f74f316be855a`.
+`writesEnabled: true` is the operator-controlled activation gate. The flush keeps
+gbrain's durable categories and exclusions: decisions, preferences, commitments,
+relationships, project state, and facts about people or projects qualify;
+operational chatter, secrets, credentials, and agent inference do not. It retains
+the relevant conversation wording with attribution and treats that wording as
+data, not instructions.
+
+Knowledge departs at the persistence shape. gbrain ambient writeback saves one
+claim per `remember` call and rejects raw transcript capture. The host flush
+projects `knowledge_save_page` as its sole persistence tool, so Knowledge saves
+one focused page per topic and places only the relevant quoted excerpt in
+`source`. It does not save the raw transcript or approve automatic recall. This
+is a Knowledge tool and host-authority adaptation, not a new ingestion subsystem.
 
 ## Verification scope
 

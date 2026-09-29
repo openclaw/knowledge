@@ -4,7 +4,9 @@ import { mkdtemp, mkdir, writeFile, rm, readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
+import { Check } from 'typebox/value';
 import { createKnowledgeService } from '../dist/service.js';
+import { deriveMemoryFlushRequestId } from '../dist/service.js';
 import { buildKnowledgeMemoryPrompt } from '../dist/memory-prompt.js';
 import { contract } from '../dist/contract.js';
 import plugin from '../dist/index.js';
@@ -309,6 +311,83 @@ test('sample is not memory; entry retains native tools and prompt honors missing
   assert.deepEqual(capability.promptBuilder({ availableTools: new Set(names) }), []);
   assert.equal(capability.flushPlanResolver({}), null);
   assert.deepEqual(buildKnowledgeMemoryPrompt({ availableTools: new Set() }), []);
+});
+
+test('flush plan provides tool persistence only for writable real vaults', async t => {
+  const f = await fixture(t);
+  const plan = f.capability.flushPlanResolver({ contextWindowTokens: 8_000 });
+  assert.deepEqual(plan.persistenceToolNames, ['knowledge_save_page']);
+  assert.equal(plan.relativePath, undefined);
+  assert.equal(plan.reserveTokensFloor, undefined);
+  assert.equal(plan.softThresholdTokens, undefined);
+  assert.equal(plan.forceFlushTranscriptBytes, undefined);
+  assert.equal(plan.model, undefined);
+  assert.match(plan.prompt, /decisions, preferences, commitments/);
+  assert.match(plan.prompt, /source: \{ text, attribution \}/);
+  assert.match(plan.prompt, /NO_REPLY/);
+  assert.doesNotMatch(`${plan.prompt}\n${plan.systemPrompt}`, /knowledge_recall\s*\(/);
+  assert.equal(
+    f.capability.flushPlanResolver({ nowMs: 0 }).prompt,
+    f.capability.flushPlanResolver({ nowMs: Date.UTC(2036, 0, 1) }).prompt,
+  );
+
+  const readOnly = await fixture(t, { writesEnabled: false });
+  assert.equal(readOnly.capability.flushPlanResolver({}), null);
+  let sampleCapability;
+  createKnowledgeService({ pluginConfig: {}, registerMemoryCapability(value) { sampleCapability = value; } });
+  assert.equal(sampleCapability.flushPlanResolver({}), null);
+});
+
+test('flush save derives stable scoped request IDs and preserves exact retry semantics', async t => {
+  const f = await fixture(t);
+  const flushContext = (flushId, base = f.tool) => ({
+    ...base,
+    tool: { ...base.tool, memoryFlush: { flushId } },
+  });
+  const input = {
+    expectedVaultId: f.vaultId,
+    type: 'note',
+    title: 'Durable project decision',
+    body: 'The team chose the indexed vault format.',
+    source: { text: 'We chose the indexed vault format.', attribution: 'Conversation excerpt' },
+  };
+  assert.equal(Check(contract.operations.save_page.input, input), true);
+
+  const first = await f.service.save_page(input, flushContext('flush-a'));
+  assert.match(first.requestId, /^[a-f0-9]{8}-[a-f0-9]{4}-8[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/);
+  assert.deepEqual(await f.service.save_page(input, flushContext('flush-a')), first);
+  await assert.rejects(
+    f.service.save_page({ ...input, body: 'A different body.' }, flushContext('flush-a')),
+    /different payload/,
+  );
+
+  const anotherFlush = await f.service.save_page(input, flushContext('flush-b'));
+  const anotherTitle = await f.service.save_page({ ...input, title: 'Durable owner preference' }, flushContext('flush-a'));
+  assert.notEqual(anotherFlush.requestId, first.requestId);
+  assert.notEqual(anotherTitle.requestId, first.requestId);
+  assert.equal(
+    deriveMemoryFlushRequestId('flush-a', '  DURABLE   project decision  '),
+    first.requestId,
+  );
+  await assert.rejects(
+    f.service.save_page({ ...input, title: 'Outside flush' }, f.tool),
+    /requires requestId outside a host pre-compaction memory flush/,
+  );
+  const supplied = randomUUID();
+  assert.equal((await f.service.save_page({ ...input, requestId: supplied, title: 'Caller ID' }, flushContext('flush-a'))).requestId, supplied);
+});
+
+test('flush save follows delegated owner-private and conversation audiences', async t => {
+  const f = await fixture(t);
+  const flushContext = flushId => ({ ...f.tool, tool: { ...f.tool.tool, memoryFlush: { flushId } } });
+  const privateReceipt = await f.service.save_page({ title: 'Private flush page', type: 'note', body: 'Private durable fact.' }, flushContext('private-flush'));
+  assert.match(await readFile(path.join(f.root, 'private', privateReceipt.path), 'utf8'), /Private durable fact/);
+
+  f.setAudience({ kind: 'conversation', agentId: 'main', sessionKey: 'agent:main:group', sessionId: f.sessionId });
+  const conversationReceipt = await f.service.save_page({ title: 'Conversation flush page', type: 'note', body: 'Conversation durable fact.' }, flushContext('conversation-flush'));
+  assert.match(await readFile(path.join(f.root, 'conversations', f.sessionId, conversationReceipt.path), 'utf8'), /Conversation durable fact/);
+  assert.equal((await f.service.record({ id: privateReceipt.id }, f.tool)).record, null);
+  assert.equal((await f.service.record({ id: conversationReceipt.id }, f.tool)).record.id, conversationReceipt.id);
 });
 
 test('grep and lookup expose empty and usable evidence for Active Memory', async t => {

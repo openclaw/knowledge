@@ -86,6 +86,19 @@ no saved draft or receipt. The error says so. Keep the proposed text, read the
 current record, reconcile, and submit a new request. Do not archive every invalid
 request just to make a misleading error true.
 
+## Pre-compaction save request IDs
+
+`knowledge_save_page.requestId` is optional only when the host invokes the tool
+with a pre-compaction `memoryFlush.flushId`. Knowledge derives a lowercase UUIDv8
+from SHA-256 of that flush ID and the normalized page title. The same flush and
+title therefore replay the same publication intent: an identical payload returns
+the original receipt, while a changed payload is rejected as a request-ID reuse.
+Different titles or later flush IDs derive different IDs.
+
+Normal agent calls and browser saves must supply a lowercase UUID. A supplied ID
+is used unchanged during a flush. The host-delegated audience still selects the
+agent-private or exact conversation partition; omitting the ID grants no scope.
+
 ## Local Git history
 
 `knowledge_save_page` and `knowledge_resume` return publication status separately from optional `git: {state, commit?, message}`. A `published` receipt remains a successful save even when Git is `pending` or `unavailable`. `committed` includes the local commit ID. Retry with the same request ID; do not resubmit a new write just to get a Git checkpoint.

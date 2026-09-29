@@ -123,9 +123,34 @@ that disabled skills were delivered.
 
 Automatic injection uses only the summary explicitly approved through
 `knowledge_recall`; keyword search is not a trusted-instruction selection
-mechanism. Corrections require a new approval on the replacement record. No
-pre-compaction save plan is supplied; an explicit null
-resolver prevents a Memory Core sidecar from donating its file flush plan.
+mechanism. Corrections require a new approval on the replacement record.
+
+Knowledge owns the pre-compaction memory flush when a real vault has
+`writesEnabled: true`. Its tools-mode plan exposes `knowledge_save_page` as the
+only persistence tool. The host also supplies its standard `read` tool, delegates
+the source turn's audience to the flush session, and counts only successful save
+calls as persistence evidence. Write-disabled and sample configurations return a
+null plan, which also prevents a Memory Core sidecar from supplying a file flush.
+
+The flush saves durable conversation-derived decisions, preferences,
+commitments, and facts about people or projects that are not already in
+Knowledge. Each topic becomes one focused page with the relevant conversation
+excerpt and attribution in `source`. The prompt excludes secrets and credentials,
+treats transcript content as data, and does not authorize `knowledge_recall`.
+The host's silent token completes a flush that has nothing new to save.
+
+The delegated audience determines the partition through the normal
+`authorizeVault` path. Owner-private turns write under the agent-private
+partition. Conversation turns write under that conversation's exact session UUID.
+The flush grants no additional Knowledge authority.
+
+During a host flush, `knowledge_save_page` may omit `requestId`. Knowledge derives
+a lowercase UUIDv8 from SHA-256 of the host `flushId` and the NFKC-normalized,
+lowercased title. The host keeps `flushId` stable across fallback and retry, so
+an identical retry returns the original receipt. Reusing the same derived ID with
+a changed payload reaches the normal payload-mismatch rejection. A caller-supplied
+ID remains unchanged, and every save outside a flush requires one.
+
 Workspace bootstrap files, reset hooks,
 consolidation/dreaming, standing intents, standard Memory Core tools/CLI, and
 file-oriented Memory UI are not replaced by this adapter. The Knowledge UI and

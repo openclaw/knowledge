@@ -1,9 +1,10 @@
 import { createKnowledgeMemoryRuntime } from "./memory-provider.js";
+import { buildKnowledgeMemoryFlushPlan } from "./memory-flush.js";
 import { buildKnowledgeMemoryPrompt } from "./memory-prompt.js";
 import { connections } from "./connections.js";
 import { DatabaseSync } from "node:sqlite";
 import { keywordSearch, exactLookup } from "./retrieval.js";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { FeatureHandlers, FeatureEventEmitter, FeatureInvocationContext } from "openclaw/plugin-sdk/feature-plugin";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 import { contract } from "./contract.js";
@@ -15,6 +16,24 @@ import { parseVaultConfig } from "./real-vault.js";
 import { inspectRecord, inspectOntology } from "./inspection.js";
 import { LiveState } from "./live-state.js";
 import { StorageClient } from "./storage-client.js";
+
+const normalizeFlushTitle = (title: string) =>
+  title.normalize("NFKC").trim().replace(/\s+/gu, " ").toLowerCase();
+
+/** Derive a stable UUIDv8 request ID for one title within one host memory flush. */
+export function deriveMemoryFlushRequestId(flushId: string, title: string): string {
+  const bytes = createHash("sha256")
+    .update("knowledge-memory-flush\0")
+    .update(flushId)
+    .update("\0")
+    .update(normalizeFlushTitle(title))
+    .digest()
+    .subarray(0, 16);
+  bytes[6] = (bytes[6]! & 0x0f) | 0x80;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = bytes.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
 
 export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureEventEmitter<typeof contract>): FeatureHandlers<typeof contract> {
   const instanceId = randomUUID(), startedAt = new Date().toISOString();
@@ -45,8 +64,11 @@ export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureE
       recallToolNames: ["knowledge_grep", "knowledge_lookup", "knowledge_record"],
       promptBuilder: params => config && (!params.agentId || params.agentId === config.agentId)
         ? buildKnowledgeMemoryPrompt({ ...params, availableTools: config.writesEnabled ? params.availableTools : new Set([...params.availableTools].filter(t => !["knowledge_save_page", "knowledge_correct", "knowledge_withdraw", "knowledge_recall"].includes(t))) }) : [],
-      // A Memory Core sidecar must not donate its append-only file flush plan.
-      flushPlanResolver: () => null,
+      // The selected provider owns persistence; write-disabled/sample modes keep
+      // suppressing Memory Core's append-only file plan with an explicit null.
+      flushPlanResolver: () => config?.writesEnabled
+        ? buildKnowledgeMemoryFlushPlan()
+        : null,
     });
   }
   const accessFor = (context: FeatureInvocationContext, write = false) => {
@@ -85,7 +107,25 @@ export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureE
     recent: async (input, context) => storage ? storage.call("recent", authority(context), input) : { items: [], upperSequence: 0, nextBefore: null },
     attach: async (input, context) => storage!.call("attach", authority(context, true), input),
     attachment: (input, context) => storage ? storage.call("attachment", accessFor(context), input) : sample().attachment(input),
-    save_page: async (input, context) => { const access = authority(context, true); try { return await storage!.call("save", access, { value: input, actor: context.source === "tool" ? "agent" : "operator" }); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); } },
+    save_page: async (input, context) => {
+      const access = authority(context, true);
+      const flushId = context.source === "tool" ? context.tool.memoryFlush?.flushId : undefined;
+      if (input.requestId === undefined && !flushId) {
+        throw Error("knowledge_save_page requires requestId outside a host pre-compaction memory flush.");
+      }
+      const value = {
+        ...input,
+        requestId: input.requestId ?? deriveMemoryFlushRequestId(flushId!, input.title),
+      };
+      try {
+        return await storage!.call("save", access, {
+          value,
+          actor: context.source === "tool" ? "agent" : "operator",
+        });
+      } finally {
+        if (access.scope.visibility === "agent-private") live?.invalidate();
+      }
+    },
     create_claim: async (input, context) => { const access = authority(context, true); try { return await storage!.call("createClaim", access, { value: input, actor: context.source === "tool" ? "agent" : "operator" }); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); } },
     create_relationship: async (input, context) => { const access = authority(context, true); try { return await storage!.call("createRelationship", access, { value: input, actor: context.source === "tool" ? "agent" : "operator" }); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); } },
     correct: async (input, context) => {
