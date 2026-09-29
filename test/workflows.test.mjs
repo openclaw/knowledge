@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { Check } from 'typebox/value';
 import plugin from '../dist/index.js';
+import { apiFor } from './support.mjs';
 import { contract } from '../dist/contract.js';
 
 // A public feature/session-action adapter over the real storage implementation.
@@ -16,14 +17,13 @@ async function fixture(t) {
   const root = path.join(base, 'vault'), vaultId = randomUUID(), publicationId = randomUUID();
   await mkdir(path.join(root, 'private'), { recursive: true });
   await writeFile(path.join(root, 'vault.json'), JSON.stringify({
-    format: 'knowledge-vault-v1', vaultId, agentId: 'main', generation: 0, publicationId,
+    format: 'knowledge-vault-v2', vaultId, generation: 0, publicationId,
   }));
-  const pluginConfig = { vault: { root, statePath: path.join(base, 'state.sqlite'),
-    agentId: 'main', vaultId, publicationId, operatorRead: true, writesEnabled: true } };
+  const api = apiFor(base, { root, statePath: path.join(base, 'state.sqlite'), vaultId, publicationId, operatorRead: true, writesEnabled: true });
   let actions;
   function restart() {
     actions = new Map();
-    plugin.register({ id: 'knowledge', pluginConfig, registerService() {}, registerTool() {},
+    plugin.register({ ...api, registerService() {}, registerTool() {},
       registerSessionAction(action) { actions.set(action.id, action); } });
   }
   restart();

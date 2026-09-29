@@ -20,7 +20,8 @@ import type { DatabaseSync } from "node:sqlite";
 import { Check } from "typebox/value";
 import { parseDocument, stringify } from "yaml";
 import { parseYaml } from "./files.js";
-import { Manifest, RealVault, type VaultConfig } from "./real-vault.js";
+import { RealVault, type StoreConfig } from "./real-vault.js";
+import { Manifest, checkpointKey } from "./store-manifest.js";
 import { SqliteIdentityStore } from "./identity-store.js";
 import { PublicationFiles, type FileChange } from "./publication-files.js";
 import { AnnotateInput, SavePage, ClaimInput, RelationshipInput, CorrectInput, WithdrawInput, RecallInput, type WriteInput, type WriteKind, type Receipt } from "./mutation-contract.js";
@@ -32,7 +33,9 @@ import type { VaultAccess } from "./access.js";
 const canonical = (x: unknown): string => JSON.stringify(x, (_, v) => v && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => a.localeCompare(b))) : v);
 export const scopeKey = (scope: Scope) => scope.visibility === "conversation" ? `conversations/${scope.sessionId}` : "private";
 const blocked = () => Error("Knowledge publication pending or conflicted; inspect mutation history and retry the original request. No partial catalog returned.");
-type Plan = { rootIdentity: string; before: Manifest; after: Manifest; changes: FileChange[]; actor: string; scope: string; record: LoadedRecord; records?: LoadedRecord[]; source?: SourceIdentity };
+// `agentId` is the writing agent, fixed at acceptance so a resumed publication
+// keeps its original author whoever resumes it.
+type Plan = { rootIdentity: string; before: Manifest; after: Manifest; changes: FileChange[]; actor: string; agentId?: string; scope: string; record: LoadedRecord; records?: LoadedRecord[]; source?: SourceIdentity };
 type Prepared = { record: LoadedRecord; artifacts: Record<string, string>; previous?: LoadedRecord; data: Awaited<ReturnType<SampleVault["scan"]>>; snapshot: string; additional?: { before?: LoadedRecord; after: LoadedRecord }[]; batch?: { items: NonNullable<Receipt["items"]>; source?: SourceIdentity; expectedPreviousRequestId?: string }; lifecycle?: CorrectInput | WithdrawInput; annotation?: boolean; metadataOnly?: boolean; annotationEvidence?: import("./model.js").Evidence[] };
 type Row = { scope: string; request: string; intent: string; state: Receipt["state"]; plan: string; receipt: string };
 export type PublicationHook = (stage: string) => void;
@@ -40,7 +43,7 @@ export type PublicationHook = (stage: string) => void;
 export class KnowledgeStorage {
   private readonly real: RealVault;
   private readonly git: GitHistory;
-  constructor(readonly config: VaultConfig, private readonly store = new SqliteIdentityStore(config.statePath), private readonly hook: PublicationHook = () => {}, git?: GitHistory) {
+  constructor(readonly config: StoreConfig, private readonly store = new SqliteIdentityStore(config.statePath), private readonly hook: PublicationHook = () => {}, git?: GitHistory) {
     this.git = git ?? new GitHistory(config.root);
     this.real = new RealVault(config, store, (records, access, evidence) => this.observe(records, access, evidence));
   }
@@ -112,7 +115,7 @@ export class KnowledgeStorage {
   }
   async initialize(access: VaultAccess) {
     access.assertCurrent();
-    if (!await this.store.lookup(`agent:${this.config.agentId}`)) await this.real.run(access, async () => undefined);
+    if (!await this.store.lookup(checkpointKey(this.config.vaultId))) await this.real.run(access, async () => undefined);
   }
   private transaction<T>(run: (db: DatabaseSync) => T): T {
     return this.store.withDatabase(db => {
@@ -123,8 +126,8 @@ export class KnowledgeStorage {
   }
   private identity(db: DatabaseSync, files: PublicationFiles, allowed?: Manifest, fallback?: string | null) {
     const manifest = JSON.parse(files.read("vault.json") ?? fallback ?? "null");
-    const checkpoint = db.prepare("SELECT manifest FROM identities WHERE agent_key=?").get(`agent:${this.config.agentId}`);
-    if (!Check(Manifest, manifest) || manifest.vaultId !== this.config.vaultId || manifest.agentId !== this.config.agentId ||
+    const checkpoint = db.prepare("SELECT manifest FROM identities WHERE agent_key=?").get(checkpointKey(this.config.vaultId));
+    if (!Check(Manifest, manifest) || manifest.vaultId !== this.config.vaultId ||
         !checkpoint || (canonical(manifest) !== canonical(JSON.parse(String(checkpoint.manifest))) && canonical(manifest) !== canonical(allowed))) throw Error("Knowledge vault identity mismatch; recovery review required.");
     return manifest;
   }
@@ -475,7 +478,7 @@ export class KnowledgeStorage {
         receipt.reason = prepared.lifecycle.reason;
         receipt.impact = lifecycleImpact(prepared.data.records, prepared.lifecycle.id);
       }
-      const plan: Plan = { rootIdentity: files.identity(), before, after, changes, actor, scope, source: prepared.batch?.source, record: prepared.record, records: [prepared.record, ...(prepared.additional ?? []).map(c => c.after)] };
+      const plan: Plan = { rootIdentity: files.identity(), before, after, changes, actor, agentId: actor === "agent" ? access.agentId : undefined, scope, source: prepared.batch?.source, record: prepared.record, records: [prepared.record, ...(prepared.additional ?? []).map(c => c.after)] };
       access.assertCurrent();
       db.prepare("INSERT INTO mutations VALUES (?,?,?,?,?,?)").run(scope, requestId, intent, "accepted", JSON.stringify(plan), JSON.stringify(receipt));
     });
@@ -498,7 +501,7 @@ export class KnowledgeStorage {
       const fallback = row.state !== "published" && files.read(manifestChange.backup, true) === manifestChange.before ? manifestChange.before : undefined;
       this.identity(db, files, row.state !== "published" ? plan.after : undefined, fallback);
       if (row.state !== "accepted") { access.assertCurrent(); return receipt; }
-      const checkpoint = JSON.parse(String(db.prepare("SELECT manifest FROM identities WHERE agent_key=?").get(`agent:${this.config.agentId}`)!.manifest));
+      const checkpoint = JSON.parse(String(db.prepare("SELECT manifest FROM identities WHERE agent_key=?").get(checkpointKey(this.config.vaultId))!.manifest));
       if (canonical(checkpoint) !== canonical(plan.before)) throw Error("Stale publisher identity");
       try {
         for (const change of plan.changes) {
@@ -508,11 +511,11 @@ export class KnowledgeStorage {
         this.hook("before-receipt");
         for (const change of plan.changes) if (files.read(change.path) !== change.after || (change.before !== null && files.read(change.backup) !== change.before)) throw Error("conflict");
         access.assertCurrent();
-        db.prepare("UPDATE identities SET manifest=? WHERE agent_key=?").run(JSON.stringify(plan.after), `agent:${this.config.agentId}`);
+        db.prepare("UPDATE identities SET manifest=? WHERE agent_key=?").run(JSON.stringify(plan.after), checkpointKey(this.config.vaultId));
         receipt.state = "published"; receipt.message = "Published and available to exact reads; keyword indexing is pending until the next search reconciles this scope.";
         const records = plan.records ?? [plan.record];
         observeWithdrawals(db, records, this.retrievalBinding(access));
-        for (const record of records) this.recordObservation(db, plan.scope, record, plan.actor);
+        for (const record of records) this.recordObservation(db, plan.scope, record, plan.actor, plan.agentId);
         this.enqueueGit(db, plan.scope, plan.changes.filter(c => c.path !== "vault.json").map(c => ({ path: c.path, raw: c.after })), plan.actor, this.publicationToken(plan.scope, requestId));
         receipt.git = { state: "pending", message: "Published; local Git checkpoint pending." };
       } catch (e) {
@@ -613,8 +616,8 @@ export class KnowledgeStorage {
       }
     });
   }
-  private recordObservation(db: DatabaseSync, scope: string, r: LoadedRecord, provenance: string) {
-    db.prepare("INSERT INTO history(scope,id,provenance,at,path,revision,hash,raw) VALUES (?,?,?,?,?,?,?,?)").run(scope, r.id, provenance, new Date().toISOString(), r.path, r.revision, r.hash, r.raw);
+  private recordObservation(db: DatabaseSync, scope: string, r: LoadedRecord, provenance: string, agentId?: string) {
+    db.prepare("INSERT INTO history(scope,id,provenance,at,path,revision,hash,raw,agent_id) VALUES (?,?,?,?,?,?,?,?,?)").run(scope, r.id, provenance, new Date().toISOString(), r.path, r.revision, r.hash, r.raw, agentId ?? null);
     db.prepare("INSERT OR REPLACE INTO observations VALUES (?,?,?,?,?,?)").run(scope, r.id, r.path, r.hash, r.revision, r.raw);
   }
   private observe(records: LoadedRecord[], access: VaultAccess, evidence: EvidenceInspector) {
@@ -665,8 +668,14 @@ export class KnowledgeStorage {
         if (!prior || prior.hash !== r.hash || prior.path !== r.path) this.recordObservation(db, key, r, prior ? "external-edit" : "observed");
         // Only journal-confirmed agent revisions may carry an agent byline.
         // Scope ownership alone is not authorship (operator/import/external edits).
-        const writer = db.prepare("SELECT provenance FROM history WHERE scope=? AND id=? AND hash=? ORDER BY sequence DESC LIMIT 1").get(key, r.id, r.hash);
-        if (writer?.provenance === "agent") r.writtenByAgentId = access.scope.agentId;
+        // In a shared store the writer is whichever agent published, never the viewer.
+        // A store conversion rewrote only the storage envelope; authorship stays
+        // with the revision it converted.
+        const exact = db.prepare("SELECT provenance,agent_id,sequence FROM history WHERE scope=? AND id=? AND hash=? ORDER BY sequence DESC LIMIT 1").get(key, r.id, r.hash);
+        const writer = exact?.provenance === "conversion"
+          ? db.prepare("SELECT provenance,agent_id FROM history WHERE scope=? AND id=? AND sequence<? AND provenance!='conversion' ORDER BY sequence DESC LIMIT 1").get(key, r.id, exact.sequence!)
+          : exact;
+        if (writer?.provenance === "agent" && writer.agent_id) r.writtenByAgentId = String(writer.agent_id);
       }
       for (const prior of db.prepare("SELECT * FROM observations WHERE scope=? AND hash!=''").all(key)) if (!records.some(r => r.id === prior.id)) {
         db.prepare("INSERT INTO history(scope,id,provenance,at,path,revision,hash,raw) VALUES (?,?,?,?,?,?,?,?)").run(key, prior.id!, "external-unavailable", new Date().toISOString(), prior.path!, Number(prior.revision) + 1, "", "");

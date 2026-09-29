@@ -11,18 +11,19 @@ import { ATTACHMENT_CHUNK_BYTES, ATTACHMENT_DOWNLOAD_CHUNK_BYTES } from '../dist
 import { contract } from '../dist/contract.js';
 import { KnowledgeStorage } from '../dist/storage.js';
 import { SqliteIdentityStore } from '../dist/identity-store.js';
-import { authorizeVault } from '../dist/access.js';
+import { accessFor, apiFor } from './support.mjs';
 
 async function fixture(t) {
   const base = await mkdtemp(path.join(os.tmpdir(), 'knowledge-files-'));
   t.after(() => rm(base, { recursive: true, force: true }));
   const root = path.join(base, 'vault'); await mkdir(root); await mkdir(path.join(root, 'private'));
-  const manifest = { format: 'knowledge-vault-v1', vaultId: randomUUID(), agentId: 'main', generation: 0, publicationId: randomUUID() };
+  const manifest = { format: 'knowledge-vault-v2', vaultId: randomUUID(), generation: 0, publicationId: randomUUID() };
   await writeFile(path.join(root, 'vault.json'), JSON.stringify(manifest));
-  const api = { pluginConfig: { vault: { root, statePath: path.join(base, 'state.sqlite'), agentId: 'main', vaultId: manifest.vaultId, publicationId: manifest.publicationId, operatorRead: true, writesEnabled: true } } };
+  const config = { root, statePath: path.join(base, 'state.sqlite'), vaultId: manifest.vaultId, publicationId: manifest.publicationId, operatorRead: true, writesEnabled: true };
+  const api = apiFor(base, config);
   const owner = { source: 'session-action', api, action: { client: { connId: 'files', scopes: ['operator.write'] } } };
   const service = createKnowledgeService(api);
-  return { base, root, api, owner, service };
+  return { base, root, config, api, owner, service };
 }
 const draft = attachments => ({ requestId: randomUUID(), title: 'File-backed evidence', type: 'note', body: 'An ordinary page.', attachments });
 const uploadInput = (extra = {}) => ({ requestId: randomUUID(), filename: 'original.txt', mediaType: 'text/plain', attribution: 'User-provided original', offset: 0, data: '', final: true, ...extra });
@@ -130,9 +131,9 @@ test('source files are independent of the catalog scan byte budget; legacy large
 
 for (const stage of ['attachment-after-link', 'attachment-before-receipt']) test(`file installation interruption at ${stage} recovers without overwriting the original`, async t => {
   const f = await fixture(t), input = uploadInput({ data: Buffer.from('Original bytes').toString('base64') });
-  const config = f.api.pluginConfig.vault;
+  const config = f.config;
   const storage = new KnowledgeStorage(config, new SqliteIdentityStore(config.statePath), where => { if (where === stage) throw Error('interrupted'); });
-  await assert.rejects(storage.attach(input, authorizeVault(f.owner, 'main', true, true)), /interrupted/);
+  await assert.rejects(storage.attach(input, accessFor(f.owner, true)), /interrupted/);
   const resumed = await createKnowledgeService(f.api).attach(input, f.owner);
   assert.equal(resumed.state, 'complete');
   assert.deepEqual(await readFile(path.join(f.root, 'private', resumed.evidence.path)), Buffer.from('Original bytes'));

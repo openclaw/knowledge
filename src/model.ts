@@ -57,8 +57,10 @@ export const RecordAnnotations = Type.Object({
 }, { additionalProperties: false });
 export const Scope = Type.Union([
   Type.Object({ visibility: Type.Literal("sample") }, { additionalProperties: false }),
-  Type.Object({ visibility: Type.Literal("agent-private"), agentId: name }, { additionalProperties: false }),
-  Type.Object({ visibility: Type.Literal("conversation"), agentId: name, sessionId: Type.String({ pattern: "^[a-f0-9-]{36}$" }) }, { additionalProperties: false }),
+  // Store-owned partitions: the store's private knowledge, or one trusted
+  // conversation's knowledge. Writers are recorded in history, not here.
+  Type.Object({ visibility: Type.Literal("private") }, { additionalProperties: false }),
+  Type.Object({ visibility: Type.Literal("conversation"), sessionId: Type.String({ pattern: "^[a-f0-9-]{36}$" }) }, { additionalProperties: false }),
 ]);
 export type Scope = Static<typeof Scope>;
 export const Envelope = Type.Object({

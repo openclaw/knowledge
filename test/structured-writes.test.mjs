@@ -9,21 +9,21 @@ import { Check } from 'typebox/value';
 import { Publisher } from '../dist/publisher.js';
 import { SqliteIdentityStore } from '../dist/identity-store.js';
 import { createKnowledgeService } from '../dist/service.js';
-import { authorizeVault } from '../dist/access.js';
+import { accessFor, apiFor } from './support.mjs';
 import { contract } from '../dist/contract.js';
 
 async function fixture(t) {
   const base = await mkdtemp(path.join(os.tmpdir(), 'knowledge-write-'));
   t.after(() => rm(base, { recursive: true, force: true }));
   const root = path.join(base, 'vault'); await mkdir(root); await mkdir(path.join(root, 'private'));
-  const manifest = { format: 'knowledge-vault-v1', vaultId: randomUUID(), agentId: 'main', generation: 0, publicationId: randomUUID() };
+  const manifest = { format: 'knowledge-vault-v2', vaultId: randomUUID(), generation: 0, publicationId: randomUUID() };
   await writeFile(path.join(root, 'vault.json'), JSON.stringify(manifest));
-  const config = { root, statePath: path.join(base, 'state.sqlite'), agentId: 'main', vaultId: manifest.vaultId, publicationId: manifest.publicationId, operatorRead: true, writesEnabled: true };
-  const api = { pluginConfig: { vault: config } };
+  const config = { root, statePath: path.join(base, 'state.sqlite'), vaultId: manifest.vaultId, publicationId: manifest.publicationId, operatorRead: true, writesEnabled: true };
+  const api = apiFor(base, config);
   const owner = { source: 'tool', api, tool: { agentId: 'main', memoryAudience: { kind: 'owner-private', agentId: 'main' }, assertInvocationCurrent() {}, assertMemoryAudienceCurrent() {} } };
   const operator = { source: 'session-action', api, action: { client: { connId: 'test', scopes: ['operator.write'] } } };
   const store = new SqliteIdentityStore(config.statePath), service = createKnowledgeService(api);
-  const access = () => authorizeVault(owner, 'main', true, true);
+  const access = () => accessFor(owner, true);
   return { base, root, config, manifest, api, owner, operator, store, service, access,
     setAudience: value => { owner.tool.memoryAudience = value; } };
 }

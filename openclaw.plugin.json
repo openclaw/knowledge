@@ -7,44 +7,36 @@
   "configSchema": {
     "type": "object",
     "properties": {
-      "vault": {
+      "operatorRead": {
+        "type": "boolean"
+      },
+      "writesEnabled": {
+        "type": "boolean"
+      },
+      "stores": {
         "type": "object",
-        "required": [
-          "root",
-          "statePath",
-          "agentId",
-          "vaultId",
-          "publicationId",
-          "operatorRead"
-        ],
-        "properties": {
-          "root": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 4096
-          },
-          "statePath": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 4096
-          },
-          "agentId": {
-            "type": "string",
-            "pattern": "^[a-z][a-z0-9_-]{0,63}$"
-          },
-          "vaultId": {
-            "type": "string",
-            "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$"
-          },
-          "publicationId": {
-            "type": "string",
-            "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$"
-          },
-          "operatorRead": {
-            "type": "boolean"
-          },
-          "writesEnabled": {
-            "type": "boolean"
+        "patternProperties": {
+          "^[a-z][a-z0-9-]{0,47}$": {
+            "type": "object",
+            "required": [
+              "agents"
+            ],
+            "properties": {
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              },
+              "agents": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+                },
+                "maxItems": 100
+              }
+            },
+            "additionalProperties": false
           }
         },
         "additionalProperties": false
@@ -56,9 +48,9 @@
     "onStartup": true
   },
   "controlUi": {
-    "entry": "dist/control-ui/dc35c2b1e45d3eac27b3eb8151a3aaaa0f47117bdd2ec3adcbec68784af5f380/index.js",
+    "entry": "dist/control-ui/a3e34682e98ff1ff57f60c3a7ea9958b58d518c4136d1bf4d32205687e690ca4/index.js",
     "styles": [
-      "dist/control-ui/dc35c2b1e45d3eac27b3eb8151a3aaaa0f47117bdd2ec3adcbec68784af5f380/index.css"
+      "dist/control-ui/a3e34682e98ff1ff57f60c3a7ea9958b58d518c4136d1bf4d32205687e690ca4/index.css"
     ]
   },
   "skills": [
@@ -80,7 +72,6 @@
       "knowledge_mutation",
       "knowledge_ontology",
       "knowledge_publish_batch",
-      "knowledge_recall",
       "knowledge_record",
       "knowledge_records",
       "knowledge_resume",

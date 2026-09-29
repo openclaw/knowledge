@@ -21,9 +21,8 @@ export const digest = (s: string) => createHash("sha256").update(s).digest("hex"
 export function sameScope(a: unknown, b: Scope): boolean {
   if (!a || typeof a !== "object" || !Check(Envelope.properties.scope, a)) return false;
   const scope = a as Scope;
-  return scope.visibility === b.visibility && (scope.visibility === "sample" ||
-    (b.visibility !== "sample" && scope.agentId === b.agentId &&
-      (scope.visibility !== "conversation" || (b.visibility === "conversation" && scope.sessionId === b.sessionId))));
+  return scope.visibility === b.visibility &&
+    (scope.visibility !== "conversation" || (b.visibility === "conversation" && scope.sessionId === b.sessionId));
 }
 
 export type ScanResult = { records: LoadedRecord[]; ontology: ReturnType<typeof resolveOntology>; sources: OntologySource[]; issues: Issue[]; checkedAt: string };

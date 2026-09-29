@@ -7,8 +7,8 @@ import { randomUUID } from 'node:crypto';
 import { Check } from 'typebox/value';
 import { SqliteIdentityStore } from '../dist/identity-store.js';
 import { createKnowledgeService } from '../dist/service.js';
-import { RealVault, parseVaultConfig } from '../dist/real-vault.js';
-import { authorizeVault } from '../dist/access.js';
+import { RealVault } from '../dist/real-vault.js';
+import { accessFor, apiFor } from './support.mjs';
 import { SAMPLE_ROOT } from '../dist/vault.js';
 import { contract } from '../dist/contract.js';
 
@@ -17,22 +17,22 @@ async function fixture(t) {
   t.after(() => rm(base, { recursive: true, force: true }));
   const root = path.join(base, 'vault'); await mkdir(root);
   const sessionId = randomUUID();
-  const manifest = { format: 'knowledge-vault-v1', vaultId: randomUUID(), agentId: 'main', generation: 0, publicationId: randomUUID() };
+  const manifest = { format: 'knowledge-vault-v2', vaultId: randomUUID(), generation: 0, publicationId: randomUUID() };
   await writeFile(path.join(root, 'vault.json'), JSON.stringify(manifest));
-  const config = { root, statePath: path.join(base, 'knowledge.sqlite'), agentId: 'main', vaultId: manifest.vaultId, publicationId: manifest.publicationId, operatorRead: true };
+  const config = { root, statePath: path.join(base, 'knowledge.sqlite'), vaultId: manifest.vaultId, publicationId: manifest.publicationId, operatorRead: true };
   async function partition(relative, scope, title) {
     const target = path.join(root, relative); await mkdir(target, { recursive: true });
     await cp(SAMPLE_ROOT, target, { recursive: true });
     const { readdir } = await import('node:fs/promises');
     for (const file of await readdir(target, { recursive: true })) if (file.endsWith('.md')) {
       const full = path.join(target, file), raw = await readFile(full, 'utf8');
-      await writeFile(full, raw.replace('visibility: sample', `visibility: ${scope.visibility}\n  agentId: main${scope.sessionId ? `\n  sessionId: ${scope.sessionId}` : ''}`).replaceAll('Alex Rivera', title));
+      await writeFile(full, raw.replace('visibility: sample', `visibility: ${scope.visibility}${scope.sessionId ? `\n  sessionId: ${scope.sessionId}` : ''}`).replaceAll('Alex Rivera', title));
     }
   }
-  await partition('private', { visibility: 'agent-private' }, 'PRIVATE SENTINEL');
+  await partition('private', { visibility: 'private' }, 'PRIVATE SENTINEL');
   await partition(`conversations/${sessionId}`, { visibility: 'conversation', sessionId }, 'SHARED SENTINEL');
   const store = new SqliteIdentityStore(config.statePath);
-  const api = { pluginConfig: { vault: config }, runtime: { state: { openKeyedStore: () => store } } };
+  const api = apiFor(base, config, { agents: ['main', 'other'] });
   const owner = { source: 'tool', api, tool: { agentId: 'main', memoryAudience: { kind: 'owner-private', agentId: 'main' }, assertInvocationCurrent() {}, assertMemoryAudienceCurrent() {} } };
   const operator = { source: 'session-action', api, action: { client: { connId: 'authenticated-connection', scopes: ['operator.read'] } } };
   const setAudience = audience => { owner.tool.memoryAudience = audience; };
@@ -45,11 +45,11 @@ test('UI and owner-private tool read identical private records through the same 
   for (const ctx of [f.owner, f.operator]) {
     const output = await invokeAll(f.service, ctx);
     for (const [name, value] of Object.entries(output)) assert.ok(Check(contract.operations[name].output, value), name);
-    assert.equal(output.status.sample, false); assert.equal(output.status.writesEnabled, false);
-    assert.equal(output.status.scope, 'agent-private'); assert.equal(output.status.records, 7);
+    assert.equal(output.status.store, 'ready'); assert.equal(output.status.writesEnabled, false);
+    assert.equal(output.status.scope, 'private'); assert.equal(output.status.records, 7);
     assert.match(JSON.stringify(output), /PRIVATE SENTINEL/); assert.doesNotMatch(JSON.stringify(output), /SHARED SENTINEL/);
   }
-  assert.deepEqual(await f.store.lookup('agent:main'), f.manifest);
+  assert.deepEqual(await f.store.lookup(`store:${f.manifest.vaultId}`), f.manifest);
 });
 
 test('conversation audience sees only its records, counts, evidence, ontology and diagnostics', async t => {
@@ -75,17 +75,25 @@ test('host-resolved conversation calls are scoped; missing audience fails closed
 
 test('missing, foreign, and revoked tool authority fails for every operation', async t => {
   const f = await fixture(t);
-  for (const override of [{ memoryAudience: undefined }, { memoryAudience: { kind: 'owner-private', agentId: 'other' } }, { assertInvocationCurrent: undefined }, { assertInvocationCurrent() { throw Error('revoked'); } }, { assertMemoryAudienceCurrent() { throw Error('audience revoked'); } }]) {
+  for (const override of [{ memoryAudience: undefined }, { assertInvocationCurrent: undefined }, { assertInvocationCurrent() { throw Error('revoked'); } }, { assertMemoryAudienceCurrent() { throw Error('audience revoked'); } }]) {
     for (const [name, op] of Object.entries(f.service)) await assert.rejects(async () => op(name === 'record' ? { id: 'sample_person_alex' } : {}, { ...f.owner, tool: { ...f.owner.tool, ...override } }));
   }
 });
 
+test("another agent's audience resolves only that agent's own store", async t => {
+  const f = await fixture(t);
+  const other = { ...f.owner, tool: { ...f.owner.tool, memoryAudience: { kind: 'owner-private', agentId: 'other' } } };
+  assert.equal((await f.service.records({}, other)).total, 0);
+  assert.doesNotMatch(JSON.stringify(await f.service.grep({ query: 'SENTINEL' }, other)), /PRIVATE SENTINEL/);
+  assert.equal((await f.service.records({}, f.owner)).total > 0, true);
+});
+
 test('operator scopes are explicit, selectors cannot create conversation authority', async t => {
   const f = await fixture(t);
-  for (const action of [{}, { client: { scopes: ['operator.read'] } }, { client: { connId: 'x', scopes: [] } }, { ...f.operator.action, agentId: 'other' }, { ...f.operator.action, sessionKey: 'agent:main:selected' }]) {
+  for (const action of [{}, { client: { scopes: ['operator.read'] } }, { client: { connId: 'x', scopes: [] } }, { ...f.operator.action, sessionKey: 'agent:main:selected' }]) {
     await assert.rejects(f.service.records({}, { ...f.operator, action }));
   }
-  const restricted = createKnowledgeService({ ...f.api, pluginConfig: { vault: { ...f.config, operatorRead: false } } });
+  const restricted = createKnowledgeService({ ...f.api, pluginConfig: { operatorRead: false } });
   await assert.rejects(restricted.records({}, f.operator));
   for (const fields of [{ root: f.root }, { agentId: 'main' }, { sessionId: f.sessionId }, { scope: 'agent-private' }]) assert.equal(Check(contract.operations.records.input, fields), false);
 });
@@ -102,10 +110,11 @@ test('empty conversation scope returns an empty catalog, without creating files 
 test('mismatched scope content is withheld, malformed files preserved', async t => {
   const f = await fixture(t);
   const file = path.join(f.root, 'private', 'people', 'alex-rivera.md'), raw = await readFile(file, 'utf8');
-  await writeFile(file, raw.replace('agentId: main', 'agentId: other'));
+  const foreign = raw.replace('visibility: private', `visibility: conversation\n  sessionId: ${f.sessionId}`);
+  await writeFile(file, foreign);
   const output = await invokeAll(f.service, f.owner);
   assert.equal(output.record.record, null); assert.doesNotMatch(JSON.stringify(output), /PRIVATE SENTINEL/);
-  assert.equal(await readFile(file, 'utf8'), raw.replace('agentId: main', 'agentId: other'));
+  assert.equal(await readFile(file, 'utf8'), foreign);
 });
 
 test('identity replacement, generation rollback/mismatch, and missing manifest never fall back to sample', async t => {
@@ -119,30 +128,32 @@ test('identity replacement, generation rollback/mismatch, and missing manifest n
   await assert.rejects(f.service.records({}, f.owner), /identity/);
 });
 
-test('retained checkpoint fences a replaced vault even after config change and service restart', async t => {
+test('the registry identity fences a replaced vault across service restarts', async t => {
   const f = await fixture(t); await f.service.status({}, f.owner);
   const replacement = { ...f.manifest, vaultId: randomUUID(), publicationId: randomUUID() };
   await writeFile(path.join(f.root, 'vault.json'), JSON.stringify(replacement));
-  const api = { ...f.api, pluginConfig: { vault: { ...f.config, vaultId: replacement.vaultId, publicationId: replacement.publicationId } } };
-  await assert.rejects(createKnowledgeService(api).records({}, { ...f.owner, api }), /identity/);
-  assert.equal((await f.store.lookup('agent:main')).vaultId, f.manifest.vaultId);
+  await assert.rejects(createKnowledgeService(f.api).records({}, f.owner), /identity/);
+  assert.equal((await f.store.lookup(`store:${f.manifest.vaultId}`)).vaultId, f.manifest.vaultId);
 });
 
-test('moving the same vault preserves identity, reordered manifest keys are immaterial', async t => {
+test('a moved store is unavailable, never replaced; reordered manifest keys are immaterial', async t => {
   const f = await fixture(t); await f.service.status({}, f.owner);
   const moved = path.join(f.base, 'moved'); await rename(f.root, moved);
-  await writeFile(path.join(moved, 'vault.json'), JSON.stringify(Object.fromEntries(Object.entries(f.manifest).reverse())));
-  const api = { ...f.api, pluginConfig: { vault: { ...f.config, root: moved } } };
-  assert.equal((await createKnowledgeService(api).status({}, { ...f.owner, api })).vault, f.manifest.vaultId);
+  const status = await createKnowledgeService(f.api).status({}, f.owner);
+  assert.equal(status.store, 'unavailable'); assert.equal(status.vault, '');
+  await assert.rejects(createKnowledgeService(f.api).records({}, f.owner), /identity/);
+  await rename(moved, f.root);
+  await writeFile(path.join(f.root, 'vault.json'), JSON.stringify(Object.fromEntries(Object.entries(f.manifest).reverse())));
+  assert.equal((await createKnowledgeService(f.api).status({}, f.owner)).vault, f.manifest.vaultId);
 });
 
 test('authority and identity are rechecked after asynchronous reads', async t => {
   const f = await fixture(t), real = new RealVault(f.config, f.store);
-  await assert.rejects(real.run(authorizeVault(f.owner, 'main', true), async vault => {
+  await assert.rejects(real.run(accessFor(f.owner), async vault => {
     const result = await vault.list({}); f.setAudience({ kind: 'conversation', agentId: 'main', sessionKey: 'agent:main:group', sessionId: f.sessionId }); return result;
   }), /authority/);
   f.setAudience({ kind: 'owner-private', agentId: 'main' });
-  await assert.rejects(real.run(authorizeVault(f.owner, 'main', true), async vault => {
+  await assert.rejects(real.run(accessFor(f.owner), async vault => {
     const result = await vault.list({}); await writeFile(path.join(f.root, 'vault.json'), JSON.stringify({ ...f.manifest, publicationId: randomUUID() })); return result;
   }), /identity/);
 });
@@ -168,16 +179,12 @@ test('external edits, renames, and deletion appear on next read without changing
   await rm(file + '-renamed.md'); assert.equal((await f.service.record({ id: 'sample_person_alex' }, f.owner)).record, null);
 });
 
-test('invalid real-vault configuration fails closed', () => {
-  assert.equal(parseVaultConfig({}), undefined);
-  for (const config of [{ vault: {} }, { vault: null }, { unrelated: true }]) assert.throws(() => parseVaultConfig(config));
-});
-
 test('identity bindings persist across connections and competing registrations never replace them', async t => {
   const f = await fixture(t), rival = { ...f.manifest, publicationId: randomUUID() };
-  const results = await Promise.all([f.store.registerIfAbsent('agent:main', f.manifest), new SqliteIdentityStore(f.config.statePath).registerIfAbsent('agent:main', rival)]);
+  const key = `store:${randomUUID()}`;
+  const results = await Promise.all([f.store.registerIfAbsent(key, f.manifest), new SqliteIdentityStore(f.config.statePath).registerIfAbsent(key, rival)]);
   assert.deepEqual(results, [true, false]);
-  assert.deepEqual(await new SqliteIdentityStore(f.config.statePath).lookup('agent:main'), f.manifest);
+  assert.deepEqual(await new SqliteIdentityStore(f.config.statePath).lookup(key), f.manifest);
 });
 
 test('unrelated/corrupt operational databases and database links fail closed without replacement', async t => {
@@ -194,7 +201,8 @@ test('unrelated/corrupt operational databases and database links fail closed wit
 test('build metadata retains the real-vault configuration contract', async () => {
   const { default: entry } = await import('../dist/index.js');
   const { getToolPluginMetadata } = await import('openclaw/plugin-sdk/tool-plugin');
-  assert.ok(entry.configSchema.jsonSchema.properties.vault.properties.statePath);
+  assert.ok(entry.configSchema.jsonSchema.properties.stores.patternProperties);
+  assert.equal(entry.configSchema.jsonSchema.properties.vault, undefined);
   assert.deepEqual(getToolPluginMetadata(entry).configSchema, entry.configSchema.jsonSchema);
   assert.equal(getToolPluginMetadata(entry).tools.length, Object.values(contract.operations).filter(operation => operation.tool).length);
 });

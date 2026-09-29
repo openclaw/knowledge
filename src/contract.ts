@@ -8,6 +8,7 @@ import { defineFeatureContract } from "openclaw/plugin-sdk/feature-contract";
 import { text } from "./model.js";
 import { RecordInput, RecordOutput, OntologyInput, OntologyOutput, CardSummary, Summary } from "./inspection-contract.js";
 
+import { AgentProxyInput, StoreState, StoresChangeInput, StoresChangeOutput, StoresSnapshot } from "./stores-contract.js";
 import { AnnotateInput, SavePage, ClaimInput, RelationshipInput, CorrectInput, WithdrawInput, RecallInput, Receipt, HistoryEntry, GitStatus, requestId } from "./mutation-contract.js";
 
 const empty = Type.Object({}, { additionalProperties: false });
@@ -99,13 +100,13 @@ export const contract = defineFeatureContract({
       tool: { name: "knowledge_history", label: "Knowledge history" },
     },
     status: {
-      kind: "query", description: "Read availability and counts for the authorized vault scope. Sample mode is read-only.",
+      kind: "query", description: "Read availability and counts for the authorized scope of this agent's knowledge store.",
       input: empty,
       output: Type.Object({
         service: Type.Literal("knowledge"), phase: Type.Union([Type.Literal("read-only-explorer"), Type.Literal("page-editor"), Type.Literal("structured-writes")]),
         backendRevision: text(80), instanceId: text(80), startedAt: text(40), checkedAt: text(40),
         snapshot: Type.Optional(text(64)),
-        vault: text(80), agent: text(80), scope: text(80), sample: Type.Boolean(), writesEnabled: Type.Boolean(),
+        vault: text(80), agent: text(80), store: StoreState, message: Type.Optional(text(300)), scope: text(80), writesEnabled: Type.Boolean(),
         live: Type.Union([Type.Literal("stopped"), Type.Literal("watching"), Type.Literal("unavailable")]),
         records: Type.Integer(), validRecords: Type.Integer(), definitions: Type.Integer(), ontologyAvailable: Type.Boolean(), ontologyFingerprint: text(64), issues: Type.Integer(),
       }, { additionalProperties: false }),
@@ -146,6 +147,26 @@ export const contract = defineFeatureContract({
       input: empty,
       output: Type.Object({ issues, total: Type.Integer(), truncated: Type.Boolean(), checkedAt: text(40) }),
       tool: { name: "knowledge_diagnostics", label: "Vault diagnostics" },
+    },
+    stores_snapshot: {
+      kind: "query", description: "Operator settings: agents, effective store assignments and store inventory. Never creates storage.",
+      input: empty, output: StoresSnapshot,
+    },
+    stores_change: {
+      kind: "action", description: "Operator settings: change one agent's store assignment (share its store, use a shared store, or use its own). Requires operator admin access and the current settings revision.",
+      input: StoresChangeInput, output: StoresChangeOutput,
+    },
+    stores_change_status: {
+      kind: "query", description: "Operator settings: reconcile and report the outcome of an assignment change by request ID.",
+      input: Type.Object({ requestId }, { additionalProperties: false }), output: StoresChangeOutput,
+    },
+    agent_query: {
+      kind: "query", description: "Operator inspection: run one read operation against a selected agent's effective store.",
+      input: AgentProxyInput, output: Type.Unknown(),
+    },
+    agent_action: {
+      kind: "action", description: "Operator inspection: run one operator-permitted change against a selected agent's effective store.",
+      input: AgentProxyInput, output: Type.Unknown(),
     },
   },
   events: { changed: Type.Object({}, { additionalProperties: false }) },

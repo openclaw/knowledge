@@ -9,21 +9,21 @@ import { Check } from 'typebox/value';
 import { Publisher } from '../dist/publisher.js';
 import { SqliteIdentityStore } from '../dist/identity-store.js';
 import { createKnowledgeService } from '../dist/service.js';
-import { authorizeVault } from '../dist/access.js';
+import { accessFor, apiFor } from './support.mjs';
 import { contract } from '../dist/contract.js';
 
 async function fixture(t) {
   const base = await mkdtemp(path.join(os.tmpdir(), 'knowledge-write-'));
   t.after(() => rm(base, { recursive: true, force: true }));
   const root = path.join(base, 'vault'); await mkdir(root); await mkdir(path.join(root, 'private'));
-  const manifest = { format: 'knowledge-vault-v1', vaultId: randomUUID(), agentId: 'main', generation: 0, publicationId: randomUUID() };
+  const manifest = { format: 'knowledge-vault-v2', vaultId: randomUUID(), generation: 0, publicationId: randomUUID() };
   await writeFile(path.join(root, 'vault.json'), JSON.stringify(manifest));
-  const config = { root, statePath: path.join(base, 'state.sqlite'), agentId: 'main', vaultId: manifest.vaultId, publicationId: manifest.publicationId, operatorRead: true, writesEnabled: true };
-  const api = { pluginConfig: { vault: config } };
+  const config = { root, statePath: path.join(base, 'state.sqlite'), vaultId: manifest.vaultId, publicationId: manifest.publicationId, operatorRead: true, writesEnabled: true };
+  const api = apiFor(base, config);
   const owner = { source: 'tool', api, tool: { agentId: 'main', memoryAudience: { kind: 'owner-private', agentId: 'main' }, assertInvocationCurrent() {}, assertMemoryAudienceCurrent() {} } };
   const operator = { source: 'session-action', api, action: { client: { connId: 'test', scopes: ['operator.write'] } } };
   const store = new SqliteIdentityStore(config.statePath), service = createKnowledgeService(api);
-  const access = () => authorizeVault(owner, 'main', true, true);
+  const access = () => accessFor(owner, true);
   return { base, root, config, manifest, api, owner, operator, store, service, access,
     setAudience: value => { owner.tool.memoryAudience = value; } };
 }
@@ -117,7 +117,7 @@ test('write authority, scope isolation, missing conversation creation and disabl
   assert.notEqual(shared.id, privateReceipt.id);
   assert.equal((await f.service.record({ id: privateReceipt.id }, f.owner)).record, null);
   assert.equal((await f.service.record({ id: shared.id }, f.operator)).record, null);
-  await assert.rejects(createKnowledgeService({ ...f.api, pluginConfig: {} }).save_page(draft(), f.owner), /read-only/);
+  await assert.rejects(createKnowledgeService({ ...f.api, pluginConfig: { writesEnabled: false } }).save_page(draft(), f.owner), /disabled/);
 });
 
 async function childWrite(f, input, crashAt) {
@@ -128,7 +128,7 @@ async function childWrite(f, input, crashAt) {
     let data=''; for await (const c of process.stdin) data+=c;
     const { config, input, crashAt } = JSON.parse(data);
     const publisher = new Publisher(config,new SqliteIdentityStore(config.statePath), stage => { if(stage === crashAt) process.exit(77); });
-    try { console.log(JSON.stringify(await publisher.save(input,{scope:{visibility:'agent-private',agentId:'main'},assertCurrent(){}},'agent'))); }
+    try { console.log(JSON.stringify(await publisher.save(input,{scope:{visibility:'private'},agentId:'main',assertCurrent(){}},'agent'))); }
     catch(e) { console.error(e.message); process.exitCode=1; }
   `;
   return new Promise(resolve => {
@@ -171,7 +171,7 @@ test('revision snapshots and publication details never cross conversation bounda
 
 test('authority expires after acceptance: no new files; original scope can resume', async t => {
   const f = await fixture(t), input = draft(); let current = true;
-  const access = { scope: { visibility: 'agent-private', agentId: 'main' }, assertCurrent() { if (!current) throw Error('revoked'); } };
+  const access = { scope: { visibility: 'private' }, assertCurrent() { if (!current) throw Error('revoked'); } };
   const publisher = new Publisher(f.config, f.store, where => { if (where === 'after-accept') current = false; });
   await assert.rejects(publisher.save(input, access, 'agent'), /revoked/);
   assert.equal((await f.service.history({}, f.operator)).mutations[0].state, 'accepted');

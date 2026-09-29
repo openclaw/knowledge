@@ -57,7 +57,7 @@ export default defineControlUiPlugin({
       const subtitle = el("p"); title.append(el("h1", "Knowledge"), subtitle);
       const status = el("span", "Connecting…", "knowledge-status"); status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
       const vocabularyButton = button("", () => navigate("ontology"), "knowledge-icon-button"); vocabularyButton.setAttribute("aria-label", "Vocabulary"); vocabularyButton.title = "Ontology & vault settings"; vocabularyButton.append(icon("book"));
-      const sampleChip = chip("Sample vault"); sampleChip.hidden = true; actions.append(sampleChip, status, vocabularyButton);
+      actions.append(status, vocabularyButton);
       const nav = el("nav", undefined, "knowledge-tabs"); nav.setAttribute("aria-label", "Knowledge views");
       // These are text navigation tabs, not host .btn controls. Theme-specific
       // .btn rules otherwise reintroduce filled backgrounds in light mode.
@@ -727,10 +727,10 @@ export default defineControlUiPlugin({
           const report = await feature.invoke("status", {}); if (disposed || n !== statusGeneration || !context.host.connection.connected) return;
           const nextIdentity = JSON.stringify([report.agent, report.vault, report.scope]);
           if (identity && identity !== nextIdentity) { vaultChanged = true; ++generation; ++suggestGeneration; toolbar.replaceChildren(); root.querySelector(".knowledge-chat-handoff")?.remove(); status.textContent = "Vault changed"; status.hidden = false; content.replaceChildren(empty("Vault changed", "Reload this page to open the newly connected vault.")); return; }
-          identity = nextIdentity; agentId = report.sample ? "" : report.agent; renderAgentCopy();
+          identity = nextIdentity; agentId = report.agent; renderAgentCopy();
           lastChecked = new Date().toISOString();
           status.textContent = ""; status.hidden = true;
-          sampleChip.hidden = !report.sample; banner.hidden = true; banner.textContent = "";
+          banner.hidden = true; banner.textContent = "";
           if (loadingGeneration || (viewReady && displayView === viewKey() && report.snapshot && snapshot === report.snapshot)) return;
           vocabulary = await loadVocabulary(feature); if (disposed || n !== statusGeneration) return;
           const pageCount = vocabulary.definitions.reduce((sum, d) => sum + d.recordCount, 0);

@@ -2,7 +2,7 @@ import { Worker } from "node:worker_threads";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import type { VaultAccess } from "./access.js";
-import type { VaultConfig } from "./real-vault.js";
+import type { StoreConfig } from "./real-vault.js";
 import type { StorageOperations } from "./storage-host.js";
 import { AUTHORITY_REVOKED, type HostMessage, type WorkerMessage } from "./storage-protocol.js";
 
@@ -13,7 +13,7 @@ type Call = { access: VaultAccess; resolve(value: unknown): void; reject(error: 
 // SDK modules reachable from storage code in the worker.
 const SDK_MODULES = ["openclaw/plugin-sdk/file-access-runtime", "openclaw/plugin-sdk/feature-contract", "openclaw/plugin-sdk/routing"];
 // Resolve through whatever resolver the host installed for this plugin module.
-function sdkUrls(): Record<string, string> {
+export function sdkUrls(): Record<string, string> {
   const urls: Record<string, string> = {}, require = createRequire(import.meta.url);
   for (const specifier of SDK_MODULES) {
     try { urls[specifier] = import.meta.resolve(specifier); continue; } catch { /* Fall back to CommonJS resolution. */ }
@@ -22,7 +22,7 @@ function sdkUrls(): Record<string, string> {
   return urls;
 }
 
-/** Main-thread handle to the storage worker. Authorization stays here: the
+/** Main-thread handle to one store's storage worker. Authorization stays here: the
  * worker receives only the resolved scope and asks this thread to re-check the
  * caller's live authority whenever storage calls `access.assertCurrent`. */
 export class StorageClient {
@@ -30,7 +30,7 @@ export class StorageClient {
   private readonly signal = new Int32Array(new SharedArrayBuffer(8));
   private readonly calls = new Map<number, Call>();
   private nextId = 0;
-  constructor(readonly config: VaultConfig) {}
+  constructor(readonly config: StoreConfig) {}
   call<Op extends keyof StorageOperations>(op: Op, access: VaultAccess, ...input: Input<Op> extends undefined ? [] : [Input<Op>]): Promise<Output<Op>> {
     access.assertCurrent();
     const worker = this.start(), id = ++this.nextId;
@@ -38,7 +38,7 @@ export class StorageClient {
       this.calls.set(id, { access, resolve: resolve as (value: unknown) => void, reject });
       // Keep the process alive only while work is outstanding.
       worker.ref();
-      worker.postMessage({ type: "call", id, op, input: input[0], scope: access.scope } satisfies HostMessage);
+      worker.postMessage({ type: "call", id, op, input: input[0], scope: access.scope, agentId: access.agentId } satisfies HostMessage);
     });
   }
   /** Stop the worker. Outstanding calls fail; the next call starts a new worker. */

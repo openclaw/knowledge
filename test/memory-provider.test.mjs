@@ -10,19 +10,20 @@ import { deriveMemoryFlushRequestId } from '../dist/service.js';
 import { buildKnowledgeMemoryPrompt } from '../dist/memory-prompt.js';
 import { contract } from '../dist/contract.js';
 import plugin from '../dist/index.js';
+import { apiFor, hostApi } from './support.mjs';
 
 async function fixture(t, overrides = {}) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'knowledge-memory-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  const base = await mkdtemp(path.join(os.tmpdir(), 'knowledge-memory-'));
+  t.after(() => rm(base, { recursive: true, force: true }));
+  const root = path.join(base, 'vault'); await mkdir(root);
   const vaultId = randomUUID(), publicationId = randomUUID(), sessionId = randomUUID();
   await mkdir(path.join(root, 'private'));
   await mkdir(path.join(root, 'conversations', sessionId), { recursive: true });
-  await writeFile(path.join(root, 'vault.json'), JSON.stringify({ format: 'knowledge-vault-v1', vaultId, agentId: 'main', generation: 0, publicationId }));
+  await writeFile(path.join(root, 'vault.json'), JSON.stringify({ format: 'knowledge-vault-v2', vaultId, generation: 0, publicationId }));
   let capability, active = true;
   const services = [];
-  const api = { id: 'knowledge', pluginConfig: { vault: { root, statePath: path.join(root, '..', `${path.basename(root)}.sqlite`), vaultId, publicationId, agentId: 'main', operatorRead: true, writesEnabled: true, ...overrides } },
-    registerMemoryCapability(c) { capability = c; }, registerService(s) { services.push(s); } };
-  t.after(() => rm(api.pluginConfig.vault.statePath, { force: true }));
+  const api = apiFor(base, { root, statePath: path.join(base, 'state.sqlite'), vaultId, publicationId, operatorRead: true, writesEnabled: true, ...overrides },
+    { extra: { registerMemoryCapability(c) { capability = c; }, registerService(s) { services.push(s); } } });
   const service = createKnowledgeService(api);
   const assertCurrent = () => { if (!active) throw Error('caller revoked'); };
   const audience = { kind: 'owner-private', agentId: 'main' };
@@ -46,7 +47,7 @@ test('shared search/get/health roundtrip uses native publication, provenance and
   const result = await provider.search({ query: 'Orchid' });
   assert.equal(result.hits.length, 1);
   const hit = result.hits[0];
-  assert.deepEqual(hit.reference, { providerId: 'knowledge', id: saved.id, revision: `${saved.revision}:${saved.hash}` });
+  assert.deepEqual(hit.reference, { providerId: 'knowledge', id: saved.id, revision: `${saved.revision}:${saved.hash}@${f.vaultId}` });
   assert.equal(hit.automaticRecall.eligible, false);
   assert.equal(hit.path, undefined);
   const first = await provider.get({ reference: hit.reference, lines: 2 });
@@ -153,7 +154,9 @@ test('cursor preserves query/scope/snapshot and revision fences reject stale rea
   await assert.rejects(provider.search({ query: 'different', cursor: page.nextCursor }), /cursor/);
   await f.service.save_page({ requestId: randomUUID(), expectedVaultId: f.vaultId, id: saved.id, expectedRevision: saved.revision, expectedHash: saved.hash, type: 'note', title: 'Orchid one', body: 'Changed' }, f.tool);
   await assert.rejects(provider.search({ query: 'Orchid', cursor: page.nextCursor }), /snapshot changed/);
-  await assert.rejects(provider.get({ reference: { providerId: 'knowledge', id: saved.id, revision: `${saved.revision}:${saved.hash}` } }), /changed/);
+  await assert.rejects(provider.get({ reference: { providerId: 'knowledge', id: saved.id, revision: `${saved.revision}:${saved.hash}@${f.vaultId}` } }), /changed/);
+  // A reference minted by another store never resolves here.
+  await assert.rejects(provider.get({ reference: { providerId: 'knowledge', id: saved.id, revision: `${saved.revision}:${saved.hash}@${randomUUID()}` } }), /different store/);
   await assert.rejects(provider.get({ reference: { providerId: 'other', id: saved.id } }), /reference/);
 });
 
@@ -301,14 +304,19 @@ test('retirement drains the shared lane, rollback resumes, close-all fences reta
   assert.equal((await (await f.open()).provider.health()).status, 'ready');
 });
 
-test('sample is not memory; entry retains native tools and prompt honors missing capabilities', async () => {
+test('entry retains native tools, denies untrusted provider callers and prompt honors missing capabilities', async t => {
+  const base = await mkdtemp(path.join(os.tmpdir(), 'knowledge-entry-')); t.after(() => rm(base, { recursive: true, force: true }));
   let capability; const names = [], services = [];
-  plugin.register({ id: 'knowledge', registerMemoryCapability(c) { capability = c; }, registerService(s) { services.push(s); }, registerSessionAction() {}, registerTool(_f, options) { names.push(options.name); } });
+  plugin.register({ ...hostApi(base).api, registerMemoryCapability(c) { capability = c; }, registerService(s) { services.push(s); }, registerSessionAction() {}, registerTool(_f, options) { names.push(options.name); } });
   assert.equal(names.length, Object.values(contract.operations).filter(o => o.tool).length);
   assert.deepEqual(capability.recallToolNames, ['knowledge_grep', 'knowledge_lookup', 'knowledge_record']);
   assert.ok(capability.recallToolNames.every(name => names.includes(name)));
-  assert.equal((await capability.providerRuntime.open({ cfg: {}, agentId: 'main', purpose: 'status', context: { authority: { kind: 'host', operation: 'status' }, assertCurrent() {} } })).provider, null);
-  assert.deepEqual(capability.promptBuilder({ availableTools: new Set(names) }), []);
+  // A host readiness lease validates storage but never releases content.
+  const status = (await capability.providerRuntime.open({ cfg: {}, agentId: 'main', purpose: 'status', context: { authority: { kind: 'host', operation: 'status' }, assertCurrent() {} } })).provider;
+  assert.deepEqual(await status.health(), { status: 'ready', message: 'Knowledge vault readiness check.' });
+  await assert.rejects(status.search({ query: 'anything' }), /authority/);
+  await assert.rejects(capability.providerRuntime.open({ cfg: {}, agentId: 'main', context: {} }), /authority/);
+  assert.deepEqual(capability.promptBuilder({ availableTools: new Set() }), []);
   assert.equal(capability.flushPlanResolver({}), null);
   assert.deepEqual(buildKnowledgeMemoryPrompt({ availableTools: new Set() }), []);
 });
@@ -441,11 +449,14 @@ test('prompt routes all workflows, obeys citation settings and omits disabled sa
 test('index failure is not empty success and late backend results are fenced', async () => {
   const { createKnowledgeMemoryRuntime } = await import('../dist/memory-provider.js');
   const sessionId = randomUUID(); let active = true, reply;
-  const storage = { config: { agentId: 'main', vaultId: randomUUID(), operatorRead: true }, async call(op) { assert.equal(op, 'search'); return reply(); } };
-  const lane = { enqueue: operation => operation(), drain: async () => {}, fence: () => () => {} };
+  const client = { async call(op) { assert.equal(op, 'search'); return reply(); } };
+  const runtime = { vaultId: randomUUID(), client, enqueue: (check, operation) => { check(); return operation(); } };
+  const stores = { policy: { operatorRead: true }, incarnation: 0, assertLive() {}, async open(principal) {
+    return { kind: 'ready', runtime, access: { ...principal(), assertCurrent: () => { principal(); } } };
+  } };
   const context = { authority: { kind: 'session', sessionKey: 'agent:main:test', sessionId, sandboxed: false,
     audience: { kind: 'owner-private', agentId: 'main' } }, assertCurrent() { if (!active) throw Error('caller revoked'); } };
-  const { provider } = await createKnowledgeMemoryRuntime(storage, lane).open({ cfg: {}, agentId: 'main', context });
+  const { provider } = await createKnowledgeMemoryRuntime(stores).open({ cfg: {}, agentId: 'main', context });
   reply = () => ({ index: { state: 'unavailable', message: 'Index unavailable; retry' } });
   await assert.rejects(provider.search({ query: 'Orchid' }), /Index unavailable/);
   reply = () => { active = false; return { index: { state: 'ready', snapshot: 's', message: '' }, hits: [], total: 0, nextOffset: null, coverage: { complete: true, message: '' } }; };

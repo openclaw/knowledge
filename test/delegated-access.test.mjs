@@ -4,8 +4,11 @@ import { randomUUID } from 'node:crypto';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { authorizeVault, authorizeMemoryAccess } from '../dist/access.js';
+import { memoryPrincipal } from '../dist/access.js';
 import { createKnowledgeService } from '../dist/service.js';
+import { accessFor, apiFor } from './support.mjs';
+
+const memoryScope = (context, agent = 'main') => memoryPrincipal(context, agent, true)().scope;
 
 function authority(audience) {
   if (arguments.length === 0) audience = { kind: 'owner-private', agentId: 'main' };
@@ -21,7 +24,7 @@ function authority(audience) {
   }, assertCurrent() { assertInvocationCurrent(); assertMemoryAudienceCurrent(); } };
   return {
     api, tool, memory,
-    access: () => authorizeVault(tool, 'main', true, true),
+    access: () => accessFor(tool, true),
     revokeInvocation() { invocationActive = false; },
     revokeAudience() { audienceActive = false; },
   };
@@ -30,26 +33,28 @@ function authority(audience) {
 test('host audiences map identically for native tools and provider access', () => {
   const sessionId = randomUUID();
   for (const [audience, expected] of [
-    [{ kind: 'owner-private', agentId: 'main' }, { visibility: 'agent-private', agentId: 'main' }],
+    [{ kind: 'owner-private', agentId: 'main' }, { visibility: 'private' }],
     [{ kind: 'conversation', agentId: 'main', sessionKey: 'agent:main:group', sessionId },
-      { visibility: 'conversation', agentId: 'main', sessionId }],
+      { visibility: 'conversation', sessionId }],
   ]) {
     const f = authority(audience);
     assert.deepEqual(f.access().scope, expected);
-    assert.deepEqual(authorizeMemoryAccess(f.memory, 'main', 'main', true).scope, expected);
+    assert.deepEqual(memoryScope(f.memory), expected);
   }
 });
 
 test('missing, foreign, sandboxed, host, and revoked authority is denied', () => {
-  for (const audience of [undefined, { kind: 'owner-private', agentId: 'other' }]) {
-    const f = authority(audience);
-    assert.throws(f.access, /authority/);
-    assert.throws(() => authorizeMemoryAccess(f.memory, 'main', 'main', true), /authority/);
-  }
+  const missing = authority(undefined);
+  assert.throws(missing.access, /authority/);
+  assert.throws(() => memoryScope(missing.memory), /authority/);
+  // Another agent's audience resolves that agent, never the requested one.
+  const foreign = authority({ kind: 'owner-private', agentId: 'other' });
+  assert.equal(foreign.access().agentId, 'other');
+  assert.throws(() => memoryScope(foreign.memory, 'main'), /authority/);
   const sandboxed = authority(); sandboxed.memory.authority.sandboxed = true;
-  assert.throws(() => authorizeMemoryAccess(sandboxed.memory, 'main', 'main', true), /authority/);
+  assert.throws(() => memoryScope(sandboxed.memory), /authority/);
   const host = authority(); host.memory.authority = { kind: 'host', operation: 'bootstrap' };
-  assert.throws(() => authorizeMemoryAccess(host.memory, 'main', 'main', true), /authority/);
+  assert.throws(() => memoryScope(host.memory), /authority/);
   for (const revoke of ['revokeInvocation', 'revokeAudience']) {
     const f = authority(), access = f.access();
     f[revoke]();
@@ -65,16 +70,16 @@ async function serviceFixture(t) {
   await mkdir(path.join(vault, 'conversations', sessionId), { recursive: true });
   const vaultId = randomUUID(), publicationId = randomUUID();
   await writeFile(path.join(vault, 'vault.json'), JSON.stringify({
-    format: 'knowledge-vault-v1', vaultId, agentId: 'main', generation: 0, publicationId,
+    format: 'knowledge-vault-v2', vaultId, generation: 0, publicationId,
   }));
   const owner = authority({ kind: 'owner-private', agentId: 'main' });
   const conversation = authority({
     kind: 'conversation', agentId: 'main', sessionKey: 'agent:main:group', sessionId,
   });
   const config = { root: vault, statePath: path.join(root, 'knowledge.sqlite'), vaultId,
-    publicationId, agentId: 'main', writesEnabled: true, operatorRead: true };
+    publicationId, writesEnabled: true, operatorRead: true };
   let memory;
-  const api = { pluginConfig: { vault: config }, registerMemoryCapability(c) { memory = c.providerRuntime; } };
+  const api = apiFor(root, config, { extra: { registerMemoryCapability(c) { memory = c.providerRuntime; } } });
   owner.tool.api = api; conversation.tool.api = api;
   const service = createKnowledgeService(api);
   const save = (title, context) => service.save_page({ requestId: randomUUID(), expectedVaultId: vaultId,

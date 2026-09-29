@@ -68,7 +68,7 @@ export function recentActivity(db: DatabaseSync, scope: string, active: LoadedRe
           WHEN h.provenance='external-edit' THEN 'external' ELSE 'observed' END AS change,
         NULL, NULL, NULL, NULL, NULL
       FROM history h
-      WHERE h.scope=? AND h.id IN (SELECT value FROM json_each(?))
+      WHERE h.scope=? AND h.id IN (SELECT value FROM json_each(?)) AND h.provenance!='conversion'
         AND (h.sequence IN (SELECT sequence FROM plain) OR h.sequence NOT IN (SELECT sequence FROM any_published))
     ), visible AS (
       SELECT * FROM events WHERE sequence<=? AND id NOT IN (SELECT value FROM json_each(?))

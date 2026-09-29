@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { stringify } from 'yaml';
 import { Check } from 'typebox/value';
 import { createKnowledgeService } from '../dist/service.js';
+import { accessFor, apiFor } from './support.mjs';
 import { SqliteIdentityStore } from '../dist/identity-store.js';
 import { contract } from '../dist/contract.js';
 import { keywordExpression } from '../dist/retrieval.js';
@@ -16,15 +17,15 @@ async function fixture(t) {
   const base = await mkdtemp(path.join(os.tmpdir(), 'knowledge-retrieval-'));
   t.after(() => rm(base, { recursive: true, force: true }));
   const root = path.join(base, 'vault'), sessionId = randomUUID();
-  const manifest = { format: 'knowledge-vault-v1', vaultId: randomUUID(), agentId: 'main', generation: 0, publicationId: randomUUID() };
+  const manifest = { format: 'knowledge-vault-v2', vaultId: randomUUID(), generation: 0, publicationId: randomUUID() };
   await mkdir(root); await mkdir(path.join(root, 'private')); await writeFile(path.join(root, 'vault.json'), JSON.stringify(manifest));
-  const config = { root, statePath: path.join(base, 'state.sqlite'), agentId: 'main', vaultId: manifest.vaultId, publicationId: manifest.publicationId, operatorRead: true };
-  const api = { pluginConfig: { vault: config } };
+  const config = { root, statePath: path.join(base, 'state.sqlite'), vaultId: manifest.vaultId, publicationId: manifest.publicationId, operatorRead: true };
+  const api = apiFor(base, config);
   const owner = { source: 'tool', api, tool: { agentId: 'main', memoryAudience: { kind: 'owner-private', agentId: 'main' }, assertInvocationCurrent() {}, assertMemoryAudienceCurrent() {} } };
   const operator = { source: 'session-action', api, action: { client: { connId: 'test', scopes: ['operator.read'] } } };
   const service = createKnowledgeService(api), store = new SqliteIdentityStore(config.statePath);
   async function put(id, title, body, metadata = {}, partition = 'private') {
-    const scope = partition === 'private' ? { visibility: 'agent-private', agentId: 'main' } : { visibility: 'conversation', agentId: 'main', sessionId: partition.split('/')[1] };
+    const scope = partition === 'private' ? { visibility: 'private' } : { visibility: 'conversation', sessionId: partition.split('/')[1] };
     const envelope = { format: 'knowledge-record-v1', id, revision: 1, kind: 'page', title, scope, type: 'note', fields: {}, recorded_at: '2026-09-23T00:00:00Z', updated_at: '2026-09-23T00:00:00Z', lifecycle: 'active', ...metadata };
     const target = path.join(root, partition, 'notes', id + '.md'); await mkdir(path.dirname(target), { recursive: true });
     await writeFile(target, `---\n${stringify(envelope)}---\n${body}`); return target;
@@ -93,7 +94,7 @@ test('scope isolates results, counts, exact identity, snippets, corpus statistic
   const after = await createKnowledgeService(f.api).grep({ query: 'comet' }, f.owner);
   assert.deepEqual(stable(after), stable(before)); assert.doesNotMatch(JSON.stringify(after), /PRIVATE|private_record|private_second/);
   assert.equal((await f.service.lookup({ query: 'PRIVATE SENTINEL' }, f.owner)).outcome, 'missing');
-  await f.put('foreign_scope', 'PRIVATE SENTINEL', 'comet', { scope: { visibility: 'agent-private', agentId: 'main' } }, shared);
+  await f.put('foreign_scope', 'PRIVATE SENTINEL', 'comet', { scope: { visibility: 'private' } }, shared);
   assert.doesNotMatch(JSON.stringify(await f.service.grep({ query: 'comet' }, f.owner)), /PRIVATE/);
 });
 
@@ -213,14 +214,8 @@ test('native search client passes explicit typed mode and filters to the shared 
   for (const { name, input } of calls) assert.ok(Check(contract.operations[name].input, input));
 });
 
-test('sample search uses FTS without a configured real vault', async () => {
-  const service = createKnowledgeService({ pluginConfig: {} });
-  const result = await service.grep({ query: 'fictional' }, {});
-  assert.equal(result.index.state, 'ready'); assert.ok(result.total > 0); assert.ok(Check(contract.operations.grep.output, result));
-});
-
 test('published pages are immediately searchable without approval; restored generations cannot serve a newer index', async t => {
-  const f = await fixture(t), api = { ...f.api, pluginConfig: { vault: { ...f.config, writesEnabled: true } } }, service = createKnowledgeService(api);
+  const f = await fixture(t), api = { ...f.api, pluginConfig: { operatorRead: true, writesEnabled: true } }, service = createKnowledgeService(api);
   const receipt = await service.save_page({ requestId: randomUUID(), title: 'Fresh publication', type: 'note', body: 'newlypublishedword', source: { text: 'Original source\nSecond line', attribution: 'User note' } }, f.owner);
   assert.equal(receipt.state, 'published'); assert.equal(receipt.indexed, false); assert.match(receipt.message, /pending/);
   const indexed = await service.grep({ query: 'newlypublishedword' }, f.owner);
@@ -245,7 +240,7 @@ test('empty conversations return a ready empty scope without materializing a dir
 test('editing a legacy page removes approval metadata through journaled publication and preserves authored material', async t => {
   const f = await fixture(t);
   await f.put('legacy_record', 'Legacy page', 'Original body', { acceptance: 'candidate', custom_note: 'Preserve me' });
-  const api = { ...f.api, pluginConfig: { vault: { ...f.config, writesEnabled: true } } }, service = createKnowledgeService(api);
+  const api = { ...f.api, pluginConfig: { operatorRead: true, writesEnabled: true } }, service = createKnowledgeService(api);
   const previous = (await service.record({ id: 'legacy_record', includeMetadata: true }, f.owner)).record;
   const receipt = await service.save_page({ requestId: randomUUID(), id: previous.id, expectedRevision: previous.revision, expectedHash: previous.hash, title: previous.title, body: previous.body }, f.owner);
   assert.equal(receipt.state, 'published');

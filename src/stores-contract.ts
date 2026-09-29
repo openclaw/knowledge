@@ -1,5 +1,8 @@
 import { Type, type Static } from "typebox";
-import { AGENT_ID, STORE_KEY } from "./stores-config.js";
+/** Agent IDs Knowledge can bind; host agents outside this shape are reported unsupported. */
+export const AGENT_ID = "^[a-z][a-z0-9_-]{0,63}$";
+/** Stable named-store keys. Keys are identities, never paths or display text. */
+export const STORE_KEY = "^[a-z][a-z0-9-]{0,47}$";
 
 const agent = Type.String({ pattern: AGENT_ID });
 const storeKey = Type.String({ pattern: STORE_KEY });

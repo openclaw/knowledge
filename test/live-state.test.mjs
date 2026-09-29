@@ -6,15 +6,16 @@ import { randomUUID } from 'node:crypto';
 import { LiveState } from '../dist/live-state.js';
 import { DraftStore } from '../dist/drafts.js';
 import { createKnowledgeService } from '../dist/service.js';
+import { apiFor } from './support.mjs';
 
 async function fixture(t) {
   const base = await realpath(await mkdtemp('/tmp/knowledge-live-'));
   t.after(() => rm(base, {recursive:true,force:true}));
   const root = base + '/vault'; await mkdir(root + '/private', {recursive:true});
-  const manifest = {format:'knowledge-vault-v1',vaultId:randomUUID(),agentId:'main',generation:0,publicationId:randomUUID()};
+  const manifest = {format:'knowledge-vault-v2',vaultId:randomUUID(),generation:0,publicationId:randomUUID()};
   await writeFile(root+'/vault.json',JSON.stringify(manifest));
   const services=[]; const emitted=[];
-  const api={pluginConfig:{vault:{root,statePath:base+'/state.sqlite',agentId:'main',vaultId:manifest.vaultId,publicationId:manifest.publicationId,operatorRead:true,writesEnabled:true}},registerService:s=>services.push(s)};
+  const api=apiFor(base,{root,statePath:base+'/state.sqlite',vaultId:manifest.vaultId,publicationId:manifest.publicationId,operatorRead:true,writesEnabled:true},{extra:{registerService:s=>services.push(s)}});
   const service=createKnowledgeService(api,{emit:(...args)=>emitted.push(args)});
   const context={source:'session-action',api,action:{client:{connId:'test',scopes:['operator.write']}}};
   t.after(()=>services.forEach(s=>s.stop()));
@@ -68,7 +69,7 @@ test('retired services fence new and in-flight operations, leaving no accepted w
 
 test('draft recovery isolates vault/agent/scope and preserves exact uncertain-save payload and base',()=>{
   const values=new Map(); const storage={getItem:k=>values.get(k)??null,setItem:(k,v)=>values.set(k,v),removeItem:k=>values.delete(k)};
-  const identity={agent:'main',vault:'one',scope:'agent-private'};
+  const identity={agent:'main',vault:'one',scope:'private'};
   const draft={version:1,key:randomUUID(),title:'Unsaved',body:'Exact text',type:'note',fields:'{}',source:'Source',attribution:'Test',base:{id:randomUUID(),revision:3,hash:'abc'},submitted:{requestId:randomUUID(),title:'Submitted text',body:'Original submission',type:'note'}};
   new DraftStore(identity,storage).write(draft); assert.deepEqual(new DraftStore(identity,storage).read(),draft);
   for(const changed of [{vault:'two'},{agent:'other'},{scope:'conversation:other'}]) assert.equal(new DraftStore({...identity,...changed},storage).read(),undefined);
@@ -91,13 +92,6 @@ test('browser vault precondition cannot redirect a retained draft to a replaceme
   assert.equal((await f.service.records({},f.context)).total,0);
 });
 
-
-test('sample retrieval also respects retired service lifecycle',async()=>{
-  const services=[];
-  const service=createKnowledgeService({pluginConfig:{},registerService:s=>services.push(s)});
-  services[0].start(); services[0].stop();
-  for (const operation of ['grep','lookup']) await assert.rejects(service[operation]({query:'fictional'},{}),/reloaded/);
-});
 
 
 test('status snapshot is stable for unchanged reads and detects equal-count edits and source corruption', async t => {

@@ -18,10 +18,10 @@ async function fixture(t) {
   const base = await mkdtemp(path.join(os.tmpdir(), 'knowledge-git-'));
   t.after(() => rm(base, { recursive: true, force: true }));
   const root = path.join(base, 'vault'); await mkdir(root); await mkdir(path.join(root, 'private'));
-  const manifest = { format: 'knowledge-vault-v1', vaultId: randomUUID(), agentId: 'main', generation: 0, publicationId: randomUUID() };
+  const manifest = { format: 'knowledge-vault-v2', vaultId: randomUUID(), generation: 0, publicationId: randomUUID() };
   await writeFile(path.join(root, 'vault.json'), JSON.stringify(manifest));
-  const config = { root, statePath: path.join(base, 'state.sqlite'), agentId: 'main', vaultId: manifest.vaultId, publicationId: manifest.publicationId, operatorRead: true, writesEnabled: true };
-  const access = { scope: { visibility: 'agent-private', agentId: 'main' }, assertCurrent() {} };
+  const config = { root, statePath: path.join(base, 'state.sqlite'), vaultId: manifest.vaultId, publicationId: manifest.publicationId, operatorRead: true, writesEnabled: true };
+  const access = { scope: { visibility: 'private' }, agentId: 'main', assertCurrent() {} };
   const store = new SqliteIdentityStore(config.statePath);
   const service = new KnowledgeStorage(config, store);
   const read = async id => service.run(access, async vault => (await vault.scan()).records.find(r => r.id === id));
@@ -88,7 +88,7 @@ test('process death after atomic Git ref update recovers from SQLite rollback wi
   const source = `import { KnowledgeStorage } from './dist/storage.js';
     let raw=''; for await(const c of process.stdin) raw+=c;
     const {config,input}=JSON.parse(raw);
-    await new KnowledgeStorage(config,undefined,s=>{if(s==='after-git-ref') process.exit(77)}).save(input,{scope:{visibility:'agent-private',agentId:'main'},assertCurrent(){}},'agent');`;
+    await new KnowledgeStorage(config,undefined,s=>{if(s==='after-git-ref') process.exit(77)}).save(input,{scope:{visibility:'private'},agentId:'main',assertCurrent(){}},'agent');`;
   const code = await new Promise(resolve => { const child = spawn(process.execPath, ['--input-type=module', '--eval', source], { stdio: ['pipe', 'ignore', 'ignore'] }); child.on('close', resolve); child.stdin.end(JSON.stringify({ config: f.config, input })); });
   assert.equal(code, 77);
   assert.equal(f.service.resume(f.access, input.requestId).git.state, 'committed');
@@ -112,7 +112,7 @@ test('scope isolation: shared reads checkpoint neither private files nor private
   const f = await fixture(t);
   const offline = new KnowledgeStorage(f.config, f.store, undefined, new GitHistory(f.root, path.join(f.base, 'missing-git')));
   const secret = await offline.save(draft(), f.access, 'agent');
-  const shared = { scope: { visibility: 'conversation', agentId: 'main', sessionId: randomUUID() }, assertCurrent() {} };
+  const shared = { scope: { visibility: 'conversation', sessionId: randomUUID() }, assertCurrent() {} };
   const receipt = await f.service.save(draft(), shared, 'agent'); assert.equal(receipt.git.state, 'committed');
   assert.doesNotMatch(git(f.root, 'ls-tree', '-r', '--name-only', 'HEAD'), /private/);
   assert.equal(f.service.history(shared, {}).git.pending, 0);

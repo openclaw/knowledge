@@ -3,36 +3,33 @@ import type { MemoryCallerContext } from "./memory-provider-types.js";
 import type { Scope } from "./model.js";
 
 const denied = () => new Error("Knowledge access unavailable: trusted agent/session authority is required.");
-export type VaultAccess = { scope: Exclude<Scope, { visibility: "sample" }>; assertCurrent: () => void };
-type Resolution = { scope: VaultAccess["scope"] };
+/** A store partition: the store's private knowledge or one trusted conversation. */
+export type Partition = Exclude<Scope, { visibility: "sample" }>;
+/** Who is asking, and for which partition of their effective store. */
+export type Principal = { agentId: string; scope: Partition };
+/** Resolved, live-checked access. `agentId` is the effective agent (reader and
+ * writer); the store is chosen by membership, never by the caller. */
+export type VaultAccess = Principal & { assertCurrent: () => void };
 type MemoryAudience = NonNullable<Extract<MemoryCallerContext["authority"], { kind: "session" }>["audience"]>;
+/** Provider principals also say whether the lease may release content at all
+ * (host readiness checks may not) and whether it is the owner's private audience. */
+export type MemoryPrincipal = Principal & { healthOnly: boolean; ownerPrivate: boolean };
+const OPERATOR_READ = ["operator.read", "operator.write", "operator.admin"], OPERATOR_WRITE = ["operator.write", "operator.admin"];
 
-/** Provider access distinguishes partition reads from host-only readiness checks. */
-export type MemoryAccess = VaultAccess & { healthOnly: boolean; ownerPrivate: boolean; assertContentAccess: () => void };
-
-function bindAccess(resolve: () => Resolution): VaultAccess {
-  const initial = resolve(), identity = JSON.stringify(initial);
-  return { scope: initial.scope, assertCurrent() { if (JSON.stringify(resolve()) !== identity) throw denied(); } };
-}
-
-// Fence both the partition and the health-only restriction for the lease lifetime.
-function bindMemoryAccess(resolve: () => Resolution & { healthOnly: boolean; ownerPrivate: boolean }): MemoryAccess {
-  const initial = resolve(), identity = JSON.stringify(initial);
-  return { ...initial, assertCurrent() { if (JSON.stringify(resolve()) !== identity) throw denied(); },
-    assertContentAccess() { if (initial.healthOnly) throw denied(); } };
-}
-
-/** No payload field participates in authorization. Re-evaluate before releasing results. */
-export function authorizeVault(context: FeatureInvocationContext, agentId: string, operatorRead: boolean, write = false): VaultAccess {
-  return bindAccess(() => {
+/** Resolve a feature invocation to a principal. No payload field participates:
+ * tools use the host-minted memory audience; operators use `operatorAgent`,
+ * which the service chooses (the default agent or an operator-only selector).
+ * The returned function re-evaluates live authority on every call. */
+export function featurePrincipal(context: FeatureInvocationContext, operatorRead: boolean, write: boolean, operatorAgent: string): () => Principal {
+  return () => {
     if (context.source === "session-action") {
-      const { client, agentId: selectedAgent, sessionKey } = context.action;
-      if (!operatorRead || !client?.connId || !client.scopes.some(s => ["operator.read", "operator.write", "operator.admin"].includes(s))) throw denied();
-      if (write && !client.scopes.some(s => ["operator.write", "operator.admin"].includes(s))) throw denied();
-      // This first browser surface is the configured agent's private vault, not a
-      // conversation impersonation surface. A supplied target cannot expand it.
-      if (sessionKey || (selectedAgent && selectedAgent !== agentId)) throw denied();
-      return { scope: { visibility: "agent-private", agentId } };
+      const { client, sessionKey } = context.action;
+      if (!operatorRead || !client?.connId || !client.scopes.some(s => OPERATOR_READ.includes(s))) throw denied();
+      if (write && !client.scopes.some(s => OPERATOR_WRITE.includes(s))) throw denied();
+      // Operators inspect an agent's private store; a session target would be
+      // conversation impersonation.
+      if (sessionKey) throw denied();
+      return { agentId: operatorAgent, scope: { visibility: "private" } };
     }
     if (context.source !== "tool") throw denied();
     const tool = context.tool;
@@ -40,40 +37,48 @@ export function authorizeVault(context: FeatureInvocationContext, agentId: strin
     if (typeof tool.assertInvocationCurrent !== "function") throw denied();
     tool.assertInvocationCurrent();
     tool.assertMemoryAudienceCurrent?.();
-    return audienceScope(tool.memoryAudience, agentId);
-  });
+    return audiencePrincipal(tool.memoryAudience);
+  };
 }
 
-function audienceScope(
-  audience: MemoryAudience | undefined,
-  agentId: string,
-): Resolution {
-  if (!audience || audience.agentId !== agentId) throw denied();
-  if (audience.kind === "owner-private") return { scope: { visibility: "agent-private", agentId } };
-  return { scope: { visibility: "conversation", agentId, sessionId: audience.sessionId } };
+function audiencePrincipal(audience: MemoryAudience | undefined): Principal {
+  if (!audience) throw denied();
+  if (audience.kind === "owner-private") return { agentId: audience.agentId, scope: { visibility: "private" } };
+  return { agentId: audience.agentId, scope: { visibility: "conversation", sessionId: audience.sessionId } };
 }
 
 /** Provider runtime access is host-issued, not a fabricated feature/tool invocation. */
-export function authorizeMemoryAccess(context: MemoryCallerContext,
-  agentId: string, requestedAgent: string, operatorRead: boolean,
-  purpose?: "default" | "status" | "cli"): MemoryAccess {
-  return bindMemoryAccess(() => {
-    if (typeof context.assertCurrent !== "function" || requestedAgent !== agentId) throw denied();
+export function memoryPrincipal(context: MemoryCallerContext, requestedAgent: string, operatorRead: boolean, purpose?: "default" | "status" | "cli"): () => MemoryPrincipal {
+  return () => {
+    if (typeof context.assertCurrent !== "function") throw denied();
     context.signal?.throwIfAborted();
     context.assertCurrent();
     const caller = context.authority;
     if (caller.kind === "host") {
       if (purpose !== "status") throw denied();
-      // The scope is internal to validation; this lease cannot release its content.
-      return { scope: { visibility: "agent-private", agentId }, healthOnly: true, ownerPrivate: false };
+      // The scope is internal to validation; this lease cannot release content.
+      return { agentId: requestedAgent, scope: { visibility: "private" }, healthOnly: true, ownerPrivate: false };
     }
     if (caller.kind === "operator") {
-      if (!operatorRead || !caller.connId || !caller.scopes.some(s => ["operator.read", "operator.write", "operator.admin"].includes(s))) throw denied();
-      return { scope: { visibility: "agent-private", agentId }, healthOnly: false, ownerPrivate: false };
+      if (!operatorRead || !caller.connId || !caller.scopes.some(s => OPERATOR_READ.includes(s))) throw denied();
+      return { agentId: requestedAgent, scope: { visibility: "private" }, healthOnly: false, ownerPrivate: false };
     }
     // Background host calls are not session delegation. Session identity is a
     // host-minted audience; providers consume it without reconstructing lineage.
     if (caller.kind !== "session" || caller.sandboxed) throw denied();
-    return { ...audienceScope(caller.audience, agentId), healthOnly: false, ownerPrivate: caller.audience?.kind === "owner-private" };
-  });
+    const principal = audiencePrincipal(caller.audience);
+    if (principal.agentId !== requestedAgent) throw denied();
+    return { ...principal, healthOnly: false, ownerPrivate: caller.audience?.kind === "owner-private" };
+  };
+}
+
+/** Whether a feature caller may change store assignments (spec §7). */
+export function canChangeAssignments(context: FeatureInvocationContext): boolean {
+  return context.source === "session-action" && Boolean(context.action.client?.connId) && Boolean(context.action.client?.scopes.includes("operator.admin"));
+}
+
+/** Pin a principal: later checks fail if live authority now resolves differently. */
+export function pinPrincipal<P extends Principal>(resolve: () => P): { principal: P; assertSame(): void } {
+  const principal = resolve(), identity = JSON.stringify(principal);
+  return { principal, assertSame() { if (JSON.stringify(resolve()) !== identity) throw denied(); } };
 }

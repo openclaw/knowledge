@@ -1,21 +1,24 @@
-import { createKnowledgeMemoryRuntime } from "./memory-provider.js";
-import { buildKnowledgeMemoryFlushPlan } from "./memory-flush.js";
-import { buildKnowledgeMemoryPrompt } from "./memory-prompt.js";
-import { connections } from "./connections.js";
-import { DatabaseSync } from "node:sqlite";
-import { keywordSearch, exactLookup } from "./retrieval.js";
 import { createHash, randomUUID } from "node:crypto";
+import { Check } from "typebox/value";
 import type { FeatureHandlers, FeatureEventEmitter, FeatureInvocationContext } from "openclaw/plugin-sdk/feature-plugin";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
+import { createKnowledgeMemoryRuntime } from "./memory-provider.js";
+import { buildKnowledgeMemoryPrompt } from "./memory-prompt.js";
+import { buildKnowledgeMemoryFlushPlan } from "./memory-flush.js";
 import { contract } from "./contract.js";
-import { SampleVault } from "./vault.js";
-import { catalogFacts } from "./catalog.js";
-import { authorizeVault } from "./access.js";
-import { parseVaultConfig } from "./real-vault.js";
+import { featurePrincipal, type VaultAccess } from "./access.js";
+import { parsePolicy } from "./stores-config.js";
+import { Stores } from "./stores.js";
+import { createStoreOperations } from "./store-assignments.js";
+import type { StoreRuntime } from "./store-runtime.js";
+import type { StoreState } from "./stores-contract.js";
+import type { StorageOperations } from "./storage-host.js";
 
-import { inspectRecord, inspectOntology } from "./inspection.js";
-import { LiveState } from "./live-state.js";
-import { StorageClient } from "./storage-client.js";
+type Handlers = FeatureHandlers<typeof contract>;
+type StoreHandlers = Omit<Handlers, "stores_snapshot" | "stores_change" | "stores_change_status" | "agent_query" | "agent_action">;
+const WRITE_TOOLS = ["knowledge_save_page", "knowledge_correct", "knowledge_withdraw", "knowledge_recall"];
+const chatOnly = () => Error("Knowledge changes must be requested through chat and agent tools.");
+const operatorOnly = () => Error("Selecting an agent's store is an operator inspection; it is not available to agent tools.");
 
 const normalizeFlushTitle = (title: string) =>
   title.normalize("NFKC").trim().replace(/\s+/gu, " ").toLowerCase();
@@ -35,157 +38,128 @@ export function deriveMemoryFlushRequestId(flushId: string, title: string): stri
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureEventEmitter<typeof contract>): FeatureHandlers<typeof contract> {
+export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureEventEmitter<typeof contract>): Handlers {
   const instanceId = randomUUID(), startedAt = new Date().toISOString();
-  const config = parseVaultConfig(api.pluginConfig);
-  // Storage runs in a worker thread; this thread authorizes and answers its
-  // authority checks. The sample vault stays in-process for tests and demos.
-  const storage = config ? new StorageClient(config) : undefined;
-  let current = true, epoch = 0;
-  const assertCurrent = () => { if (!current) throw Error("Knowledge service was reloaded; reconnect and retry the same request."); };
-  let pending: Promise<void> = Promise.resolve();
-  const enqueue = <T>(operation: () => Promise<T>): Promise<T> => {
-    const submittedEpoch = epoch;
-    const result = pending.then(() => {
-      assertCurrent();
-      if (submittedEpoch !== epoch) throw Error("Knowledge service was reloaded; retry the original request.");
-      return operation();
-    });
-    // A rejected operation must not poison subsequent reads, writes or recovery.
-    pending = result.then(() => undefined, () => undefined);
-    return result;
-  };
+  const policy = parsePolicy(api.pluginConfig);
+  const stores = new Stores(api, policy, () => {
+    try { events?.emit("changed", {}); } catch { /* Reload/reconnect snapshots recover missed hints. */ }
+  });
   if (typeof api.registerMemoryCapability === "function") {
     api.registerMemoryCapability({
-      providerRuntime: createKnowledgeMemoryRuntime(storage, { enqueue, drain: () => pending, fence() {
-        const openedEpoch = epoch;
-        return () => { assertCurrent(); if (openedEpoch !== epoch) throw Error("Knowledge service was reloaded."); };
-      } }),
+      providerRuntime: createKnowledgeMemoryRuntime(stores),
       recallToolNames: ["knowledge_grep", "knowledge_lookup", "knowledge_record"],
-      promptBuilder: params => config && (!params.agentId || params.agentId === config.agentId)
-        ? buildKnowledgeMemoryPrompt({ ...params, availableTools: config.writesEnabled ? params.availableTools : new Set([...params.availableTools].filter(t => !["knowledge_save_page", "knowledge_correct", "knowledge_withdraw", "knowledge_recall"].includes(t))) }) : [],
-      // The selected provider owns persistence; write-disabled/sample modes keep
+      // Every agent has an effective store, so every agent gets the guidance.
+      promptBuilder: params => buildKnowledgeMemoryPrompt({ ...params, availableTools: policy.writesEnabled ? params.availableTools : new Set([...params.availableTools].filter(t => !WRITE_TOOLS.includes(t))) }),
+      // The selected provider owns persistence; write-disabled installs keep
       // suppressing Memory Core's append-only file plan with an explicit null.
-      flushPlanResolver: () => config?.writesEnabled
-        ? buildKnowledgeMemoryFlushPlan()
-        : null,
+      flushPlanResolver: () => policy.writesEnabled ? buildKnowledgeMemoryFlushPlan() : null,
     });
   }
-  const accessFor = (context: FeatureInvocationContext, write = false) => {
-    assertCurrent();
-    const observedEpoch = epoch;
-    const access = authorizeVault(context, config!.agentId, config!.operatorRead, write);
-    return { ...access, assertCurrent() { assertCurrent(); if (observedEpoch !== epoch) throw Error("Knowledge service was reloaded; retry the original request."); access.assertCurrent(); } };
-  };
-  const live = config?.operatorRead ? new LiveState(config.root, () => {
-    try { events?.emit("changed", {}); } catch { /* Reload/reconnect snapshots recover missed hints. */ }
-  }) : undefined;
-  api.registerService?.({ id: "knowledge:live-state", start() { ++epoch; current = true; live?.start(); }, stop() {
-    const stopped = ++epoch; current = false; live?.stop();
-    // Release the worker once queued work settles, unless the service restarted.
-    void pending.finally(() => { if (epoch === stopped) storage?.close(); });
-  } });
-  const sample = () => { assertCurrent(); return new SampleVault(); };
-  const authority = (context: FeatureInvocationContext, write = false) => {
-    if (!config || !storage) throw Error("Sample vault is read-only; connect a real vault first.");
-    if (write && !config.writesEnabled) throw Error("Knowledge writes are disabled.");
-    return accessFor(context, write);
-  };
-  const handlers: FeatureHandlers<typeof contract> = {
-    verify: (input, context) => storage!.call("verify", authority(context), input),
-    source_check: (input, context) => storage!.call("sourceCheck", authority(context), input),
-    publish_batch: async (input, context) => {
-      if (context.source !== "tool") throw Error("Knowledge changes must be requested through chat and agent tools.");
-      const access = authority(context, true);
-      try { return await storage!.call("batch", access, input); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); }
-    },
-    annotate: async (input, context) => {
-      if (context.source !== "tool") throw Error("Knowledge changes must be requested through chat and agent tools.");
-      const access = authority(context, true);
-      try { return await storage!.call("annotate", access, input); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); }
-    },
-    recent: async (input, context) => storage ? storage.call("recent", authority(context), input) : { items: [], upperSequence: 0, nextBefore: null },
-    attach: async (input, context) => storage!.call("attach", authority(context, true), input),
-    attachment: (input, context) => storage ? storage.call("attachment", accessFor(context), input) : sample().attachment(input),
-    save_page: async (input, context) => {
-      const access = authority(context, true);
-      const flushId = context.source === "tool" ? context.tool.memoryFlush?.flushId : undefined;
-      if (input.requestId === undefined && !flushId) {
-        throw Error("knowledge_save_page requires requestId outside a host pre-compaction memory flush.");
+  api.registerService?.({ id: "knowledge:live-state", start() { stores.start(); }, stop() { stores.stop(); } });
+
+  /** Handlers bound to one operator viewing selection. Tools always resolve
+   * their store from the host audience; `agent` only applies to operators. */
+  const storeHandlers = (agent?: string): StoreHandlers => {
+    // Resolve, then run inside the store's lane. Agent tools may create a
+    // never-provisioned store; operator inspection never does.
+    const use = async <T>(context: FeatureInvocationContext, write: boolean, work: (runtime: StoreRuntime, access: VaultAccess) => Promise<T>, whenEmpty?: () => T): Promise<T> => {
+      if (write && !policy.writesEnabled) throw Error("Knowledge writes are disabled.");
+      const opened = await stores.open(featurePrincipal(context, policy.operatorRead, write, agent ?? stores.defaultAgent()), { provision: context.source === "tool" }, stores.incarnation);
+      if (opened.kind !== "ready") {
+        if (opened.kind === "unprovisioned" && whenEmpty) return whenEmpty();
+        throw Error(opened.message);
       }
-      const value = {
-        ...input,
-        requestId: input.requestId ?? deriveMemoryFlushRequestId(flushId!, input.title),
-      };
-      try {
-        return await storage!.call("save", access, {
-          value,
-          actor: context.source === "tool" ? "agent" : "operator",
-        });
-      } finally {
-        if (access.scope.visibility === "agent-private") live?.invalidate();
-      }
-    },
-    create_claim: async (input, context) => { const access = authority(context, true); try { return await storage!.call("createClaim", access, { value: input, actor: context.source === "tool" ? "agent" : "operator" }); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); } },
-    create_relationship: async (input, context) => { const access = authority(context, true); try { return await storage!.call("createRelationship", access, { value: input, actor: context.source === "tool" ? "agent" : "operator" }); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); } },
-    correct: async (input, context) => {
-      if (context.source !== "tool") throw Error("Knowledge changes must be requested through chat and agent tools.");
-      const access = authority(context, true);
-      try { return await storage!.call("correct", access, input); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); }
-    },
-    withdraw: async (input, context) => {
-      if (context.source !== "tool") throw Error("Knowledge changes must be requested through chat and agent tools.");
-      const access = authority(context, true);
-      try { return await storage!.call("withdraw", access, input); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); }
-    },
-    recall: async (input, context) => {
-      if (context.source !== "tool") throw Error("Automatic recall approval is available only through an owner-private agent tool call; browser and operator actions are not allowed.");
-      if (context.tool.memoryAudience?.kind !== "owner-private") throw Error("Automatic recall approval requires the owner's private memory audience; conversation audiences are not allowed.");
-      const access = authority(context, true);
-      try { return await storage!.call("recall", access, input); } finally { live?.invalidate(); }
-    },
-    connections: async (input, context) => storage ? storage.call("connections", authority(context), input) : connections(await sample().scan(), input),
-    resume: async (input, context) => { const access = authority(context, true); try { return await storage!.call("resume", access, { requestId: input.requestId }); } finally { if (access.scope.visibility === "agent-private") live?.invalidate(); } },
-    revision: async (input, context) => storage!.call("revision", authority(context), { sequence: input.sequence }),
-    mutation: async (input, context) => storage!.call("mutation", authority(context), input),
-    history: async (input, context) => {
-      if (!storage) return { entries: [], mutations: [], nextOffset: null, git: { state: "read-only", pending: 0, message: "Sample vault; no Git changes." } };
-      return storage.call("history", authority(context), input);
-    },
-    status: async (_, context) => {
-      const access = storage ? accessFor(context) : undefined;
-      const scope = !access ? "sample" : access.scope.visibility === "conversation" ? `conversation:${access.scope.sessionId}` : "agent-private";
-      if (scope === "agent-private") live?.ensureWatching();
-      const catalog = access ? await storage!.call("catalog", access) : catalogFacts(await sample().scan());
-      return {
-        service: "knowledge", phase: config?.writesEnabled ? "structured-writes" : "read-only-explorer", backendRevision: "memory-provider-v2-2", instanceId, startedAt,
-        checkedAt: catalog.checkedAt, vault: config?.vaultId ?? "bundled-sample", agent: config?.agentId ?? "none — synthetic sample", scope, sample: !config, writesEnabled: Boolean(config?.writesEnabled && (() => { try { authority(context, true); return true; } catch { return false; } })()),
-        live: scope === "agent-private" ? live?.state ?? "stopped" : "stopped",
-        snapshot: catalog.snapshot, records: catalog.records, validRecords: catalog.records,
-        definitions: catalog.definitions, ontologyAvailable: catalog.ontologyAvailable, ontologyFingerprint: catalog.ontologyFingerprint, issues: catalog.issues,
-      } as const;
-    },
-    grep: async (input, context) => {
-      if (storage) return storage.call("search", authority(context), input);
-      const data = await sample().scan(), db = new DatabaseSync(":memory:");
-      try { return keywordSearch(db, data, input, "sample", "sample"); } finally { db.close(); }
-    },
-    lookup: async (input, context) => storage ? storage.call("lookup", authority(context), input) : exactLookup(await sample().scan(), input),
-    records: async (input, context) => storage ? storage.call("records", accessFor(context), input) : sample().list(input),
-    record: async (input, context) => storage ? storage.call("record", accessFor(context), input) : inspectRecord(sample(), input),
-    ontology: async (input, context) => storage ? storage.call("ontology", accessFor(context), input) : inspectOntology(sample(), input),
-    diagnostics: async (_, context) => {
-      const data = storage ? undefined : await sample().scan();
-      return storage ? storage.call("diagnostics", accessFor(context)) : { issues: data!.issues.slice(0, 1000), total: data!.issues.length, truncated: data!.issues.length > 1000, checkedAt: data!.checkedAt };
-    },
+      const result = await opened.runtime.enqueue(opened.access.assertCurrent, () => work(opened.runtime, opened.access));
+      if (write && opened.access.scope.visibility === "private") opened.runtime.live.invalidate();
+      return result;
+    };
+    // A plain storage call: one worker operation in the resolved store.
+    const call = <Op extends keyof StorageOperations>(op: Op, write = false, whenEmpty?: () => Awaited<ReturnType<StorageOperations[Op]>>) =>
+      (input: unknown, context: FeatureInvocationContext) => use(context, write, (runtime, access) =>
+        (runtime.client.call as (op: Op, access: VaultAccess, input?: unknown) => Promise<Awaited<ReturnType<StorageOperations[Op]>>>)(op, access, input), whenEmpty);
+    // Agent-only changes reject (never throw synchronously) for other callers.
+    const agentChange = <Op extends keyof StorageOperations>(op: Op) => (input: unknown, context: FeatureInvocationContext) =>
+      context.source !== "tool" ? Promise.reject(chatOnly()) : call(op, true)(input, context);
+    const authored = <Op extends "save" | "createClaim" | "createRelationship">(op: Op) => (input: unknown, context: FeatureInvocationContext) =>
+      use(context, true, (runtime, access) => (runtime.client.call as (op: Op, access: VaultAccess, input: unknown) => Promise<Awaited<ReturnType<StorageOperations[Op]>>>)(op, access, { value: input, actor: context.source === "tool" ? "agent" : "operator" }));
+    const now = () => new Date().toISOString();
+    return {
+      verify: call("verify"),
+      source_check: call("sourceCheck"),
+      publish_batch: agentChange("batch"),
+      annotate: agentChange("annotate"),
+      recent: call("recent", false, () => ({ items: [], upperSequence: 0, nextBefore: null })),
+      attach: call("attach", true),
+      attachment: call("attachment"),
+      // Inside a host pre-compaction flush, a missing requestId is derived from
+      // the flush and title so the flush's retries replay instead of duplicating.
+      save_page: (input, context) => {
+        const flushId = context.source === "tool" ? context.tool.memoryFlush?.flushId : undefined;
+        if (input.requestId === undefined && !flushId) return Promise.reject(Error("knowledge_save_page requires requestId outside a host pre-compaction memory flush."));
+        return authored("save")({ ...input, requestId: input.requestId ?? deriveMemoryFlushRequestId(flushId!, input.title) }, context);
+      },
+      create_claim: authored("createClaim"),
+      create_relationship: authored("createRelationship"),
+      correct: agentChange("correct"),
+      withdraw: agentChange("withdraw"),
+      recall: (input, context) => {
+        if (context.source !== "tool") return Promise.reject(Error("Automatic recall approval is available only through an owner-private agent tool call; browser and operator actions are not allowed."));
+        if (context.tool.memoryAudience?.kind !== "owner-private") return Promise.reject(Error("Automatic recall approval requires the owner's private memory audience; conversation audiences are not allowed."));
+        return use(context, true, (runtime, access) => runtime.client.call("recall", access, input));
+      },
+      connections: call("connections"),
+      resume: (input, context) => use(context, true, (runtime, access) => runtime.client.call("resume", access, { requestId: input.requestId })),
+      revision: (input, context) => use(context, false, (runtime, access) => runtime.client.call("revision", access, { sequence: input.sequence })),
+      mutation: call("mutation"),
+      history: call("history", false, () => ({ entries: [], mutations: [], nextOffset: null, git: { state: "idle" as const, pending: 0, message: "Nothing saved here yet." } })),
+      status: async (_, context) => {
+        const opened = await stores.open(featurePrincipal(context, policy.operatorRead, false, agent ?? stores.defaultAgent()), { provision: false }, stores.incarnation);
+        const base = { service: "knowledge" as const, phase: policy.writesEnabled ? "structured-writes" as const : "read-only-explorer" as const, backendRevision: "memory-provider-v2-2+stores-v1", instanceId, startedAt };
+        const notReady = (agentId: string, store: Exclude<StoreState, "ready">, message: string) => ({ ...base, checkedAt: now(), vault: "", agent: agentId, store, scope: "private", writesEnabled: false, live: "stopped" as const,
+          records: 0, validRecords: 0, definitions: 0, ontologyAvailable: false, ontologyFingerprint: "", issues: 0, message: message.slice(0, 300) });
+        if (opened.kind !== "ready") return notReady(opened.agentId, opened.kind, opened.message);
+        const { runtime, access } = opened;
+        const scope = access.scope.visibility === "conversation" ? `conversation:${access.scope.sessionId}` : "private";
+        let catalog;
+        try { catalog = await runtime.enqueue(access.assertCurrent, () => runtime.client.call("catalog", access)); }
+        catch (e) {
+          // A provisioned store that fails its identity checks is reported, never replaced.
+          if (!/identity or storage is unavailable/.test((e as Error).message)) throw e;
+          return notReady(access.agentId, "unavailable", `This store couldn't be opened. ${(e as Error).message}`);
+        }
+        if (scope === "private") runtime.live.ensureWatching();
+        const canWrite = policy.writesEnabled && (context.source === "tool" || (context.source === "session-action" && Boolean(context.action.client?.scopes.some((s: string) => s === "operator.write" || s === "operator.admin"))));
+        return {
+          ...base, checkedAt: catalog.checkedAt, vault: runtime.vaultId, agent: access.agentId, store: "ready" as const, scope, writesEnabled: canWrite,
+          live: scope === "private" ? runtime.live.state : "stopped",
+          snapshot: catalog.snapshot, records: catalog.records, validRecords: catalog.records,
+          definitions: catalog.definitions, ontologyAvailable: catalog.ontologyAvailable, ontologyFingerprint: catalog.ontologyFingerprint, issues: catalog.issues,
+        };
+      },
+      grep: call("search"),
+      lookup: call("lookup"),
+      records: call("records", false, () => ({ facets: { kinds: {}, origins: {} }, records: [], total: 0, offset: 0, nextOffset: null, checkedAt: now() })),
+      record: call("record"),
+      ontology: call("ontology"),
+      diagnostics: call("diagnostics", false, () => ({ issues: [], total: 0, truncated: false, checkedAt: now() })),
+    } as StoreHandlers;
   };
-  // RealVault fences an operation's manifest/checkpoint snapshot. A sibling
-  // publication advances that snapshot, so reads as well as writes must share
-  // this lane. Otherwise ordinary parallel tool/UI calls look like an external
-  // vault replacement. Keep the filesystem and revision fences intact.
-  if (!storage) return handlers;
-  const serialize = <Input, Output>(handler: (input: Input, context: FeatureInvocationContext) => Output | Promise<Output>) =>
-    (input: Input, context: FeatureInvocationContext): Promise<Output> => enqueue(async () => handler(input, context));
-  return Object.fromEntries(Object.entries(handlers).map(([name, handler]) =>
-    [name, serialize(handler as (input: never, context: FeatureInvocationContext) => unknown)])) as FeatureHandlers<typeof contract>;
+
+  const defaults = storeHandlers();
+  // Operator-only proxy: run one ordinary operation against a selected agent's
+  // effective store. Validates the inner input and output with the operation's
+  // own schemas, and never serves agent tools.
+  const proxy = (kind: "query" | "action") => async (input: { agent: string; operation: string; input: unknown }, context: FeatureInvocationContext) => {
+    if (context.source !== "session-action") throw operatorOnly();
+    const operation = contract.operations[input.operation as keyof StoreHandlers];
+    if (!operation || !(input.operation in defaults) || operation.kind !== kind) throw Error(`Unknown ${kind} operation: ${input.operation}.`);
+    await stores.ensure();
+    if (!stores.agents().includes(input.agent)) throw Error("Unknown agent.");
+    if (!Check(operation.input, input.input)) throw Error(`Invalid input for ${input.operation}.`);
+    const handler = storeHandlers(input.agent)[input.operation as keyof StoreHandlers] as (input: unknown, context: FeatureInvocationContext) => Promise<unknown>;
+    const output = await handler(input.input, context);
+    if (!Check(operation.output, output)) throw Error(`Invalid output from ${input.operation}.`);
+    return output;
+  };
+  return { ...defaults, ...createStoreOperations(stores), agent_query: proxy("query"), agent_action: proxy("action") } as Handlers;
 }

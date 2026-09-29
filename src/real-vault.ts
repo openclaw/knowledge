@@ -1,55 +1,36 @@
 import path from "node:path";
 import { lstat, realpath } from "node:fs/promises";
-import { Type, type Static } from "typebox";
 import { Check } from "typebox/value";
 import { readText } from "./files.js";
 import { SampleVault, type ScanCache } from "./vault.js";
+import { Manifest, checkpointKey } from "./store-manifest.js";
 import type { VaultAccess } from "./access.js";
 
-const uuid = Type.String({ pattern: "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$" });
-export const Manifest = Type.Object({
-  format: Type.Literal("knowledge-vault-v1"), vaultId: uuid,
-  agentId: Type.String({ pattern: "^[a-z][a-z0-9_-]{0,63}$" }),
-  generation: Type.Integer({ minimum: 0 }), publicationId: uuid,
-}, { additionalProperties: false });
-export type Manifest = Static<typeof Manifest>;
-export const VaultConfig = Type.Object({
-  root: Type.String({ minLength: 1, maxLength: 4096 }),
-  statePath: Type.String({ minLength: 1, maxLength: 4096 }),
-  agentId: Manifest.properties.agentId, vaultId: uuid, publicationId: uuid,
-  operatorRead: Type.Boolean(), writesEnabled: Type.Optional(Type.Boolean()),
-}, { additionalProperties: false });
-export type VaultConfig = Static<typeof VaultConfig>;
+/** One physical store as resolved through the registry. Paths are registry
+ * facts, never authored configuration. */
+export type StoreConfig = { root: string; statePath: string; vaultId: string; publicationId: string; writesEnabled: boolean };
 export type IdentityStore = { lookup(key: string): Promise<Manifest | undefined>; registerIfAbsent(key: string, value: Manifest): Promise<boolean> };
-const unavailable = () => Error("Knowledge vault identity or storage is unavailable; recovery/configuration review is required.");
-
-export function parseVaultConfig(config: Record<string, unknown> | undefined): VaultConfig | undefined {
-  if (!config || !Object.keys(config).length) return undefined;
-  if (Object.keys(config).some(k => k !== "vault") || !Check(VaultConfig, config.vault) || !path.isAbsolute(config.vault.root) || !path.isAbsolute(config.vault.statePath) ||
-      path.resolve(config.vault.statePath) === path.resolve(config.vault.root) || path.resolve(config.vault.statePath).startsWith(path.resolve(config.vault.root) + path.sep)) throw unavailable();
-  return config.vault;
-}
+const unavailable = () => Error("Knowledge store identity or storage is unavailable; recovery review is required.");
 
 /** Manifest/checkpoint equality fences publication, replacement, and rollback. */
 export class RealVault {
   // One scan cache per scope directory. Entries self-validate against file
   // stamps, so a replaced vault or scope simply misses and rescans.
   private readonly scans = new Map<string, ScanCache>();
-  constructor(readonly config: VaultConfig, private readonly identities: IdentityStore, private readonly observe?: (records: import("./model.js").LoadedRecord[], access: VaultAccess, evidence: import("./evidence-files.js").EvidenceInspector) => void) {}
+  constructor(readonly config: StoreConfig, private readonly identities: IdentityStore, private readonly observe?: (records: import("./model.js").LoadedRecord[], access: VaultAccess, evidence: import("./evidence-files.js").EvidenceInspector) => void) {}
   async identity() {
     try {
       const rootPath = await realpath(this.config.root), stat = await lstat(this.config.root);
       if (!stat.isDirectory() || stat.isSymbolicLink()) throw unavailable();
       const value: unknown = JSON.parse(await readText(rootPath, "vault.json"));
-      if (!Check(Manifest, value) || value.vaultId !== this.config.vaultId || value.agentId !== this.config.agentId ||
+      if (!Check(Manifest, value) || value.vaultId !== this.config.vaultId ||
           (value.generation === 0 && value.publicationId !== this.config.publicationId)) throw unavailable();
-      return { manifest: { format: value.format, vaultId: value.vaultId, agentId: value.agentId, generation: value.generation, publicationId: value.publicationId }, rootPath, dev: stat.dev, ino: stat.ino };
+      return { manifest: { format: value.format, vaultId: value.vaultId, generation: value.generation, publicationId: value.publicationId }, rootPath, dev: stat.dev, ino: stat.ino };
     } catch { throw unavailable(); }
   }
   async run<T>(access: VaultAccess, operation: (vault: SampleVault) => Promise<T>): Promise<T> {
     access.assertCurrent();
-    if (access.scope.agentId !== this.config.agentId) throw unavailable();
-    const before = await this.identity(), key = `agent:${this.config.agentId}`;
+    const before = await this.identity(), key = checkpointKey(this.config.vaultId);
     const existing = await this.identities.lookup(key);
     if (!existing) {
       if (before.manifest.generation !== 0) throw unavailable();
@@ -58,7 +39,7 @@ export class RealVault {
     }
     const checkpoint = await this.identities.lookup(key);
     if (JSON.stringify(checkpoint) !== JSON.stringify(before.manifest)) throw unavailable();
-    const relative = access.scope.visibility === "agent-private" ? "private" : `conversations/${access.scope.sessionId}`;
+    const relative = access.scope.visibility === "private" ? "private" : `conversations/${access.scope.sessionId}`;
     const scopedPath = path.join(before.rootPath, relative);
     let missing = false, scopeStamp = "";
     const inspectScope = async () => {

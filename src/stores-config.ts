@@ -2,10 +2,7 @@ import { createHash } from "node:crypto";
 import { Type, type Static } from "typebox";
 import { Check } from "typebox/value";
 
-/** Agent IDs Knowledge can bind; host agents outside this shape are reported unsupported. */
-export const AGENT_ID = "^[a-z][a-z0-9_-]{0,63}$";
-/** Stable named-store keys. Keys are identities, never paths or display text. */
-export const STORE_KEY = "^[a-z][a-z0-9-]{0,47}$";
+import { AGENT_ID, STORE_KEY } from "./stores-contract.js";
 export const agentIdPattern = new RegExp(AGENT_ID);
 export const storeKeyPattern = new RegExp(STORE_KEY);
 
@@ -14,7 +11,7 @@ export const NamedStore = Type.Object({
   agents: Type.Array(Type.String({ pattern: AGENT_ID }), { maxItems: 100 }),
 }, { additionalProperties: false });
 export type NamedStore = Static<typeof NamedStore>;
-export const StoresSection = Type.Record(Type.String({ pattern: STORE_KEY }), NamedStore);
+export const StoresSection = Type.Record(Type.String({ pattern: STORE_KEY }), NamedStore, { additionalProperties: false });
 export type StoresSection = Static<typeof StoresSection>;
 
 /** Authored plugin configuration. Membership is the only per-agent setting;

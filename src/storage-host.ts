@@ -4,7 +4,7 @@ import { inspectRecord, inspectOntology } from "./inspection.js";
 import { eligible } from "./retrieval.js";
 import { catalogFacts } from "./catalog.js";
 import type { VaultAccess } from "./access.js";
-import type { VaultConfig } from "./real-vault.js";
+import type { StoreConfig } from "./real-vault.js";
 import type { LoadedRecord } from "./model.js";
 import { AUTHORITY_REVOKED, type HostMessage, type WorkerMessage } from "./storage-protocol.js";
 
@@ -68,13 +68,13 @@ export type StorageOperations = typeof operations;
 
 /** Serve storage calls one at a time. Authority checks block this worker on a
  * shared flag while the main thread re-evaluates the caller's live authority. */
-export function serve(port: MessagePort, init: { config: VaultConfig; signal: SharedArrayBuffer }) {
+export function serve(port: MessagePort, init: { config: StoreConfig; signal: SharedArrayBuffer }) {
   const storage = new KnowledgeStorage(init.config), signal = new Int32Array(init.signal);
   let queue: Promise<void> = Promise.resolve();
   port.on("message", (message: HostMessage) => {
     if (message.type !== "call") return;
     queue = queue.then(async () => {
-      const access: Access = { scope: message.scope, assertCurrent() {
+      const access: Access = { scope: message.scope, agentId: message.agentId, assertCurrent() {
         Atomics.store(signal, 0, 0);
         port.postMessage({ type: "assert", id: message.id } satisfies WorkerMessage);
         if (Atomics.wait(signal, 0, 0, 120_000) === "timed-out") throw Error("Knowledge authority check timed out.");

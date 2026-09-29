@@ -2,7 +2,8 @@ import { DatabaseSync } from "node:sqlite";
 import { constants, closeSync, fsyncSync, lstatSync, openSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { Check } from "typebox/value";
-import { Manifest, type IdentityStore } from "./real-vault.js";
+import { Manifest } from "./store-manifest.js";
+import type { IdentityStore } from "./real-vault.js";
 
 const APPLICATION_ID = 0x4b4e4f57; // KNOW; separate plugin-owned database, never the host DB.
 const unavailable = () => Error("Knowledge identity checkpoint unavailable; preserve the database and resolve recovery before reading.");
@@ -34,7 +35,7 @@ export class SqliteIdentityStore implements IdentityStore {
         const parent = openSync(path.dirname(this.filename), constants.O_RDONLY);
         try { fsyncSync(parent); } finally { closeSync(parent); }
       }
-      if (db.prepare("PRAGMA application_id").get()?.application_id !== APPLICATION_ID || ![1, 2, 3, 4].includes(Number(db.prepare("PRAGMA user_version").get()?.user_version))) throw unavailable();
+      if (db.prepare("PRAGMA application_id").get()?.application_id !== APPLICATION_ID || ![1, 2, 3, 4, 5].includes(Number(db.prepare("PRAGMA user_version").get()?.user_version))) throw unavailable();
       if (db.prepare("PRAGMA user_version").get()?.user_version === 1) db.exec(`BEGIN IMMEDIATE;
         CREATE TABLE IF NOT EXISTS mutations (
           scope TEXT NOT NULL, request TEXT NOT NULL, intent TEXT NOT NULL,
@@ -71,6 +72,11 @@ export class SqliteIdentityStore implements IdentityStore {
           PRIMARY KEY(scope,request,offset)
         ) STRICT;
         PRAGMA user_version=4; COMMIT;`);
+      // Writer attribution: the agent that published a revision. Stores are
+      // shared, so the partition no longer implies the author.
+      if (db.prepare("PRAGMA user_version").get()?.user_version === 4) db.exec(`BEGIN IMMEDIATE;
+        ALTER TABLE history ADD COLUMN agent_id TEXT;
+        PRAGMA user_version=5; COMMIT;`);
       // Additive indexes remain readable by older plugin versions. The activity
       // projection joins exact publication snapshots to history; without this
       // key every published record scans the entire history table again.
