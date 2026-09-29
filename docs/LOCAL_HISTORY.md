@@ -8,7 +8,7 @@ GitHub, repository hosting, remote configuration, fetch/pull/push, and synchroni
 
 ## One storage owner
 
-`KnowledgeStorage` owns the configured vault's reads, observations, publication journal, SQLite adapter and Git adapter. Feature handlers only authorize and delegate. Short-lived SQLite connections remain encapsulated in this stateful service; durable work survives service replacement.
+`KnowledgeStorage` owns one store's reads, observations, publication journal, SQLite adapter and Git adapter. Feature handlers only authorize and delegate. Short-lived SQLite connections remain encapsulated in this stateful service; durable work survives service replacement.
 
 A publication follows:
 

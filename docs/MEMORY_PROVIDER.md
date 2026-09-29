@@ -99,11 +99,17 @@ child run. Grep and lookup expose the returned page's `resultCount`, so Active
 Memory distinguishes an empty result from a result that can ground a summary,
 including an empty page after earlier matches.
 
-Operator reads require a current host capability, connection ID, read/write/admin
-scope, configured agent, and `operatorRead`. Session reads consume the
-host-resolved audience on the provider authority. An `owner-private` audience
-maps to agent-private records; a `conversation` audience maps to its exact
-session UUID partition. Native tools consume `memoryAudience` from their tool
+Every provider call resolves the requested agent's effective store through the
+same resolver as native tools, so an agent's provider and tools share one store
+runtime. Operator reads require a current host capability, connection ID,
+read/write/admin scope and `operatorRead`; they never create a store. Session
+reads consume the host-resolved audience on the provider authority, and only an
+agent session's own search or read may create its never-provisioned store. An
+`owner-private` audience maps to the store's private partition; a
+`conversation` audience maps to its exact session UUID partition. References
+carry their store identity (`revision@vaultId`), and search cursors bind to
+store and partition, so a reference or cursor from a former store is rejected
+instead of matching a coincidental ID elsewhere. Native tools consume `memoryAudience` from their tool
 context. Knowledge does not read session entries, infer owner status, or walk
 spawn lineage. OpenClaw owns those decisions, gives spawned children their
 validated root audience, and revokes stale lineage through the audience currency

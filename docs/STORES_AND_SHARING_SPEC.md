@@ -384,11 +384,14 @@ the same validate/fence/reconcile path completes in-process. Invalid external
 membership, such as a duplicate agent, keeps affected agents unavailable and is
 reported through `stores_snapshot`. It never falls back to first match.
 
-Host preflight gate: the foundation phase must show that `config.current()`
-reflects a no-op-classified write by the time `mutateConfigFile` resolves. If
-it does not, the transaction reconciles from the `nextConfig` returned by
-`mutateConfigFile`. Resolution then treats the journaled next revision as
-current until `config.current()` catches up. It does not poll or delay.
+Host preflight result (isolated Gateway, 2026-09-28): a stores-only write with
+`noopPrefixes` causes no plugin stop or replacement, and `config.current()` is
+**not** yet updated when `mutateConfigFile` resolves (it follows about a second
+later). Knowledge therefore enforces the registry's reconciled section, keeps
+the previous revision as expected lag in memory, and confirms it against the
+persisted file (read under the config lock by aborting inside `mutate`) before
+ignoring it. It does not poll or delay. A pending change is settled against the
+persisted file, never `config.current()`.
 
 ## 8. Native UI and flows
 

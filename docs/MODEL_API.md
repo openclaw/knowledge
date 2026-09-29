@@ -5,6 +5,15 @@ presentation choices, not alternate authority or storage paths. All options belo
 are live service inputs once the rebuilt plugin is loaded. Existing callers must
 opt into fields that used to be returned unconditionally.
 
+## Stores
+
+Every tool acts on the calling agent's effective knowledge store: its own store,
+or a named store it is assigned to. Tools take no store, agent, path or scope
+argument, and the store is resolved from the host-minted audience on every call.
+A never-used store is created on the agent's first knowledge operation. Store
+assignment (`stores_*`) and the operator viewing proxy (`agent_query`,
+`agent_action`) are operator operations, not tools.
+
 ## Ontology: discover, then inspect
 
 | Task | Input to `knowledge_ontology` | Output |

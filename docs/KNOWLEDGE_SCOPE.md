@@ -248,3 +248,15 @@ Implemented local composition, the reviewed gbrain-based default, shared resolve
 ## Real-vault read foundation milestone — 2026-09-22
 
 Implemented one configured agent vault, trusted private/conversation read access, guarded filesystem reads, and a durable SQLite identity checkpoint. See [REAL_VAULT.md](REAL_VAULT.md) for the implemented contract and limitations. Writes remain disabled. Next is Slice 2: shared UI/agent create/edit with journaled publication, revision/hash conflicts, retry-safe receipts/history, and retained text evidence. Ingestion follows the writable foundation.
+
+## Stores and sharing — 2026-09-28
+
+Implemented per-agent isolated stores with lazy, resumable provisioning; named
+shared stores declared by configuration membership; a store registry; one
+runtime per physical store with fencing on assignment changes; operator-only
+assignment operations with a journaled, revision-checked config write that does
+not reload the plugin; Settings (Stores & sharing, Vocabulary, Vault status),
+an agent viewing selector and assignment dialogs; and a resumable one-time
+conversion of the single-vault installation. See
+[STORES_AND_SHARING_SPEC.md](STORES_AND_SHARING_SPEC.md). Live activation on the
+running Gateway is a separate, approved step.
