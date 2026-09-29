@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
-import { closeSync, constants, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, writeSync } from "node:fs";
+import { closeSync, constants, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, writeSync } from "node:fs";
 import path from "node:path";
 import { Check } from "typebox/value";
 import { Manifest, checkpointKey } from "./store-manifest.js";
@@ -36,10 +36,14 @@ export const registryPaths = (stateRoot: string) => ({ registry: path.join(state
  * SQLite plus filesystem work and never runs on the Gateway main thread. */
 export class StoreRegistry {
   private readonly db: DatabaseSync;
+  /** Canonical state root: store paths are recorded without symlinks, which
+   * the operational database's link guard would otherwise reject. */
+  readonly stateRoot: string;
   /** `converting` is only for the conversion tool, which owns an unfinished journal. */
-  constructor(readonly stateRoot: string, options: { converting?: boolean } = {}) {
-    const { registry, stores, sentinel } = registryPaths(stateRoot);
+  constructor(stateRoot: string, options: { converting?: boolean } = {}) {
     mkdirSync(stateRoot, { recursive: true, mode: 0o700 });
+    this.stateRoot = stateRoot = realpathSync(stateRoot);
+    const { registry, stores, sentinel } = registryPaths(stateRoot);
     // Adopted stores live outside stores/, so a missing or emptied registry is
     // detected through the sentinel written when the registry was created.
     const hadRegistry = isFile(registry) && lstatSync(registry).size > 0;

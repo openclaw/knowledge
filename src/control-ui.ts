@@ -9,6 +9,8 @@ import { confidenceView, identityTag, assertionOrigin as origin, agentDisplayNam
 import { formatSourceDate, sourceDateNote } from "./temporal.js";
 import { captureReadingState } from "./reading-state.js";
 import { markdownView } from "./markdown-view.js";
+import { viewingClient } from "./store-view-client.js";
+import { accessText, settingsShell, storeBar, storeDialog, storeLabel, storeNotice, storeOf, storesSection, vaultFacts, type SettingsSection } from "./stores-view.js";
 import "./control-ui.css";
 
 type Summary = FeatureOutput<typeof contract, "records">["records"][number];
@@ -52,12 +54,20 @@ export default defineControlUiPlugin({
   activate(host) {
     const removeNavigation = host.ui.registerNavigation({ id: "knowledge", label: "Knowledge", page: { id: "overview" }, icon: "book" });
     const removePage = host.ui.registerPage({ id: "overview", label: "Knowledge", mount(container, context) {
-      const feature = createFeatureClient(contract, context.host);
+      const base = createFeatureClient(contract, context.host);
+      // Store settings and the viewing selector. Every other call goes through
+      // `feature`, which reads as the selected agent's effective store.
+      type StoresSnapshot = FeatureOutput<typeof contract, "stores_snapshot">;
+      let storesSnapshot: StoresSnapshot | undefined, viewing: string | undefined, settingsSection: SettingsSection = "stores";
+      let storeState: FeatureOutput<typeof contract, "status">["store"] = "ready", storeMessage: string | undefined;
+      const feature = viewingClient(base, () => ({ agent: viewing, defaultAgent: storesSnapshot?.defaultAgent }));
       const root = el("section", undefined, "knowledge-page"), header = el("header", undefined, "knowledge-header"), title = el("div"), actions = el("div", undefined, "knowledge-actions");
       const subtitle = el("p"); title.append(el("h1", "Knowledge"), subtitle);
       const status = el("span", "Connecting…", "knowledge-status"); status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
-      const vocabularyButton = button("", () => navigate("ontology"), "knowledge-icon-button"); vocabularyButton.setAttribute("aria-label", "Vocabulary"); vocabularyButton.title = "Ontology & vault settings"; vocabularyButton.append(icon("book"));
-      actions.append(status, vocabularyButton);
+      const settingsButton = button("", () => openSettings("stores"), "knowledge-icon-button"); settingsButton.setAttribute("aria-label", "Settings"); settingsButton.title = "Stores, vocabulary and vault status"; settingsButton.append(icon("settings"));
+      actions.append(status, settingsButton);
+      const storeContext = el("div", undefined, "knowledge-store-slot"); title.append(storeContext);
+      const announcer = el("p", "", "knowledge-visually-hidden"); announcer.setAttribute("role", "status"); announcer.setAttribute("aria-live", "polite");
       const nav = el("nav", undefined, "knowledge-tabs"); nav.setAttribute("aria-label", "Knowledge views");
       // These are text navigation tabs, not host .btn controls. Theme-specific
       // .btn rules otherwise reintroduce filled backgrounds in light mode.
@@ -67,7 +77,7 @@ export default defineControlUiPlugin({
       const body = el("div", undefined, "knowledge-page-body"); const loading = el("div", "", "knowledge-loading knowledge-muted"); loading.hidden = true; loading.setAttribute("role", "status"); loading.setAttribute("aria-live", "polite");
       body.append(banner, toolbar, loading, content);
       root.append(header, body); container.append(root);
-      let tab: "recent" | "browse" | "search" | "ontology" | "diagnostics" = "recent", selectedId = "", query = "", kind: "page" | "claim" | "relationship" = "page", type = "", offset = 0;
+      let tab: "recent" | "browse" | "search" | "settings" = "recent", selectedId = "", query = "", kind: "page" | "claim" | "relationship" = "page", type = "", offset = 0;
       type RecentCursor = { upperSequence: number; beforeSequence: number } | undefined;
       let recentCursor: RecentCursor;
       let includeHistory = false, browseQuery = "", originFilter = "";
@@ -75,26 +85,98 @@ export default defineControlUiPlugin({
       const updates = button("", () => { updates.hidden = true; void load(true).then(ok => { if (ok) { snapshot = pendingSnapshot; pendingSnapshot = undefined; } }); }, "knowledge-new-saves"); updates.hidden = true; toolbar.after(updates);
       const recentBack: RecentCursor[] = [];
       const recentExpanded = new Set<number | string>();
-      let generation = 0, statusGeneration = 0, disposed = false, identity = "", vaultChanged = false, agentId = "";
+      let generation = 0, statusGeneration = 0, disposed = false, identity = "", agentId = "";
       const agentName = (id = agentId) => agentDisplayName(id, context.host.agents.rows);
       const askLabel = () => `Ask ${agentName() ?? "your agent"}`;
       const searchPlaceholder = () => `Find a person, project, or anything ${agentName() ?? "your agent"} saved…`;
       // Header copy names the configured agent; rerun when its identity or name changes.
-      const renderAgentCopy = () => { subtitle.textContent = `What ${agentName() ?? "your agent"} has saved, and where it came from.`; const input = root.querySelector<HTMLInputElement>(".knowledge-search:not(.knowledge-search-compact) input"); if (input) input.placeholder = searchPlaceholder(); };
+      const renderAgentCopy = () => { subtitle.textContent = storesSnapshot && storeOf(storesSnapshot, viewedAgent())?.kind === "named" ? "Knowledge saved here, and where it came from." : `What ${agentName() ?? "your agent"} has saved, and where it came from.`; const input = root.querySelector<HTMLInputElement>(".knowledge-search:not(.knowledge-search-compact) input"); if (input) input.placeholder = searchPlaceholder(); };
       let searchSnapshot: string | null | undefined;
       let displayGeneration = 0, viewReady = false, snapshot: string | undefined;
       let staging: HTMLElement | undefined;
       let loadingGeneration = 0, displayView = "", displayScreen = "";
-      const viewKey = () => JSON.stringify([tab, selectedId, kind, type, offset, includeHistory, browseQuery, originFilter, query, recentCursor]);
+      const viewKey = () => JSON.stringify([viewing, storeState, tab, settingsSection, selectedId, kind, type, offset, includeHistory, browseQuery, originFilter, query, recentCursor]);
       let connectionPages = 1;
       const evidenceLoaders = new WeakMap<HTMLDetailsElement, () => Promise<void>>();
       let timer: ReturnType<typeof setTimeout> | undefined, suggestGeneration = 0;
       let vocabulary: Awaited<ReturnType<typeof loadVocabulary>> | undefined;
-      const live = (n: number) => !disposed && !context.signal.aborted && !vaultChanged && (n === generation || n === displayGeneration) && context.host.connection.connected;
+      const live = (n: number) => !disposed && !context.signal.aborted && (n === generation || n === displayGeneration) && context.host.connection.connected;
       const errorText = (error: unknown) => context.host.redact(error instanceof Error ? error.message : String(error));
       const failure = (error: unknown) => el("p", errorText(error), "knowledge-error");
       const empty = (heading: string, text: string) => { const n = el("div", undefined, "knowledge-empty"); n.append(el("h2", heading), el("p", text)); return n; };
       function navigate(next: typeof tab) { updates.hidden = true; pendingSnapshot = undefined; tab = next; selectedId = ""; offset = 0; recentCursor = undefined; recentBack.length = 0; renderToolbar(); void load(); }
+      /** Host roster names first; agent IDs are never shown when a name exists. */
+      const displayName = (id: string) => agentDisplayName(id, context.host.agents.rows) ?? storesSnapshot?.agents.find(a => a.id === id)?.name ?? id;
+      const viewedAgent = () => viewing ?? storesSnapshot?.defaultAgent ?? agentId;
+      const announce = (text: string) => { announcer.textContent = ""; announcer.textContent = text; };
+      function openSettings(section: SettingsSection) { settingsSection = section; navigate("settings"); }
+      function renderStoreContext() {
+        storeContext.replaceChildren();
+        if (storesSnapshot?.agents.length) storeContext.append(storeBar(storesSnapshot, viewedAgent(), displayName, selectAgent, () => openSettings("stores")));
+        renderAgentCopy();
+      }
+      /** Switch the viewed agent. Store-bound state resets; nothing is provisioned. */
+      function selectAgent(agent: string) {
+        if (agent === viewedAgent()) return;
+        viewing = agent; identity = ""; snapshot = undefined; ++generation; ++suggestGeneration; viewReady = false; vocabulary = undefined;
+        root.querySelector(".knowledge-chat-handoff")?.remove(); content.replaceChildren();
+        const entry = storesSnapshot && storeOf(storesSnapshot, agent);
+        announce(`Viewing ${displayName(agent)}’s knowledge${entry ? `: ${storeLabel(entry, displayName)}` : ""}.`);
+        renderStoreContext(); tab = tab === "settings" ? "settings" : "recent"; selectedId = ""; offset = 0; recentCursor = undefined; recentBack.length = 0; renderToolbar();
+        void refresh();
+      }
+      // After an applied assignment, refresh facts; reset the reading view if the viewed store moved.
+      function assignmentApplied(result: FeatureOutput<typeof contract, "stores_change">, agent: string) {
+        if (!result.snapshot) return;
+        const before = storesSnapshot && storeOf(storesSnapshot, viewedAgent())?.binding;
+        storesSnapshot = result.snapshot; renderStoreContext();
+        const entry = storeOf(result.snapshot, agent);
+        if (result.outcome === "applied") announce(`${displayName(agent)} now uses ${entry ? storeLabel(entry, displayName) : "a different store"}.`);
+        if (before !== storeOf(result.snapshot, viewedAgent())?.binding) { identity = ""; snapshot = undefined; vocabulary = undefined; }
+        if (tab === "settings") void load(true);
+        void refresh();
+      }
+      async function settings(n: number, target: HTMLElement) {
+        const agent = viewedAgent(), who = displayName(agent), entry = storesSnapshot && storeOf(storesSnapshot, agent);
+        const heading: Record<SettingsSection, [string, string]> = {
+          stores: ["Stores & sharing", "Each agent gets its own knowledge store unless you assign it to a shared one."],
+          vocab: ["Vocabulary", `The kinds of pages and connections ${who} can save${entry ? ` in ${storeLabel(entry, displayName)}` : ""}.`],
+          status: ["Vault status", entry ? `Showing ${storeLabel(entry, displayName)}, the store ${who} uses.` : `Showing ${who}’s store.`],
+        };
+        const shell = settingsShell(settingsSection, section => { settingsSection = section; void load(); }, () => navigate("recent"), heading[settingsSection]);
+        if (settingsSection === "stores") {
+          storesSnapshot = await base.invoke("stores_snapshot", {}); if (!live(n)) return; renderStoreContext();
+          shell.slot.append(storesSection(storesSnapshot, agent, displayName, (changing, mode) => {
+            storeDialog(mode, changing, storesSnapshot!, displayName,
+              change => base.invoke("stores_change", { requestId: crypto.randomUUID(), expectedRevision: storesSnapshot!.revision, agent: changing, change }),
+              result => assignmentApplied(result, changing));
+          }));
+        } else if (storeState !== "ready") {
+          shell.slot.append(storeNotice(entry, storeState, storeMessage, who, displayName, () => openSettings("stores"), () => void refresh()));
+        } else if (settingsSection === "vocab") {
+          const result = await loadVocabulary(feature, true); if (!live(n)) return;
+          shell.slot.append(ontologyView(result, open, () => openSettings("status")));
+        } else {
+          const [report, findings, history] = await Promise.all([feature.invoke("status", {}), feature.invoke("diagnostics", {}), feature.invoke("history", { limit: 1 })]); if (!live(n)) return;
+          const facts: [string, string | Node][] = [
+            ["Store", entry ? `${storeLabel(entry, displayName)} · ${entry.kind === "named" ? "shared store" : "own store"}` : "Unknown"],
+            ["Used by", entry?.members.length ? entry.members.map(displayName).join(", ") : "No agents"],
+            ["Access", `${entry ? accessText(entry, agent, displayName) + ". " : ""}Read and update from owner-direct conversations. Group chats see only their own conversation’s knowledge.`],
+            ["Changes", `Made by ${entry?.members.length ? entry.members.map(displayName).join(", ") : who} in chat. These pages only read.`],
+            ["Live", `${report.live === "watching" ? "Watching for changes" : report.live === "unavailable" ? "Change watching unavailable" : "Not watching"} · checked ${time(report.checkedAt)}`],
+            ["Records", `${report.records.toLocaleString()} current`],
+            ["Checks", report.issues ? `${report.issues} finding${report.issues === 1 ? "" : "s"}` : "All pass"],
+            ["Vocabulary", report.ontologyAvailable ? `${report.definitions} definitions · ${report.ontologyFingerprint.slice(0, 12)}` : "Unavailable"],
+            ["Local history", `${label(history.git.state)} · ${history.git.pending ? `${history.git.pending} waiting` : "nothing waiting"}`],
+          ];
+          shell.slot.append(vaultFacts(facts));
+          const list = el("section", undefined, "knowledge-findings"); list.append(el("h3", `Findings · ${findings.total}`, "knowledge-eyebrow"));
+          if (!findings.total) list.append(el("p", `No findings. Checked ${time(findings.checkedAt)}.`, "knowledge-muted"));
+          for (const issue of findings.issues) list.append(el("p", `${human(issue.code)} · ${issue.path}: ${issue.message}`));
+          shell.slot.append(list);
+        }
+        target.replaceChildren(shell.root, announcer);
+      }
       function open(id: string) { updates.hidden = true; pendingSnapshot = undefined; selectedId = id; renderToolbar(); void load(); }
       function ask(record: Pick<NonNullable<Detail["record"]>, "id" | "title" | "kind" | "revision" | "hash">, correct = false, candidate?: { id: string; title: string }) {
         root.querySelector(".knowledge-chat-handoff")?.remove();
@@ -120,7 +202,8 @@ export default defineControlUiPlugin({
       function renderToolbar() {
         recentTab.setAttribute("aria-pressed", String(!selectedId && tab === "recent")); browseTab.setAttribute("aria-pressed", String(!selectedId && tab === "browse"));
         toolbar.replaceChildren(); ++suggestGeneration; clearTimeout(timer);
-        if (selectedId || tab === "ontology" || tab === "diagnostics" || tab === "browse") return;
+        // Nothing to search until the viewed store is ready.
+        if (selectedId || tab === "settings" || tab === "browse" || storeState !== "ready") return;
         toolbar.append(searchForm());
       }
       function searchForm(compact = false) {
@@ -184,7 +267,7 @@ export default defineControlUiPlugin({
         disclosure.append(el("span", `Evidence · ${result.evidenceSourceTotal ?? "?"} ${result.evidenceSourceTotal === 1 ? "file" : "files"} · ${result.evidenceTotal ?? 0} ${result.evidenceTotal === 1 ? "citation" : "citations"}`, "knowledge-sr-only"), icon("chevronDown", 14));
         disclosure.title = "Show evidence and correction options"; evidence.open = standalone; evidence.append(disclosure);
         const evidenceBody = el("div"); evidence.append(evidenceBody);
-        const alive = () => !disposed && !vaultChanged && !context.signal.aborted && context.host.connection.connected && (card.isConnected || (live(n) && Boolean(staging?.contains(card))));
+        const alive = () => !disposed && !context.signal.aborted && context.host.connection.connected && (card.isConnected || (live(n) && Boolean(staging?.contains(card))));
         const showEvidence = (loaded: Detail) => {
           evidenceBody.replaceChildren();
           const details = el("dl", undefined, "knowledge-claim-details"), m = loaded.record?.metadata;
@@ -337,7 +420,7 @@ export default defineControlUiPlugin({
         const technical = el("details", undefined, "knowledge-technical-details"); technical.append(el("summary", "Technical metadata"), el("p", `Lifecycle: ${r.lifecycle}`), el("code", `SHA-256: ${r.hash}`), rawBlock("Structured metadata", JSON.stringify(meta, null, 2)));
         const raw = button("View Markdown", () => {
           raw.disabled = true; let next = 0; const text = el("pre"); const more = button("Read more Markdown", () => { void read(); });
-          async function read() { more.disabled = true; try { const page = await feature.invoke("record", { id, view: "raw", offset: next, maxChars: 65536 }); if (disposed || vaultChanged || !filePanel.isConnected || !context.host.connection.connected) return; if (page.record?.hash !== r.hash) throw Error("Record changed; reopen it to read the current Markdown."); text.textContent += page.record.raw ?? ""; if (page.content.nextOffset === null) more.remove(); else { next = page.content.nextOffset; more.disabled = false; } } catch (error) { filePanel.append(failure(error)); more.disabled = false; } }
+          async function read() { more.disabled = true; try { const page = await feature.invoke("record", { id, view: "raw", offset: next, maxChars: 65536 }); if (disposed || !filePanel.isConnected || !context.host.connection.connected) return; if (page.record?.hash !== r.hash) throw Error("Record changed; reopen it to read the current Markdown."); text.textContent += page.record.raw ?? ""; if (page.content.nextOffset === null) more.remove(); else { next = page.content.nextOffset; more.disabled = false; } } catch (error) { filePanel.append(failure(error)); more.disabled = false; } }
           filePanel.append(text, more); void read();
         }); raw.prepend(icon("fileText", 14));
         const historyList = el("div", undefined, "knowledge-history-list"); historyList.hidden = true;
@@ -653,7 +736,7 @@ export default defineControlUiPlugin({
         feed.append(pages); target.replaceChildren(feed);
       }
       async function load(background = false): Promise<boolean> {
-        if (vaultChanged || disposed) return false;
+        if (disposed) return false;
         const n = ++generation, nextView = viewKey(), nextScreen = JSON.stringify([tab, selectedId]);
         if (!context.host.connection.connected) { void refresh(); return false; }
         if (!background) connectionPages = 1;
@@ -666,11 +749,12 @@ export default defineControlUiPlugin({
         }
         try {
           await (async () => {
+          if (tab === "settings") return await settings(n, target);
+          // A store that isn't ready has nothing to read; say why instead.
+          if (storeState !== "ready") { target.replaceChildren(storeNotice(storesSnapshot && viewedAgent() ? storeOf(storesSnapshot, viewedAgent()) : undefined, storeState, storeMessage, agentName() ?? "your agent", displayName, () => openSettings("stores"), () => void refresh())); return; }
           if (selectedId) return await showDetail(selectedId, n, target, connectionPages, background);
           if (tab === "recent") return await recent(n, target);
           if (tab === "browse") return await browse(n, target);
-          if (tab === "ontology") { const result = await loadVocabulary(feature, true); if (live(n)) target.replaceChildren(button("← Knowledge", () => navigate("recent"), "knowledge-quiet"), button("Vault status", () => navigate("diagnostics"), "knowledge-quiet"), ontologyView(result, open, () => navigate("diagnostics"))); return; }
-          if (tab === "diagnostics") { const result = await feature.invoke("diagnostics", {}); if (!live(n)) return; const panel = empty("Vault status", `${result.total} validation findings. Knowledge changes happen through your agent in chat.`); for (const issue of result.issues) panel.append(el("p", `${human(issue.code)} · ${issue.path}: ${issue.message}`)); target.replaceChildren(panel); return; }
           if (!query.trim()) { target.replaceChildren(empty("Search knowledge", "Enter a name or a few words to search all saved text.")); return; }
           const result = await feature.invoke("grep", { query: query.trim(), limit: 20, offset }); if (!live(n)) return;
           if (result.index.state !== "ready") { target.replaceChildren(empty("Search unavailable", result.index.message)); return; }
@@ -718,20 +802,33 @@ export default defineControlUiPlugin({
       }
       let refreshing = false, refreshAgain = false;
       async function refresh() {
-        if (vaultChanged || disposed) return;
+        if (disposed) return;
         if (!context.host.connection.connected) { ++statusGeneration; status.textContent = viewReady ? "Reconnecting…" : "Offline"; status.hidden = false; banner.hidden = false; banner.textContent = `Can’t reach the vault. ${viewReady ? `Showing the last readable view, checked at ${lastChecked ? time(lastChecked) : "an unknown time"}. Retrying.` : "Reconnect to read your agent’s knowledge."}`; return; }
         if (refreshing) { refreshAgain = true; return; }
         refreshing = true;
         const n = ++statusGeneration, observedGeneration = generation;
         try {
-          const report = await feature.invoke("status", {}); if (disposed || n !== statusGeneration || !context.host.connection.connected) return;
+          const [report, stores] = await Promise.all([feature.invoke("status", {}), base.invoke("stores_snapshot", {}).catch(() => undefined)]);
+          if (disposed || n !== statusGeneration || !context.host.connection.connected) return;
+          if (stores) { storesSnapshot = stores; renderStoreContext(); }
           const nextIdentity = JSON.stringify([report.agent, report.vault, report.scope]);
-          if (identity && identity !== nextIdentity) { vaultChanged = true; ++generation; ++suggestGeneration; toolbar.replaceChildren(); root.querySelector(".knowledge-chat-handoff")?.remove(); status.textContent = "Vault changed"; status.hidden = false; content.replaceChildren(empty("Vault changed", "Reload this page to open the newly connected vault.")); return; }
-          identity = nextIdentity; agentId = report.agent; renderAgentCopy();
+          if (identity && identity !== nextIdentity) {
+            // The viewed agent's store changed (an assignment or recovery). Never
+            // show one store's content under another's label: reset store-bound
+            // navigation and say what happened.
+            ++generation; ++suggestGeneration; root.querySelector(".knowledge-chat-handoff")?.remove();
+            selectedId = ""; if (tab !== "settings") tab = "recent"; offset = 0; recentCursor = undefined; recentBack.length = 0; snapshot = undefined; viewReady = false; vocabulary = undefined; content.replaceChildren(); renderToolbar();
+            const entry = storesSnapshot && storeOf(storesSnapshot, report.agent);
+            announce(`${displayName(report.agent)}’s knowledge store changed${entry ? ` to ${storeLabel(entry, displayName)}` : ""}. Showing it now.`);
+          }
+          const stateChanged = storeState !== report.store;
+          identity = nextIdentity; agentId = report.agent; storeState = report.store; storeMessage = report.message; renderAgentCopy();
+          if (stateChanged) renderToolbar();
           lastChecked = new Date().toISOString();
           status.textContent = ""; status.hidden = true;
           banner.hidden = true; banner.textContent = "";
           if (loadingGeneration || (viewReady && displayView === viewKey() && report.snapshot && snapshot === report.snapshot)) return;
+          if (storeState !== "ready") { browseTab.replaceChildren(document.createTextNode("Browse")); if (!viewReady || displayView !== viewKey()) await load(); return; }
           vocabulary = await loadVocabulary(feature); if (disposed || n !== statusGeneration) return;
           const pageCount = vocabulary.definitions.reduce((sum, d) => sum + d.recordCount, 0);
           const countBadge = el("span", pageCount.toLocaleString(), "knowledge-tab-count"); countBadge.setAttribute("aria-hidden", "true"); browseTab.replaceChildren(document.createTextNode("Browse"), countBadge);
@@ -751,7 +848,7 @@ export default defineControlUiPlugin({
       let names = rosterKey();
       const unsubscribe = context.host.subscribe(() => {
         const nextNames = rosterKey(), namesChanged = names !== nextNames; names = nextNames; if (namesChanged) renderAgentCopy();
-        if (namesChanged && viewReady && connected && !vaultChanged) { root.querySelector(".knowledge-chat-handoff")?.remove(); void load(true); }
+        if (namesChanged && viewReady && connected) { root.querySelector(".knowledge-chat-handoff")?.remove(); void load(true); }
         if (connected !== context.host.connection.connected) { connected = context.host.connection.connected; ++suggestGeneration; toolbar.querySelector(".knowledge-suggestions")?.replaceChildren(); void refresh(); }
       });
       const unwatch = feature.on("changed", () => void refresh());
