@@ -62,13 +62,24 @@ fences retained leases; reload rollback can resume the drained old runtime.
   plus up to 20 retained-evidence locators. The shared API is a projection, not
   a lossless replacement for native evidence/metadata/relationship tools.
   Evidence locators describe retained artifacts, not lines in the rendered body.
-- Health reports scoped vault/ontology validation; it does not invent embedding
-  health or claim keyword-index readiness before a search.
+- Session and operator health reports scoped vault/ontology validation; it does
+  not invent embedding health or claim keyword-index readiness before a search.
+  Host authority opened with `purpose: "status"` receives a health-only handle:
+  readiness has a generic message and no record counts, scope, IDs, or paths.
+  Doctor and CLI status use this handle. Storage failures report `unavailable`
+  without exposing their error details; caller and lease revocation still reject.
 
 The handle declares `{ sources: ["memory"], pagination: true, candidates: [],
 projectFilter: false }`. The host rejects undeclared sources, project filters,
 and candidate kinds before dispatch. Search cursors are supported; automatic
-trigger/project selection is not.
+trigger/project selection remains unavailable until curated recall is implemented.
+
+The memory capability declares `knowledge_grep`, `knowledge_lookup`, and
+`knowledge_record` in `recallToolNames`. Active Memory defaults deep recall to
+these tools and passes the parent turn's host-minted `MemoryAudience` to the
+child run. Grep and lookup expose the returned page's `resultCount`, so Active
+Memory distinguishes an empty result from a result that can ground a summary,
+including an empty page after earlier matches.
 
 Operator reads require a current host capability, connection ID, read/write/admin
 scope, configured agent, and `operatorRead`. Session reads consume the
@@ -78,9 +89,9 @@ session UUID partition. Native tools consume `memoryAudience` from their tool
 context. Knowledge does not read session entries, infer owner status, or walk
 spawn lineage. OpenClaw owns those decisions, gives spawned children their
 validated root audience, and revokes stale lineage through the audience currency
-assertion. Missing and foreign audiences, host/background calls, and sandboxed
-provider calls are denied. Some host consumers lack sufficient authority;
-registering the provider runtime does not make those consumers work automatically.
+assertion. Missing and foreign audiences and sandboxed provider calls are denied.
+Host authority can open only with `purpose: "status"`; its handle denies search
+and get. Every other host-purpose combination is denied at open.
 
 ## Prompt and lifecycle boundaries
 
@@ -92,10 +103,11 @@ mode is explicit. The host exposes tools but no enabled-skill inventory, so skil
 references are conditional on availability and associated tools, not a guarantee
 that disabled skills were delivered.
 
-No trigger/project candidates or automatic-injection eligibility are advertised.
-Keyword search is not a trusted-instruction selection mechanism. No pre-compaction
-save plan is supplied; an explicit null resolver prevents a Memory Core sidecar
-from donating its file flush plan. Workspace bootstrap files, reset hooks,
+Trigger/project candidates and automatic-injection eligibility remain unavailable
+until curated recall is implemented. Keyword search is not a trusted-instruction
+selection mechanism. No pre-compaction save plan is supplied; an explicit null
+resolver prevents a Memory Core sidecar from donating its file flush plan.
+Workspace bootstrap files, reset hooks,
 consolidation/dreaming, standing intents, standard Memory Core tools/CLI, and
 file-oriented Memory UI are not replaced by this adapter. The Knowledge UI and
 native Knowledge tools remain the rich inspection/mutation surfaces.

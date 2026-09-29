@@ -26,7 +26,7 @@ async function fixture(t, overrides = {}) {
   const audience = { kind: 'owner-private', agentId: 'main' };
   const context = { authority: { kind: 'session', sessionKey: 'agent:main:test', sessionId, sandboxed: false, audience }, assertCurrent };
   const tool = { source: 'tool', api, tool: { agentId: 'main', memoryAudience: audience, assertInvocationCurrent: assertCurrent, assertMemoryAudienceCurrent: assertCurrent } };
-  const open = (ctx = context, agentId = 'main') => capability.providerRuntime.open({ cfg: {}, agentId, context: ctx });
+  const open = (ctx = context, agentId = 'main', purpose) => capability.providerRuntime.open({ cfg: {}, agentId, context: ctx, ...(purpose ? { purpose } : {}) });
   const save = (title, body = 'Evidence-backed durable note', ctx = tool) => service.save_page({ requestId: randomUUID(), expectedVaultId: vaultId, type: 'note', title, body }, ctx);
   return { api, service, services, open, save, tool, context, sessionId, vaultId, root, capability,
     revoke() { active = false; }, setAudience(value) { context.authority.audience = value; tool.tool.memoryAudience = value; } };
@@ -81,6 +81,43 @@ test('operator authorization and missing, foreign, host, and sandbox audience re
   await assert.rejects(f.open(f.context, 'other'), /authority/);
   await assert.rejects(f.open({ ...f.context, assertCurrent: undefined }), /authority/);
   const restricted = await fixture(t, { operatorRead: false }); await assert.rejects(restricted.open(operator), /authority/);
+});
+
+test('host status receives health only and every other host purpose is denied', async t => {
+  const f = await fixture(t); await f.save('Private status sentinel');
+  const host = { ...f.context, authority: { kind: 'host', operation: 'status' } };
+  const { provider } = await f.open(host, 'main', 'status');
+  const health = await provider.health();
+  assert.deepEqual(Object.keys(health).sort(), ['message', 'status']);
+  assert.equal(health.status, 'ready');
+  assert.doesNotMatch(JSON.stringify(health), /records|issues|scope|sentinel|private|knowledge-memory-/i);
+  await assert.rejects(provider.search({ query: 'sentinel' }), /authority/);
+  await assert.rejects(provider.get({ reference: { providerId: 'knowledge', id: 'recordid' } }), /authority/);
+  await provider.close();
+  await assert.rejects(provider.health(), /closed/);
+  for (const purpose of [undefined, 'default', 'cli']) await assert.rejects(f.open(host, 'main', purpose), /authority/);
+});
+
+test('host readiness redacts all states and storage errors while preserving lease fences', async () => {
+  const { createKnowledgeMemoryRuntime } = await import('../dist/memory-provider.js');
+  let facts = { ontology: true, issues: 0, records: 42 }, failure, active = true;
+  const storage = { config: { agentId: 'main', operatorRead: false }, async call(op) {
+    assert.equal(op, 'memoryHealth');
+    if (failure) throw failure;
+    return facts;
+  } };
+  const lane = { enqueue: operation => operation(), drain: async () => {}, fence: () => () => {} };
+  const context = { authority: { kind: 'host', operation: 'status' }, assertCurrent() { if (!active) throw Error('caller revoked'); } };
+  const { provider } = await createKnowledgeMemoryRuntime(storage, lane).open({ cfg: {}, agentId: 'main', purpose: 'status', context });
+  for (const [ontology, issues, status] of [[true, 0, 'ready'], [true, 1, 'degraded'], [false, 0, 'unavailable']]) {
+    facts = { ontology, issues, records: 42 };
+    assert.deepEqual(await provider.health(), { status, message: 'Knowledge vault readiness check.' });
+  }
+  failure = Error('Failed private/secret-record.md in vault-id partition-id');
+  assert.deepEqual(await provider.health(), { status: 'unavailable', message: 'Knowledge vault readiness unavailable.' });
+  active = false;
+  await assert.rejects(provider.health(), /caller revoked/);
+  await provider.close();
 });
 
 test('queued result release revalidates authority, cancellation and service incarnation', async t => {
@@ -158,10 +195,34 @@ test('sample is not memory; entry retains native tools and prompt honors missing
   let capability; const names = [], services = [];
   plugin.register({ id: 'knowledge', registerMemoryCapability(c) { capability = c; }, registerService(s) { services.push(s); }, registerSessionAction() {}, registerTool(_f, options) { names.push(options.name); } });
   assert.equal(names.length, Object.values(contract.operations).filter(o => o.tool).length);
-  assert.equal((await capability.providerRuntime.open({ cfg: {}, agentId: 'main', context: {} })).provider, null);
+  assert.deepEqual(capability.recallToolNames, ['knowledge_grep', 'knowledge_lookup', 'knowledge_record']);
+  assert.ok(capability.recallToolNames.every(name => names.includes(name)));
+  assert.equal((await capability.providerRuntime.open({ cfg: {}, agentId: 'main', purpose: 'status', context: { authority: { kind: 'host', operation: 'status' }, assertCurrent() {} } })).provider, null);
   assert.deepEqual(capability.promptBuilder({ availableTools: new Set(names) }), []);
   assert.equal(capability.flushPlanResolver({}), null);
   assert.deepEqual(buildKnowledgeMemoryPrompt({ availableTools: new Set() }), []);
+});
+
+test('grep and lookup expose empty and usable evidence for Active Memory', async t => {
+  const f = await fixture(t);
+  const factories = new Map();
+  plugin.register({ ...f.api, registerSessionAction() {}, registerTool(factory, options) { factories.set(options.name, factory); } });
+  // The feature adapter must expose the page count in both transcript details and JSON text.
+  const assertCount = async (name, input, count, total) => {
+    const tool = factories.get(name)(f.tool.tool), result = await tool.execute(randomUUID(), input);
+    for (const output of [result.details, JSON.parse(result.content[0].text)]) {
+      assert.equal(output.resultCount, count);
+      assert.equal(output.hits.length, count);
+      assert.equal(output.total, total);
+    }
+  };
+  await assertCount('knowledge_grep', { query: 'Orchid' }, 0, 0);
+  await assertCount('knowledge_lookup', { query: 'Orchid decision' }, 0, 0);
+  await f.save('Orchid decision');
+  await assertCount('knowledge_grep', { query: 'Orchid' }, 1, 1);
+  await assertCount('knowledge_lookup', { query: 'Orchid decision' }, 1, 1);
+  await assertCount('knowledge_grep', { query: 'Orchid', offset: 1 }, 0, 1);
+  await assertCount('knowledge_lookup', { query: 'Orchid decision', offset: 1 }, 0, 1);
 });
 
 test('prompt routes all workflows, obeys citation settings and omits disabled save guidance', async t => {

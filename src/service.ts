@@ -42,6 +42,7 @@ export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureE
         const openedEpoch = epoch;
         return () => { assertCurrent(); if (openedEpoch !== epoch) throw Error("Knowledge service was reloaded."); };
       } }),
+      recallToolNames: ["knowledge_grep", "knowledge_lookup", "knowledge_record"],
       promptBuilder: params => config && (!params.agentId || params.agentId === config.agentId)
         ? buildKnowledgeMemoryPrompt({ ...params, availableTools: config.writesEnabled ? params.availableTools : new Set([...params.availableTools].filter(t => !["knowledge_save_page", "knowledge_correct", "knowledge_withdraw"].includes(t))) }) : [],
       // A Memory Core sidecar must not donate its append-only file flush plan.

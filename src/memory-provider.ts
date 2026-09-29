@@ -22,10 +22,10 @@ const attribution = (origin?: string, who?: string) => `Origin: ${origin || "not
 export function createKnowledgeMemoryRuntime(storage: StorageClient | undefined, lane: MemoryServiceLane): MemoryProviderRuntime {
   let generation = 0, retiring = false;
   return {
-    async open({ agentId, context }) {
+    async open({ agentId, context, purpose }) {
       if (!storage) return { provider: null, error: "Knowledge memory requires a configured real vault; sample records are not memory." };
       const serviceFence = lane.fence(), openedGeneration = generation;
-      const access = authorizeMemoryAccess(context, storage.config.agentId, agentId, storage.config.operatorRead);
+      const access = authorizeMemoryAccess(context, storage.config.agentId, agentId, storage.config.operatorRead, purpose);
       let closed = false;
       const check = () => {
         serviceFence(); access.assertCurrent();
@@ -37,6 +37,7 @@ export function createKnowledgeMemoryRuntime(storage: StorageClient | undefined,
       return { provider: {
         capabilities: { sources: ["memory"], pagination: true, candidates: [], projectFilter: false },
         search: (request: MemorySearchRequest) => run(async () => {
+          access.assertContentAccess();
           if (request.sources && !request.sources.includes("memory")) throw Error("Knowledge does not search session transcripts; use conversation-history tools.");
           if (request.activeProjectKeys?.length) throw Error("Knowledge has no curated project-key selection capability.");
           const limit = integer(request.maxResults, 20, 50);
@@ -70,6 +71,7 @@ export function createKnowledgeMemoryRuntime(storage: StorageClient | undefined,
           };
         }),
         get: request => run(async () => {
+          access.assertContentAccess();
           if (request.reference.providerId !== "knowledge" || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{7,95}$/.test(request.reference.id) || request.reference.fragment !== undefined) throw Error("Invalid Knowledge record reference.");
           const from = integer(request.from, 1, 100000), count = integer(request.lines, 100, 200);
           const found = await storage.call("memoryGet", guarded, { id: request.reference.id, ...(request.reference.revision !== undefined ? { revision: request.reference.revision } : {}), from, count });
@@ -79,8 +81,17 @@ export function createKnowledgeMemoryRuntime(storage: StorageClient | undefined,
           return { status: "ok" as const, reference: ref, text: found.text, citations, from, lines: found.lines, truncated: nextFrom <= found.total, ...(nextFrom <= found.total ? { nextFrom } : {}) };
         }),
         health: () => run(async () => {
-          const facts = await storage.call("memoryHealth", guarded);
-          return { status: !facts.ontology ? "unavailable" as const : facts.issues ? "degraded" as const : "ready" as const,
+          let facts;
+          try { facts = await storage.call("memoryHealth", guarded); }
+          catch (error) {
+            if (!access.healthOnly) throw error;
+            // Preserve caller/lifecycle fencing while withholding storage error details.
+            check();
+            return { status: "unavailable" as const, message: "Knowledge vault readiness unavailable." };
+          }
+          const status = !facts.ontology ? "unavailable" as const : facts.issues ? "degraded" as const : "ready" as const;
+          if (access.healthOnly) return { status, message: "Knowledge vault readiness check." };
+          return { status,
             message: "Scoped vault validation; keyword index readiness is checked on search.",
             details: { records: facts.records, issues: facts.issues, retrieval: "keyword", index: "checked-on-search", scope: access.scope.visibility } };
         }),

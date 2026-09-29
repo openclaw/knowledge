@@ -27,7 +27,8 @@ const hit = Type.Object({
   evidence: Type.Array(locator, { maxItems: 3 }), evidenceTruncated: Type.Boolean(),
 });
 const common = {
-  hits: Type.Array(hit, { maxItems: 50 }), offset: Type.Integer(),
+  // Page-local evidence count understood by Active Memory's custom-tool result gate.
+  hits: Type.Array(hit, { maxItems: 50 }), resultCount: Type.Integer(), offset: Type.Integer(),
   nextOffset: Type.Union([Type.Integer(), Type.Null()]), checkedAt: text(40),
   coverage: Type.Object({ complete: Type.Boolean(), message: text(500) }),
 };

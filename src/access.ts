@@ -7,9 +7,19 @@ export type VaultAccess = { scope: Exclude<Scope, { visibility: "sample" }>; ass
 type Resolution = { scope: VaultAccess["scope"] };
 type MemoryAudience = NonNullable<Extract<MemoryCallerContext["authority"], { kind: "session" }>["audience"]>;
 
+/** Provider access distinguishes partition reads from host-only readiness checks. */
+export type MemoryAccess = VaultAccess & { healthOnly: boolean; assertContentAccess: () => void };
+
 function bindAccess(resolve: () => Resolution): VaultAccess {
   const initial = resolve(), identity = JSON.stringify(initial);
   return { scope: initial.scope, assertCurrent() { if (JSON.stringify(resolve()) !== identity) throw denied(); } };
+}
+
+// Fence both the partition and the health-only restriction for the lease lifetime.
+function bindMemoryAccess(resolve: () => Resolution & { healthOnly: boolean }): MemoryAccess {
+  const initial = resolve(), identity = JSON.stringify(initial);
+  return { ...initial, assertCurrent() { if (JSON.stringify(resolve()) !== identity) throw denied(); },
+    assertContentAccess() { if (initial.healthOnly) throw denied(); } };
 }
 
 /** No payload field participates in authorization. Re-evaluate before releasing results. */
@@ -45,19 +55,25 @@ function audienceScope(
 
 /** Provider runtime access is host-issued, not a fabricated feature/tool invocation. */
 export function authorizeMemoryAccess(context: MemoryCallerContext,
-  agentId: string, requestedAgent: string, operatorRead: boolean): VaultAccess {
-  return bindAccess(() => {
+  agentId: string, requestedAgent: string, operatorRead: boolean,
+  purpose?: "default" | "status" | "cli"): MemoryAccess {
+  return bindMemoryAccess(() => {
     if (typeof context.assertCurrent !== "function" || requestedAgent !== agentId) throw denied();
     context.signal?.throwIfAborted();
     context.assertCurrent();
     const caller = context.authority;
+    if (caller.kind === "host") {
+      if (purpose !== "status") throw denied();
+      // The scope is internal to validation; this lease cannot release its content.
+      return { scope: { visibility: "agent-private", agentId }, healthOnly: true };
+    }
     if (caller.kind === "operator") {
       if (!operatorRead || !caller.connId || !caller.scopes.some(s => ["operator.read", "operator.write", "operator.admin"].includes(s))) throw denied();
-      return { scope: { visibility: "agent-private", agentId } };
+      return { scope: { visibility: "agent-private", agentId }, healthOnly: false };
     }
     // Background host calls are not session delegation. Session identity is a
     // host-minted audience; providers consume it without reconstructing lineage.
     if (caller.kind !== "session" || caller.sandboxed) throw denied();
-    return audienceScope(caller.audience, agentId);
+    return { ...audienceScope(caller.audience, agentId), healthOnly: false };
   });
 }

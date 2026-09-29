@@ -53,7 +53,7 @@ Git commits use exact retained bytes, preserve unrelated changes and staged cont
 - [UI redesign: implemented features and interim limits](docs/UI_REDESIGN_IMPLEMENTATION.md)
 - [UI support contracts and remaining backend/host work](docs/UI_REDESIGN_SUPPORT.md)
 - Use [gbrain](https://github.com/garrytan/gbrain) as the default for unresolved knowledge-model decisions, with explicit reasons for departures.
-- Reuse OpenClaw's feature-plugin scaffold, typed operations, and native UI lifecycle. No separate frontend service or memory/context-engine slot.
+- Reuse OpenClaw's feature-plugin scaffold, typed operations, and native UI lifecycle. Knowledge owns the selected memory slot; it does not add a separate frontend service or take the context-engine slot.
 
 ## Develop
 
