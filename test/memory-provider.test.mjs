@@ -111,14 +111,17 @@ test('host status receives health only and every other host purpose is denied', 
 test('host readiness redacts all states and storage errors while preserving lease fences', async () => {
   const { createKnowledgeMemoryRuntime } = await import('../dist/memory-provider.js');
   let facts = { ontology: true, issues: 0, records: 42 }, failure, active = true;
-  const storage = { config: { agentId: 'main', operatorRead: false }, async call(op) {
+  const client = { async call(op) {
     assert.equal(op, 'memoryHealth');
     if (failure) throw failure;
     return facts;
   } };
-  const lane = { enqueue: operation => operation(), drain: async () => {}, fence: () => () => {} };
+  const runtime = { vaultId: randomUUID(), client, enqueue: (check, operation) => { check(); return operation(); } };
+  const stores = { policy: { operatorRead: false }, incarnation: 0, assertLive() {}, async open(principal) {
+    return { kind: 'ready', runtime, access: { ...principal(), assertCurrent: () => { principal(); } } };
+  } };
   const context = { authority: { kind: 'host', operation: 'status' }, assertCurrent() { if (!active) throw Error('caller revoked'); } };
-  const { provider } = await createKnowledgeMemoryRuntime(storage, lane).open({ cfg: {}, agentId: 'main', purpose: 'status', context });
+  const { provider } = await createKnowledgeMemoryRuntime(stores).open({ cfg: {}, agentId: 'main', purpose: 'status', context });
   for (const [ontology, issues, status] of [[true, 0, 'ready'], [true, 1, 'degraded'], [false, 0, 'unavailable']]) {
     facts = { ontology, issues, records: 42 };
     assert.deepEqual(await provider.health(), { status, message: 'Knowledge vault readiness check.' });
@@ -224,8 +227,6 @@ test('knowledge_recall rejects non-owner authority, unavailable writes and inval
 
   const readOnly = await fixture(t, { writesEnabled: false });
   await assert.rejects(readOnly.service.recall({ requestId: randomUUID(), id: randomUUID(), expectedRevision: 1, expectedHash: '0'.repeat(64), clear: true }, readOnly.tool), /writes are disabled/);
-  const sample = createKnowledgeService({ pluginConfig: {} });
-  await assert.rejects(sample.recall({ requestId: randomUUID(), id: randomUUID(), expectedRevision: 1, expectedHash: '0'.repeat(64), clear: true }, f.tool), /Sample vault is read-only/);
 });
 
 test('automatic candidates select by kind, inject summary only and order deterministically', async t => {
@@ -317,7 +318,8 @@ test('entry retains native tools, denies untrusted provider callers and prompt h
   await assert.rejects(status.search({ query: 'anything' }), /authority/);
   await assert.rejects(capability.providerRuntime.open({ cfg: {}, agentId: 'main', context: {} }), /authority/);
   assert.deepEqual(capability.promptBuilder({ availableTools: new Set() }), []);
-  assert.equal(capability.flushPlanResolver({}), null);
+  // Writes are on by default, so the provider owns the pre-compaction flush.
+  assert.deepEqual(capability.flushPlanResolver({}).persistenceToolNames, ['knowledge_save_page']);
   assert.deepEqual(buildKnowledgeMemoryPrompt({ availableTools: new Set() }), []);
 });
 
@@ -350,9 +352,6 @@ test('flush plan provides tool persistence only for writable real vaults', async
 
   const readOnly = await fixture(t, { writesEnabled: false });
   assert.equal(readOnly.capability.flushPlanResolver({}), null);
-  let sampleCapability;
-  createKnowledgeService({ pluginConfig: {}, registerMemoryCapability(value) { sampleCapability = value; } });
-  assert.equal(sampleCapability.flushPlanResolver({}), null);
 });
 
 test('flush save derives stable scoped request IDs and preserves exact retry semantics', async t => {

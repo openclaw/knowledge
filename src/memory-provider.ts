@@ -35,8 +35,10 @@ export function createKnowledgeMemoryRuntime(stores: Stores): MemoryProviderRunt
       };
       // Each call re-resolves: an assignment change moves the next call, and a
       // call already bound to the former store fails its live checks.
-      const run = async <T>(provision: boolean, operation: (runtime: StoreRuntime, access: VaultAccess) => Promise<T>, whenEmpty?: () => NoInfer<T>): Promise<T> => {
+      const run = async <T>(provision: boolean, operation: (runtime: StoreRuntime, access: VaultAccess) => Promise<T>, whenEmpty?: () => NoInfer<T>, content = true): Promise<T> => {
         lease();
+        // Content access is decided by the lease, before any store resolution.
+        if (content) assertContentAccess();
         // Operator inspection never creates storage; only an agent session's own use does.
         const opened = await stores.open(principal, { provision: provision && context.authority.kind === "session" }, incarnation);
         if (opened.kind !== "ready") { if (opened.kind === "unprovisioned" && whenEmpty) return whenEmpty(); throw Error(opened.message); }
@@ -46,7 +48,6 @@ export function createKnowledgeMemoryRuntime(stores: Stores): MemoryProviderRunt
       return { provider: {
         capabilities: { sources: ["memory"], pagination: true, candidates: ["trigger", "project"], projectFilter: false },
         search: (request: MemorySearchRequest) => run(true, async ({ client: storage, vaultId }, guarded) => {
-          assertContentAccess();
           if (request.sources && !request.sources.includes("memory")) throw Error("Knowledge does not search session transcripts; use conversation-history tools.");
           if (request.activeProjectKeys?.length) throw Error("Knowledge has no curated project-key selection capability.");
           const limit = integer(request.maxResults, 20, 50);
@@ -81,7 +82,6 @@ export function createKnowledgeMemoryRuntime(stores: Stores): MemoryProviderRunt
           };
         }),
         get: request => run(true, async ({ client: storage, vaultId }, guarded) => {
-          assertContentAccess();
           if (request.reference.providerId !== "knowledge" || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{7,95}$/.test(request.reference.id) || request.reference.fragment !== undefined) throw Error("Invalid Knowledge record reference.");
           const [recordRevision, referenceStore] = request.reference.revision?.split("@") ?? [];
           if (request.reference.revision !== undefined && referenceStore !== vaultId) throw Error("This Knowledge reference belongs to a different store; search again.");
@@ -93,7 +93,6 @@ export function createKnowledgeMemoryRuntime(stores: Stores): MemoryProviderRunt
           return { status: "ok" as const, reference: ref, text: found.text, citations, from, lines: found.lines, truncated: nextFrom <= found.total, ...(nextFrom <= found.total ? { nextFrom } : {}) };
         }),
         candidates: request => run(false, async ({ client: storage, vaultId }, guarded) => {
-          assertContentAccess();
           if (guarded.scope.visibility === "conversation") return { hits: [], coverage: "complete" as const, warning: "Automatic recall uses only owner-approved private records." };
           if (!pinned.principal.ownerPrivate) throw Error("Automatic recall requires an owner-private memory audience.");
           if (request.kind !== "trigger" && request.kind !== "project") throw Error("Knowledge candidates kind must be trigger or project.");
@@ -127,7 +126,7 @@ export function createKnowledgeMemoryRuntime(stores: Stores): MemoryProviderRunt
               return { status, message: "Scoped vault validation; keyword index readiness is checked on search.",
                 details: { records: facts.records, issues: facts.issues, retrieval: "keyword", index: "checked-on-search", scope: guarded.scope.visibility } };
             }, () => healthOnly ? { status: "ready" as const, message: "Knowledge vault readiness check." }
-              : { status: "ready" as const, message: "This agent's store is created on first authorized use.", details: { records: 0, issues: 0, retrieval: "keyword", index: "checked-on-search", scope: "private" as const } });
+              : { status: "ready" as const, message: "This agent's store is created on first authorized use.", details: { records: 0, issues: 0, retrieval: "keyword", index: "checked-on-search", scope: "private" as const } }, false);
           } catch (error) {
             if (!healthOnly) throw error;
             // Preserve caller/lifecycle fencing while withholding storage error details.
