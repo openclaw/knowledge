@@ -317,15 +317,24 @@ test('flush plan provides tool persistence only for writable real vaults', async
   const f = await fixture(t);
   const plan = f.capability.flushPlanResolver({ contextWindowTokens: 8_000 });
   assert.deepEqual(plan.persistenceToolNames, ['knowledge_save_page']);
+  assert.deepEqual(plan.lookupToolNames, ['knowledge_grep', 'knowledge_lookup', 'knowledge_record']);
   assert.equal(plan.relativePath, undefined);
   assert.equal(plan.reserveTokensFloor, undefined);
   assert.equal(plan.softThresholdTokens, undefined);
   assert.equal(plan.forceFlushTranscriptBytes, undefined);
   assert.equal(plan.model, undefined);
-  assert.match(plan.prompt, /decisions, preferences, commitments/);
-  assert.match(plan.prompt, /source: \{ text, attribution \}/);
+  const promptText = `${plan.prompt}\n${plan.systemPrompt}`;
+  assert.match(plan.prompt, /knowledge_grep before saving/);
+  assert.match(plan.prompt, /knowledge_lookup only for exact known record IDs, full titles, or aliases/);
+  assert.match(plan.prompt, /already saved, do not save it again/);
+  assert.match(plan.prompt, /knowledge_save_page/);
+  assert.match(plan.prompt, /quoted source excerpt plus attribution/);
+  assert.match(plan.prompt, /knowledge_record/);
   assert.match(plan.prompt, /NO_REPLY/);
-  assert.doesNotMatch(`${plan.prompt}\n${plan.systemPrompt}`, /knowledge_recall\s*\(/);
+  assert.deepEqual(
+    [...new Set(promptText.match(/knowledge_[a-z_]+/g))].sort(),
+    ['knowledge_grep', 'knowledge_lookup', 'knowledge_record', 'knowledge_save_page'],
+  );
   assert.equal(
     f.capability.flushPlanResolver({ nowMs: 0 }).prompt,
     f.capability.flushPlanResolver({ nowMs: Date.UTC(2036, 0, 1) }).prompt,
