@@ -64,16 +64,53 @@ const BUFFERED_EVIDENCE_BYTES = 16 * 1024 * 1024;
 type LoadedEvidence = { size: number; sha256: string; bytes: Buffer; text?: string | null; lines?: string[] };
 const isTextual = (e: Evidence) => e.start_line !== undefined || e.end_line !== undefined || /^text\//.test(e.mediaType ?? "") || /(?:json|xml|yaml|javascript)/.test(e.mediaType ?? "") || /\.(txt|md|csv|json|jsonl|ya?ml|log|xml|html|ts|js)$/i.test(e.filename ?? e.path);
 
+// Evidence verdicts that depend only on the file's bytes and the citation.
+const DETERMINISTIC = /does not match|Invalid evidence line range|must be within artifacts|Unsafe evidence file|Evidence truncated/;
+
+/** Verified citation outcomes that outlive one operation, each valid only
+ * while its file keeps the stamp taken before it was read. Holds outcomes,
+ * never file contents. */
+export type VerifiedEvidence = Map<string, { stamp: string; outcome: Omit<ReturnType<typeof inspectEvidence>, "excerpt" | "excerptTruncated"> | Error }>;
+
 /** Verifies many citations within one operation. Each retained file is read,
  * hashed and decoded at most once; every citation of it is then checked against
  * that single read with the same rules and errors as `inspectEvidence`. An
- * inspector holds file contents, so it must not outlive its operation. */
+ * inspector holds file contents, so it must not outlive its operation. With a
+ * shared `verified` map, a citation whose file is unchanged is not re-read. */
 export class EvidenceInspector {
   private readonly files = new Map<string, LoadedEvidence | "stream" | Error>();
   /** File stamps taken before each file was read, for callers that reuse results. */
   readonly stamps = new Map<string, string>();
-  constructor(private readonly root: string) {}
+  /** Citation keys this inspector checked, so an owner can drop stale outcomes. */
+  readonly used = new Set<string>();
+  constructor(private readonly root: string, private readonly verified?: VerifiedEvidence) {}
   inspect(e: Evidence, previewChars = 0): ReturnType<typeof inspectEvidence> {
+    // Previews need file text, so only plain verification reuses outcomes.
+    if (previewChars || !this.verified) return this.check(e, previewChars);
+    const key = JSON.stringify([e.path, e.sha256, e.size, e.start_line, e.end_line, e.quote, e.mediaType, e.filename]);
+    this.used.add(key);
+    let stamp = this.stamps.get(e.path);
+    if (stamp === undefined) this.stamps.set(e.path, stamp = fileStamp(this.root, e.path));
+    const known = this.verified.get(key);
+    if (known && known.stamp === stamp && settledStamp(stamp)) {
+      if (known.outcome instanceof Error) throw known.outcome;
+      return { ...known.outcome, excerpt: "", excerptTruncated: false };
+    }
+    const settled = settledStamp(stamp);
+    try {
+      const result = this.check(e, 0);
+      if (settled) this.verified.set(key, { stamp, outcome: { size: result.size, sha256: result.sha256 } });
+      else this.verified.delete(key);
+      return result;
+    } catch (error) {
+      const failure = error instanceof Error ? error : Error(String(error));
+      // Only verdicts about the bytes are reusable; I/O failures are retried.
+      if (settled && DETERMINISTIC.test(failure.message)) this.verified.set(key, { stamp, outcome: failure });
+      else this.verified.delete(key);
+      throw failure;
+    }
+  }
+  private check(e: Evidence, previewChars: number): ReturnType<typeof inspectEvidence> {
     const ranged = e.start_line !== undefined || e.end_line !== undefined;
     if (ranged && (e.start_line === undefined || e.end_line === undefined || e.end_line < e.start_line)) throw Error("Invalid evidence line range");
     const file = this.load(e.path);
@@ -104,7 +141,7 @@ export class EvidenceInspector {
     const known = this.files.get(relative);
     if (known instanceof Error) throw known;
     if (known) return known;
-    this.stamps.set(relative, fileStamp(this.root, relative));
+    if (!this.stamps.has(relative)) this.stamps.set(relative, fileStamp(this.root, relative));
     try {
       const loaded = withEvidenceFile(this.root, relative, (fd, size): LoadedEvidence | "stream" => {
         if (size > BUFFERED_EVIDENCE_BYTES) return "stream";
@@ -115,6 +152,18 @@ export class EvidenceInspector {
       this.files.set(relative, loaded); return loaded;
     } catch (error) { const failure = error instanceof Error ? error : Error(String(error)); this.files.set(relative, failure); throw failure; }
   }
+}
+
+/** Git's "racy clean" rule: a stamp captured within this window of the file's
+ * last change cannot prove later bytes are unchanged, because a same-size
+ * rewrite in the same timestamp tick (coarse filesystems) keeps every field. */
+const RACY_MS = 2000;
+/** Whether a stamp is safe to trust for reuse: settled, and not an error. */
+export function settledStamp(stamp: string, now = Date.now()): boolean {
+  if (!/^\d+(?::\d+){5}$/.test(stamp)) return false;
+  const [mtimeNs, ctimeNs] = stamp.split(":").slice(-2).map(value => BigInt(value));
+  const newest = Number((mtimeNs! > ctimeNs! ? mtimeNs! : ctimeNs!) / 1_000_000n);
+  return now - newest > RACY_MS;
 }
 
 /** Identity and change stamp of one path, without following links. Any rewrite

@@ -16,18 +16,19 @@ export class GitHistory {
   constructor(private readonly root: string, private readonly executable = "git") {
     this.gitDir = path.join(root, ".git");
   }
-  private command(args: string[], input?: string, extra: NodeJS.ProcessEnv = {}, optional = false, inputFd?: number): string {
+  // `timeout` scales with batch size for commands that process many paths.
+  private command(args: string[], input?: string, extra: NodeJS.ProcessEnv = {}, optional = false, inputFd?: number, timeout = 10000): string {
     const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_")));
     const result = spawnSync(this.executable, ["--no-pager", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "core.splitIndex=false", "-c", "core.sparseCheckout=false", "-c", "gc.auto=0", "-c", "maintenance.auto=false", ...args], {
-      cwd: this.root, input, ...(inputFd !== undefined ? { stdio: [inputFd, "pipe", "pipe"] as [number, "pipe", "pipe"] } : {}), encoding: "utf8", timeout: 10000, maxBuffer: 16 * 1024 * 1024,
+      cwd: this.root, input, ...(inputFd !== undefined ? { stdio: [inputFd, "pipe", "pipe"] as [number, "pipe", "pipe"] } : {}), encoding: "utf8", timeout, maxBuffer: 64 * 1024 * 1024,
       env: { ...env, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_TERMINAL_PROMPT: "0", ...extra },
     });
     if ((result.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") throw new GitUnavailable("Git is not installed; local history is waiting for Git.");
     if (result.error || (result.status !== 0 && !optional)) throw Error("Local Git checkpoint failed; resolve repository permissions, locks, or concurrent Git activity and retry.");
     return result.status === 0 ? result.stdout.trimEnd() : "";
   }
-  private git(args: string[], input?: string, extra?: NodeJS.ProcessEnv, optional = false, inputFd?: number) {
-    return this.command([`--git-dir=${this.gitDir}`, `--work-tree=${this.root}`, ...args], input, extra, optional, inputFd);
+  private git(args: string[], input?: string, extra?: NodeJS.ProcessEnv, optional = false, inputFd?: number, timeout?: number) {
+    return this.command([`--git-dir=${this.gitDir}`, `--work-tree=${this.root}`, ...args], input, extra, optional, inputFd, timeout);
   }
   private repository() {
     this.command(["--version"]);
@@ -62,23 +63,38 @@ export class GitHistory {
     }
     return entries;
   }
-  private apply(changes: GitChange[], index: string) {
-    for (const change of changes) {
-      if (change.fileHash) {
-        const at = change.path.indexOf("/artifacts/");
-        if (at < 0) throw Error("File-backed Git changes must be source artifacts");
-        const root = path.join(this.root, change.path.slice(0, at)), relative = change.path.slice(at + 1);
-        const oid = withEvidenceFile(root, relative, fd => {
-          inspectEvidence(root, { path: relative, sha256: change.fileHash! });
-          return this.git(["hash-object", "-w", "--stdin", "--no-filters"], undefined, undefined, false, fd);
-        });
-        this.git(["update-index", "--add", "--cacheinfo", "100644", oid, change.path], undefined, { GIT_INDEX_FILE: index });
-      } else if (change.raw === null) this.git(["update-index", "--force-remove", "--", change.path], undefined, { GIT_INDEX_FILE: index });
-      else {
-        const oid = this.git(["hash-object", "-w", "--stdin", "--no-filters"], change.raw);
-        this.git(["update-index", "--add", "--cacheinfo", "100644", oid, change.path], undefined, { GIT_INDEX_FILE: index });
-      }
+  /** Stage a batch in a constant number of Git processes, whatever its size:
+   * exact content blobs are written by one `hash-object --stdin-paths`, and
+   * every index entry is applied by one `update-index` per kind. Retained
+   * originals keep their verified per-file path (they are few and large). */
+  private apply(changes: GitChange[], index: string, scratch: string) {
+    const budget = (n: number) => 10000 + 20 * n;
+    const oids = new Map<GitChange, string>();
+    const contents = changes.filter(c => !c.fileHash && c.raw !== null);
+    if (contents.length) {
+      // Exact bytes go through scratch files; paths in the vault could change underneath.
+      const files = contents.map((c, i) => { const file = path.join(scratch, `blob-${i}`); fs.writeFileSync(file, c.raw!, { mode: 0o600 }); return file; });
+      try {
+        const written = this.git(["hash-object", "-w", "--no-filters", "--stdin-paths"], files.join("\n") + "\n", undefined, false, undefined, budget(files.length)).split("\n");
+        if (written.length !== contents.length) throw Error("Local Git checkpoint failed; blob count mismatch.");
+        contents.forEach((c, i) => oids.set(c, written[i]!));
+      } finally { for (const file of files) fs.rmSync(file, { force: true }); }
     }
+    for (const change of changes) {
+      if (!change.fileHash) continue;
+      const at = change.path.indexOf("/artifacts/");
+      if (at < 0) throw Error("File-backed Git changes must be source artifacts");
+      const root = path.join(this.root, change.path.slice(0, at)), relative = change.path.slice(at + 1);
+      oids.set(change, withEvidenceFile(root, relative, fd => {
+        inspectEvidence(root, { path: relative, sha256: change.fileHash! });
+        return this.git(["hash-object", "-w", "--stdin", "--no-filters"], undefined, undefined, false, fd);
+      }));
+    }
+    // Paths were validated in checkpoint(): no control characters, so tab/newline framing is safe.
+    const removals = changes.filter(c => !c.fileHash && c.raw === null).map(c => c.path);
+    if (removals.length) this.git(["update-index", "--force-remove", "-z", "--stdin"], removals.join("\0") + "\0", { GIT_INDEX_FILE: index }, false, undefined, budget(removals.length));
+    const additions = changes.filter(c => oids.has(c)).map(c => `100644 ${oids.get(c)}\t${c.path}`);
+    if (additions.length) this.git(["update-index", "--add", "--index-info"], additions.join("\n") + "\n", { GIT_INDEX_FILE: index }, false, undefined, budget(additions.length));
   }
   /** Synchronize only unstaged paths; retain all pre-existing staged content.
    * A crash before this cosmetic step can be retried from the checkpoint ref. */
@@ -94,7 +110,7 @@ export class GitHistory {
       const staged = this.entries(["ls-files", "--stage", "-z"], { GIT_INDEX_FILE: temporary });
       const before = parent ? this.entries(["ls-tree", "-r", "-z", parent]) : new Map<string, string>();
       const unchanged = changes.filter(c => staged.get(c.path) === before.get(c.path));
-      this.apply(unchanged, temporary);
+      this.apply(unchanged, temporary, path.dirname(temporary));
       fs.writeFileSync(fd, fs.readFileSync(temporary)); fs.fsyncSync(fd);
       fs.renameSync(lock, index); ownsLock = false;
     } finally { fs.closeSync(fd); if (ownsLock) fs.unlinkSync(lock); }
@@ -118,7 +134,7 @@ export class GitHistory {
         parent = this.git(["rev-parse", "--verify", "--quiet", "HEAD"], undefined, undefined, true);
         const index = path.join(temporary, "commit");
         this.git(["read-tree", parent || "--empty"], undefined, { GIT_INDEX_FILE: index });
-        this.apply(batch.changes, index);
+        this.apply(batch.changes, index, temporary);
         const tree = this.git(["write-tree"], undefined, { GIT_INDEX_FILE: index });
         commit = this.git(["commit-tree", tree, ...(parent ? ["-p", parent] : [])], `Knowledge: ${batch.actor} (${batch.changes.length} files)\n\nKnowledge-Checkpoint: ${batch.token}\n`, {
           GIT_AUTHOR_NAME: "OpenClaw Knowledge", GIT_AUTHOR_EMAIL: "knowledge@localhost", GIT_COMMITTER_NAME: "OpenClaw Knowledge", GIT_COMMITTER_EMAIL: "knowledge@localhost", GIT_AUTHOR_DATE: batch.at, GIT_COMMITTER_DATE: batch.at,

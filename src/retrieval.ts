@@ -85,18 +85,31 @@ export function keywordExpression(input: SearchInput): string {
   return input.mode === "phrase" ? `"${tokens.join(" ")}"` : tokens.map(t => `"${t}"`).join(input.mode === "any" ? " OR " : " AND ");
 }
 
+/** Bring the scope's FTS table to exactly `records`. Rows are tracked by record
+ * ID and content hash, so a change re-indexes only the records that changed;
+ * the indexed set is always exactly the eligible records passed in. */
 function reconcileKeywordIndex(db: DatabaseSync, data: Snapshot, records: LoadedRecord[], binding: string, generation: string) {
-  const table = `keyword_fts_v1_${digest(binding)}`;
+  const suffix = digest(binding), table = `keyword_fts_v1_${suffix}`, rows = `keyword_rows_v1_${suffix}`;
   const snapshot = digest(JSON.stringify([generation, data.ontology?.fingerprint, records.map(r => [r.id, r.path, r.hash, r.revision])]));
   db.exec("CREATE TABLE IF NOT EXISTS keyword_state_v1 (binding TEXT PRIMARY KEY, snapshot TEXT NOT NULL, indexed_at TEXT NOT NULL) STRICT");
-  const exists = db.prepare("SELECT 1 FROM sqlite_master WHERE name=?").get(table);
+  const tracked = db.prepare("SELECT 1 FROM sqlite_master WHERE name=?").get(rows);
   db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS ${table} USING fts5(id UNINDEXED, title, aliases, body, tokenize='unicode61 remove_diacritics 2')`);
+  db.exec(`CREATE TABLE IF NOT EXISTS ${rows} (id TEXT PRIMARY KEY, hash TEXT NOT NULL, fts_rowid INTEGER NOT NULL) STRICT`);
+  // An index built before row tracking has unknown contents: start it over once,
+  // and forget its recorded snapshot so this call repopulates it.
+  if (!tracked) { db.exec(`DELETE FROM ${table}`); db.prepare("DELETE FROM keyword_state_v1 WHERE binding=?").run(binding); }
   const state = db.prepare("SELECT * FROM keyword_state_v1 WHERE binding=?").get(binding);
   let indexedAt = String(state?.indexed_at ?? new Date().toISOString());
-  if (!exists || state?.snapshot !== snapshot) {
-    db.exec(`DELETE FROM ${table}`);
-    const insert = db.prepare(`INSERT INTO ${table}(id,title,aliases,body) VALUES (?,?,?,?)`);
-    for (const r of records) insert.run(r.id, r.title, (r.metadata.aliases ?? []).join("\n"), r.body);
+  if (state?.snapshot !== snapshot) {
+    const wanted = new Map(records.map(r => [r.id, r]));
+    const remove = db.prepare(`DELETE FROM ${table} WHERE rowid=?`), untrack = db.prepare(`DELETE FROM ${rows} WHERE id=?`);
+    for (const row of db.prepare(`SELECT id,hash,fts_rowid FROM ${rows}`).all()) {
+      const r = wanted.get(String(row.id));
+      if (r && r.hash === row.hash) { wanted.delete(r.id); continue; }
+      remove.run(row.fts_rowid!); untrack.run(row.id!);
+    }
+    const insert = db.prepare(`INSERT INTO ${table}(id,title,aliases,body) VALUES (?,?,?,?)`), track = db.prepare(`INSERT INTO ${rows} VALUES (?,?,?)`);
+    for (const r of wanted.values()) track.run(r.id, r.hash, insert.run(r.id, r.title, (r.metadata.aliases ?? []).join("\n"), r.body).lastInsertRowid);
     indexedAt = new Date().toISOString();
     db.prepare("INSERT OR REPLACE INTO keyword_state_v1 VALUES (?,?,?)").run(binding, snapshot, indexedAt);
   }
@@ -124,26 +137,30 @@ export function keywordSearch(db: DatabaseSync, data: Snapshot, input: SearchInp
   try {
     db.exec("BEGIN IMMEDIATE");
     const { table, snapshot, indexedAt } = reconcileKeywordIndex(db, data, records, binding, generation);
-    // A separate filtered corpus ensures BM25 statistics cannot be influenced by
-    // inaccessible scopes OR records excluded by the caller's filters.
-    db.exec("DROP TABLE IF EXISTS temp.keyword_query_v1");
-    db.exec("CREATE VIRTUAL TABLE temp.keyword_query_v1 USING fts5(id UNINDEXED, title, aliases, body, tokenize='unicode61 remove_diacritics 2')");
-    const insertQuery = db.prepare(`INSERT INTO temp.keyword_query_v1 SELECT id,title,aliases,body FROM ${table} WHERE id=?`);
-    for (const r of selected) insertQuery.run(r.id);
+    // BM25 statistics must come only from the searched corpus. The scope table
+    // holds exactly the eligible records, so an unfiltered search queries it
+    // directly; a filtered search ranks within a copy of just its subset.
+    const corpus = selected.length === records.length ? table : "keyword_query_v1";
+    if (corpus !== table) {
+      db.exec("DROP TABLE IF EXISTS temp.keyword_query_v1");
+      db.exec("CREATE VIRTUAL TABLE temp.keyword_query_v1 USING fts5(id UNINDEXED, title, aliases, body, tokenize='unicode61 remove_diacritics 2')");
+      const insertQuery = db.prepare(`INSERT INTO temp.keyword_query_v1 SELECT id,title,aliases,body FROM ${table} WHERE id=?`);
+      for (const r of selected) insertQuery.run(r.id);
+    }
     // Unpredictable delimiters checked against the corpus prevent authored marker injection.
     let marker: string;
     do { marker = randomUUID(); } while (selected.some(r => [r.title, r.body, ...(r.metadata.aliases ?? [])].some(v => v.includes(marker))));
-    const total = Number(db.prepare("SELECT count(*) AS n FROM keyword_query_v1 WHERE keyword_query_v1 MATCH ?").get(expression)!.n);
-    const rows = db.prepare(`SELECT id,bm25(keyword_query_v1,0,8,6,1) AS score,
-      highlight(keyword_query_v1,1,?,'') AS title, highlight(keyword_query_v1,2,?,'') AS aliases, highlight(keyword_query_v1,3,?,'') AS body
-      FROM keyword_query_v1 WHERE keyword_query_v1 MATCH ? ORDER BY score,id LIMIT ? OFFSET ?`).all(marker, marker, marker, expression, limit, offset);
+    const total = Number(db.prepare(`SELECT count(*) AS n FROM ${corpus} WHERE ${corpus} MATCH ?`).get(expression)!.n);
+    const rows = db.prepare(`SELECT id,bm25(${corpus},0,8,6,1) AS score,
+      highlight(${corpus},1,?,'') AS title, highlight(${corpus},2,?,'') AS aliases, highlight(${corpus},3,?,'') AS body
+      FROM ${corpus} WHERE ${corpus} MATCH ? ORDER BY score,id LIMIT ? OFFSET ?`).all(marker, marker, marker, expression, limit, offset);
     const byId = new Map(selected.map(r => [r.id, r]));
     const hits = rows.map(row => {
       const fields = (["title", "aliases", "body"] as const).filter(field => String(row[field]).includes(marker));
       const field = fields.includes("body") ? "body" : fields[0] ?? "title";
       return hit(byId.get(String(row.id))!, field, Math.max(0, String(row[field]).indexOf(marker)), fields, -Number(row.score));
     });
-    db.exec("DROP TABLE temp.keyword_query_v1; COMMIT");
+    db.exec(corpus === table ? "COMMIT" : "DROP TABLE temp.keyword_query_v1; COMMIT");
     return { ...base, hits, resultCount: hits.length, total, nextOffset: offset + limit < total ? offset + limit : null, index: { state: "ready", lag: false, snapshot, indexedAt, message: "Indexed from the current reconciled scope. Higher BM25 scores rank first; compare scores only within this query and snapshot." } };
   } catch {
     if (db.isTransaction) db.exec("ROLLBACK");

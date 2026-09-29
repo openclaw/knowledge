@@ -6,7 +6,7 @@ import { eligible } from "./retrieval.js";
 import { temporalProblems } from "./temporal.js";
 import * as fs from "node:fs";
 import path from "node:path";
-import { EvidenceInspector, fileStamp, inspectEvidence, withEvidenceFile } from "./evidence-files.js";
+import { EvidenceInspector, fileStamp, inspectEvidence, settledStamp, withEvidenceFile, type VerifiedEvidence } from "./evidence-files.js";
 import { ATTACHMENT_DOWNLOAD_CHUNK_BYTES } from "./attachment-contract.js";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
@@ -16,7 +16,9 @@ import { approvedRecall, Envelope, type Evidence, type Issue, type LoadedRecord,
 import { readText, parseYaml, safeRoot } from "./files.js";
 import { bundledOntology, parseOntology, resolveOntology, expandTypes, inferType, type OntologySource } from "./ontology.js";
 export const SAMPLE_ROOT = fileURLToPath(new URL("../fixtures/sample-vault/", import.meta.url));
-const MAX_FILES = 500;
+/** Runaway guard, not a size budget: a partition this large is a pathological
+ * tree (e.g. a misplaced checkout), not ordinary growth. */
+export const MAX_ENTRIES = 100_000;
 export const digest = (s: string) => createHash("sha256").update(s).digest("hex");
 export function sameScope(a: unknown, b: Scope): boolean {
   if (!a || typeof a !== "object" || !Check(Envelope.properties.scope, a)) return false;
@@ -26,9 +28,13 @@ export function sameScope(a: unknown, b: Scope): boolean {
 }
 
 export type ScanResult = { records: LoadedRecord[]; ontology: ReturnType<typeof resolveOntology>; sources: OntologySource[]; issues: Issue[]; checkedAt: string };
-/** Holds one scope's last scan. The owner (RealVault) keeps it across operations;
- * an entry is reused only while every file the scan read still has its stamp. */
-export type ScanCache = { entry?: { tree: string; evidence: Map<string, string>; data: ScanResult } };
+/** One record file's parse, valid while the file keeps `stamp`. */
+type ParsedFile = { stamp: string; record?: LoadedRecord; issue?: string };
+/** Holds one scope's scan state. The owner (RealVault) keeps it across operations.
+ * `entry` is the whole last scan, reused only while every file the scan read
+ * still has its stamp. `files` and `evidence` are per-file results, so a change
+ * reparses and re-verifies only what changed. */
+export type ScanCache = { entry?: { tree: string; evidence: Map<string, string>; data: ScanResult }; files?: Map<string, ParsedFile>; evidence?: VerifiedEvidence };
 type Overlay = { record?: LoadedRecord; records?: LoadedRecord[]; artifacts: Record<string, string> };
 
 // Scope is selected by the service from trusted authority, never from operation inputs.
@@ -57,7 +63,7 @@ export class SampleVault {
       let names: string[];
       try { names = fs.readdirSync(path.join(this.root, dir)).sort(); } catch { return false; }
       for (const name of names) {
-        if (++visited > MAX_FILES) return false;
+        if (++visited > MAX_ENTRIES) return false;
         const file = dir + name, stamp = fileStamp(this.root, file);
         entries.push(`${file}|${stamp}`);
         if (!dir && (name === "artifacts" || name === ".knowledge-history")) continue;
@@ -70,17 +76,20 @@ export class SampleVault {
   private async load(overlay?: Overlay): Promise<{ data: ScanResult; evidence: EvidenceInspector }> {
     const issues: Issue[] = [];
     // One read per retained file for this scan; observation reuses the same checks.
-    const evidence = new EvidenceInspector(this.root);
+    if (this.cache) { this.cache.files ??= new Map(); this.cache.evidence ??= new Map(); }
+    const evidence = new EvidenceInspector(this.root, this.cache?.evidence);
+    const parsed = this.cache?.files, seen = new Set<string>();
     const directory = this.empty ? null : await safeRoot(this.root);
     const records: LoadedRecord[] = [];
     const sources: OntologySource[] = [await bundledOntology(issues)];
-    let visited = 0, bytes = 0;
+    let visited = 0;
     const add = (file: string, code: string, message: string) => issues.push({ path: file, code, message: message.slice(0, 1000) });
-    const read = async (file: string) => { const raw = overlay?.artifacts[file] ?? await this.read(file); bytes += Buffer.byteLength(raw); if (bytes > 8 * 1024 * 1024) throw Error("Vault exceeds 8 MiB scan budget"); return raw; };
+    // Per-file size stays bounded by the guarded reader (64 KiB).
+    const read = async (file: string) => overlay?.artifacts[file] ?? await this.read(file);
     const walk = async (dir = "", depth = 0): Promise<void> => {
       if (depth > 8) throw Error("Vault directory depth exceeds 8");
-      for await (const entry of directory!.entries(dir || ".", { maxEntries: MAX_FILES + 1, order: "sorted", symlinks: "reject" })) {
-        if (++visited > MAX_FILES) throw Error("Vault exceeds 500 entries");
+      for await (const entry of directory!.entries(dir || ".", { maxEntries: MAX_ENTRIES + 1, order: "sorted", symlinks: "reject" })) {
+        if (++visited > MAX_ENTRIES) throw Error(`Vault exceeds ${MAX_ENTRIES.toLocaleString("en-US")} entries`);
         const file = dir + entry.name;
         if (entry.isSymbolicLink) { add(file, "unsafe-path", "Symbolic links are not read."); if (file === "ontology.yaml") sources.push({ path: file, raw: "", valid: false, manifest: null }); continue; }
         if (file === "ontology.yaml" && !entry.isFile) { sources.push({ path: file, raw: "", valid: false, manifest: null }); add(file, "invalid-ontology", "Active ontology must be a regular file."); continue; }
@@ -93,24 +102,51 @@ export class SampleVault {
         } else if (file.startsWith("schemas/") && /\.ya?ml$/.test(file)) {
           add(file, "unsupported-schema", "Independent schemas are no longer activated. Move definitions into ontology.yaml.");
         } else if (file.endsWith(".md") && !["README.md", "RESOLVER.md"].includes(entry.name)) {
+          // Reuse this file's parse while its stamp is unchanged. The stamp is
+          // taken before reading, so a change during the read forces a reparse.
+          seen.add(file);
+          const stamp = fileStamp(this.root, file), known = parsed?.get(file);
+          if (known && known.stamp === stamp && settledStamp(stamp)) {
+            if (known.record) records.push({ ...known.record });
+            else add(file, "invalid-record", known.issue!);
+            continue;
+          }
+          // Cache only deterministic outcomes of settled files; a failed read is retried.
+          const remember = (value: Omit<ParsedFile, "stamp">) => { if (settledStamp(stamp)) parsed?.set(file, { stamp, ...value }); else parsed?.delete(file); };
+          let raw: string;
+          try { raw = await read(file); }
+          catch (e) {
+            parsed?.delete(file);
+            add(file, "invalid-record", this.scope.visibility === "sample" ? String((e as Error).message) : "Record is unreadable or malformed; original file preserved.");
+            continue;
+          }
           try {
-            const raw = await read(file);
             const match = /^(?:\uFEFF)?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(raw);
             if (!match) throw Error("Expected a closed YAML frontmatter block");
             const metadata = parseYaml(match[1]);
             // A moved/mislabeled record cannot acquire the containing partition's authority.
             const candidate = metadata && typeof metadata === "object" ? (metadata as { scope?: unknown }).scope : undefined;
             if (!sameScope(candidate, this.scope)) {
-              add(file, "invalid-record", "Record scope is missing, invalid, or does not match this partition. Content withheld.");
+              const issue = "Record scope is missing, invalid, or does not match this partition. Content withheld.";
+              remember({ issue }); add(file, "invalid-record", issue);
               continue;
             }
             if (!Check(Envelope, metadata)) throw Error("Record envelope is invalid");
-            records.push({ id: metadata.id, title: metadata.title, kind: metadata.kind, type: metadata.type ?? metadata.label ?? metadata.claim_kind ?? "", path: file, revision: metadata.revision, lifecycle: metadata.lifecycle, valid: true, metadata, body: raw.slice(match[0].length), raw, hash: digest(raw) });
-          } catch (e) { add(file, "invalid-record", this.scope.visibility === "sample" ? String((e as Error).message) : "Record is unreadable or malformed; original file preserved."); }
+            const record: LoadedRecord = { id: metadata.id, title: metadata.title, kind: metadata.kind, type: metadata.type ?? metadata.label ?? metadata.claim_kind ?? "", path: file, revision: metadata.revision, lifecycle: metadata.lifecycle, valid: true, metadata: parsed ? freeze(metadata) : metadata, body: raw.slice(match[0].length), raw, hash: digest(raw) };
+            // Cache a pristine copy (metadata frozen, shared by later scans):
+            // validation and observation adjust only the scan's own copy.
+            if (!overlay?.artifacts[file]) remember({ record: { ...record } });
+            records.push(record);
+          } catch (e) {
+            const issue = this.scope.visibility === "sample" ? String((e as Error).message) : "Record is unreadable or malformed; original file preserved.";
+            remember({ issue }); add(file, "invalid-record", issue);
+          }
         }
       }
     };
     try { if (!this.empty) await walk(); } catch { throw Error("Vault unavailable or scan limit exceeded; no partial catalog returned."); }
+    // Forget files and citations that no longer exist, so state tracks the tree.
+    if (parsed && !overlay) for (const file of parsed.keys()) if (!seen.has(file)) parsed.delete(file);
     if (overlay) for (const record of overlay.records ?? (overlay.record ? [overlay.record] : [])) { const old = records.findIndex(r => r.path === record.path); if (old >= 0) records.splice(old, 1); records.push(record); }
     const ontology = resolveOntology(sources, issues);
     const active = new Map(ontology?.definitions.map(d => [d.definition.name, d.definition]) ?? []);
@@ -152,7 +188,7 @@ export class SampleVault {
         }
       }
       for (const message of temporalProblems(m)) problem("invalid-temporal", message);
-      for (const message of annotationProblems(m, records)) problem("invalid-annotation", message);
+      for (const message of annotationProblems(m, id => byId.get(id) ?? [])) problem("invalid-annotation", message);
       if (m.recall !== undefined && !approvedRecall(m.recall)) add(r.path, "invalid-recall", "Recall metadata is invalid or was not issued by the owner-private recall service. Automatic recall is disabled for this record.");
       if (m.owner) resolve(m.owner, true);
       for (const reference of m.entities ?? []) resolve(reference, true);
@@ -170,11 +206,11 @@ export class SampleVault {
         } catch { problem("invalid-evidence", "Evidence is missing, unsafe, changed, or its locator/quote does not match: " + e.path); }
       }
     }
-    if (bytes > 8 * 1024 * 1024) throw Error("Vault exceeds scan budget; no partial catalog returned.");
     if (!overlay) this.observe?.(records, this.scope, evidence);
     const navigable = eligible({ records, ontology, sources, issues, checkedAt: "" }, undefined, false);
     for (const r of navigable) for (const link of resolveLinks(r, navigable)) if (link.status !== "resolved") add(r.path, `${link.status}-link`, `Document link is ${link.status}: ${link.href}`);
     records.sort((a,b) => a.path.localeCompare(b.path));
+    if (this.cache?.evidence && !overlay) for (const key of this.cache.evidence.keys()) if (!evidence.used.has(key)) this.cache.evidence.delete(key);
     return { data: { records, ontology, sources, issues, checkedAt: new Date().toISOString() }, evidence };
   }
   async list(input: { assertionOrigin?: string; includeCards?: boolean; includeEndpoints?: boolean; offset?: number; limit?: number; kind?: string; type?: string; query?: string; lifecycle?: "active" | "all" }) {

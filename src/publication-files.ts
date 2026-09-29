@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import path from "node:path";
-import { digest } from "./vault.js";
+import { digest, MAX_ENTRIES } from "./vault.js";
 
 /** Synchronous file operations keep the SQLite publisher fence held throughout
  * each filesystem boundary. No user path is accepted by the mutation API. */
@@ -98,8 +98,12 @@ export class PublicationFiles {
     checkpoint("after-install");
     if (this.read(change.path) !== change.after || (change.before !== null && this.read(change.backup) !== change.before)) throw Error("conflict");
   }
+  /** Change stamps of every authored file in a scope (not contents). Equal
+   * snapshots mean no file was added, removed or rewritten: any rewrite
+   * changes ctime. Reading stamps keeps each publication independent of how
+   * much knowledge the scope holds. */
   snapshot(scope: string, tolerateUnsafe = false): string {
-    const entries: [string, string][] = []; let count = 0, bytes = 0;
+    const entries: [string, string][] = []; let count = 0;
     const walk = (relative: string, depth = 0) => {
       if (depth > 8) throw Error("Vault directory depth exceeds 8");
       let names: string[];
@@ -107,14 +111,16 @@ export class PublicationFiles {
       catch (e) { if ((e as NodeJS.ErrnoException).code === "ENOENT") return; throw e; }
       for (const name of names.sort()) {
         if (name === ".knowledge-history" || name.toLowerCase() === ".git" || name === "artifacts") continue;
-        if (++count > 500) throw Error("Vault exceeds 500 entries");
-        const target = `${relative}/${name}`, full = this.guard(target), stat = fs.lstatSync(full);
-        if (stat.isSymbolicLink() || (stat.isFile() && stat.nlink !== 1)) {
+        if (++count > MAX_ENTRIES) throw Error(`Vault exceeds ${MAX_ENTRIES.toLocaleString("en-US")} entries`);
+        const target = `${relative}/${name}`, full = this.guard(target), stat = fs.lstatSync(full, { bigint: true });
+        if (stat.isSymbolicLink() || (stat.isFile() && stat.nlink !== 1n)) {
           if (tolerateUnsafe) continue; // Read-side Git observation never follows unsafe entries.
           throw Error("Unsafe publication directory entry");
         }
         if (stat.isDirectory()) { entries.push([target, "directory"]); walk(target, depth + 1); }
-        else if (stat.isFile() && /\.(md|ya?ml)$/.test(name)) { const raw = this.read(target)!; bytes += Buffer.byteLength(raw); if (bytes > 8 * 1024 * 1024) throw Error("Scan budget exceeded"); entries.push([target, digest(raw)]); }
+        // Stamps only: two snapshots of an unchanged file must compare equal
+        // whenever they are taken. accept() re-verifies record contents.
+        else if (stat.isFile() && /\.(md|ya?ml)$/.test(name)) entries.push([target, `${stat.mode}:${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`]);
       }
     };
     walk(scope); return JSON.stringify(entries);

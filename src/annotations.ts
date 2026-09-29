@@ -4,10 +4,11 @@ export function annotationEvidence(m: Partial<Envelope>): Evidence[] {
   return [...(m.attribution_confidence?.evidence ?? []), ...(m.identity?.candidates ?? []).flatMap(c => c.evidence), ...(m.continuity ?? []).flatMap(c => c.evidence)];
 }
 
-export function annotationProblems(m: Envelope, records: LoadedRecord[]): string[] {
+/** `byId` resolves a stable ID to every record carrying it (a scan's index). */
+export function annotationProblems(m: Envelope, byId: (id: string) => readonly LoadedRecord[]): string[] {
   const issues: string[] = [];
   const reference = (id: string, kind: string) => {
-    const found = records.filter(r => r.id === id);
+    const found = byId(id);
     if (id === m.id || found.length !== 1 || found[0].kind !== kind) issues.push(`Invalid ${kind} annotation reference: ${id}`);
   };
   if (m.source_event && (m.claim_kind !== "event" || !m.source_page)) issues.push("Source event requires an event claim and its source page");

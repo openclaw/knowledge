@@ -89,9 +89,13 @@ test('duplicate keys, unknown scope, YAML alias expansion and oversize records a
   const data = await vault.scan();
   for (const file of ['duplicate-key','unknown-scope','alias','large']) assert.ok(data.issues.some(i=>i.path===`notes/${file}.md` && i.code==='invalid-record'),file);
 });
-test('scan byte limit refuses a partial catalog', async t => {
+test('total partition size does not cap a scan; every record is cataloged', async t => {
   const {root,vault} = await fixture(t);
   const original = await readFile(path.join(root,'people/alex-rivera.md'),'utf8');
+  const before = (await vault.scan()).records.length;
+  // ~8.5 MB: past the retired 8 MiB whole-scan budget; each file stays under 64 KiB.
   for (let i=0;i<135;i++) await writeFile(path.join(root,`notes/budget-${i}.md`),original.replace('sample_person_alex',`sample_budget_${i}`)+'x'.repeat(63000));
-  await assert.rejects(vault.scan(), /scan budget/);
+  const data = await vault.scan();
+  assert.equal(data.records.length, before + 135);
+  assert.equal(data.records.filter(r => r.path.startsWith('notes/budget-') && !r.valid).length, 0);
 });

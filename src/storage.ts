@@ -10,7 +10,7 @@ import type { Static } from "typebox";
 import path from "node:path";
 import { attachChunk } from "./attachments.js";
 import { AttachInput, ATTACHMENT_CHUNK_BYTES } from "./attachment-contract.js";
-import { EvidenceInspector, inspectEvidence } from "./evidence-files.js";
+import { EvidenceInspector, inspectEvidence, settledStamp } from "./evidence-files.js";
 import { keywordSearch, verifyKeywordIndex, exactLookup, observeWithdrawals, withdrawnIds, eligible } from "./retrieval.js";
 import type { SearchInput, LookupInput } from "./retrieval-contract.js";
 import { GitHistory, GitUnavailable, type GitBatch, type GitChange } from "./git-history.js";
@@ -42,6 +42,9 @@ export type PublicationHook = (stage: string) => void;
 
 export class KnowledgeStorage {
   private readonly real: RealVault;
+  // Content hash per authored file, valid while its stamp is unchanged, so Git
+  // observation re-reads only files that changed since the last scan.
+  private readonly observedHashes = new Map<string, { stamp: string; hash: string }>();
   private readonly git: GitHistory;
   constructor(readonly config: StoreConfig, private readonly store = new SqliteIdentityStore(config.statePath), private readonly hook: PublicationHook = () => {}, git?: GitHistory) {
     this.git = git ?? new GitHistory(config.root);
@@ -246,7 +249,7 @@ export class KnowledgeStorage {
       const extra = [...(input.addEvidence ?? []), ...annotationEvidence(metadata)];
       for (const evidence of extra) inspectEvidence(path.join(this.config.root, scope), evidence);
       if (extra.length) metadata.evidence = [...new Map([...(metadata.evidence ?? []), ...extra].map(e => [canonical(e), e])).values()];
-      const problems = annotationProblems(metadata, data.records);
+      const problems = annotationProblems(metadata, id => data.records.filter(r => r.id === id));
       if (problems.length) throw Error(problems.join("; "));
       const match = /^(?:\uFEFF)?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(previous.raw)!;
       const doc = parseDocument(match[1]);
@@ -631,16 +634,22 @@ export class KnowledgeStorage {
       if (this.config.writesEnabled) {
         const files = new PublicationFiles(this.config.root);
         const snapshot = files.snapshot(key, true);
+        // Content hashes per file, re-read only when its stamp changed.
         const current = new Map<string, string>();
         const originals = new Map<string, string>();
-        for (const [relative, hash] of JSON.parse(snapshot) as [string, string][]) {
-          if (hash === "directory") continue;
+        for (const [relative, stamp] of JSON.parse(snapshot) as [string, string][]) {
+          if (stamp === "directory") continue;
+          const known = this.observedHashes.get(relative);
+          if (known?.stamp === stamp) { current.set(relative, known.hash); continue; }
           const raw = files.read(relative);
-          if (raw === null || digest(raw) !== hash) throw Error("Vault changed during Git observation.");
-          current.set(relative, raw);
+          if (raw === null) throw Error("Vault changed during Git observation.");
+          const hash = digest(raw);
+          if (settledStamp(stamp)) this.observedHashes.set(relative, { stamp, hash }); else this.observedHashes.delete(relative);
+          current.set(relative, hash);
         }
+        for (const relative of this.observedHashes.keys()) if (relative.startsWith(`${key}/`) && !current.has(relative)) this.observedHashes.delete(relative);
         for (const r of records) {
-          if (current.get(`${key}/${r.path}`) !== r.raw) throw Error("Vault changed during Git observation.");
+          if (current.get(`${key}/${r.path}`) !== r.hash) throw Error("Vault changed during Git observation.");
           for (const file of r.metadata.evidence ?? []) {
             if (!file.path.startsWith("artifacts/")) continue;
             const relative = `${key}/${file.path}`;
@@ -654,15 +663,26 @@ export class KnowledgeStorage {
           }
         }
         const prior = new Map(db.prepare("SELECT path,hash FROM git_files WHERE scope=?").all(key).map(r => [String(r.path), String(r.hash)]));
-        const changes: GitChange[] = [...current].filter(([p, raw]) => prior.get(p) !== digest(raw)).map(([path, raw]) => ({ path, raw }));
+        const changes: GitChange[] = [...current].filter(([p, hash]) => prior.get(p) !== hash).map(([path, hash]) => {
+          const raw = files.read(path);
+          if (raw === null || digest(raw) !== hash) throw Error("Vault changed during Git observation.");
+          return { path, raw };
+        });
         for (const [path, fileHash] of originals) if (prior.get(path) !== fileHash) changes.push({ path, raw: null, fileHash });
         // Artifacts are retained originals; absent references are not deletions.
         for (const p of prior.keys()) if (!current.has(p) && !p.startsWith(`${key}/artifacts/`)) changes.push({ path: p, raw: null });
         if (files.snapshot(key, true) !== snapshot) throw Error("Vault changed during Git observation.");
         this.enqueueGit(db, key, changes, "external observation");
       }
-      for (const r of records.filter(r => r.valid && records.filter(other => other.id === r.id).length === 1)) {
-        const prior = db.prepare("SELECT * FROM observations WHERE scope=? AND id=?").get(key, r.id);
+      // Count IDs once: records with a duplicated ID are not observed.
+      const idCounts = new Map<string, number>();
+      for (const r of records) idCounts.set(r.id, (idCounts.get(r.id) ?? 0) + 1);
+      // Never materialize stored raw text just to compare hashes.
+      const priorOf = db.prepare("SELECT path,hash,revision FROM observations WHERE scope=? AND id=?");
+      const exactWriter = db.prepare("SELECT provenance,agent_id,sequence FROM history WHERE scope=? AND id=? AND hash=? ORDER BY sequence DESC LIMIT 1");
+      const convertedWriter = db.prepare("SELECT provenance,agent_id FROM history WHERE scope=? AND id=? AND sequence<? AND provenance!='conversion' ORDER BY sequence DESC LIMIT 1");
+      for (const r of records.filter(r => r.valid && idCounts.get(r.id) === 1)) {
+        const prior = priorOf.get(key, r.id);
         if (prior && (prior.hash !== r.hash || prior.path !== r.path)) r.revision = Math.max(r.revision, Number(prior.revision) + 1);
         else if (prior) r.revision = Math.max(r.revision, Number(prior.revision));
         if (!prior || prior.hash !== r.hash || prior.path !== r.path) this.recordObservation(db, key, r, prior ? "external-edit" : "observed");
@@ -671,13 +691,12 @@ export class KnowledgeStorage {
         // In a shared store the writer is whichever agent published, never the viewer.
         // A store conversion rewrote only the storage envelope; authorship stays
         // with the revision it converted.
-        const exact = db.prepare("SELECT provenance,agent_id,sequence FROM history WHERE scope=? AND id=? AND hash=? ORDER BY sequence DESC LIMIT 1").get(key, r.id, r.hash);
-        const writer = exact?.provenance === "conversion"
-          ? db.prepare("SELECT provenance,agent_id FROM history WHERE scope=? AND id=? AND sequence<? AND provenance!='conversion' ORDER BY sequence DESC LIMIT 1").get(key, r.id, exact.sequence!)
-          : exact;
+        const exact = exactWriter.get(key, r.id, r.hash);
+        const writer = exact?.provenance === "conversion" ? convertedWriter.get(key, r.id, exact.sequence!) : exact;
         if (writer?.provenance === "agent" && writer.agent_id) r.writtenByAgentId = String(writer.agent_id);
       }
-      for (const prior of db.prepare("SELECT * FROM observations WHERE scope=? AND hash!=''").all(key)) if (!records.some(r => r.id === prior.id)) {
+      const present = new Set(records.map(r => r.id));
+      for (const prior of db.prepare("SELECT id,path,revision FROM observations WHERE scope=? AND hash!=''").all(key)) if (!present.has(String(prior.id))) {
         db.prepare("INSERT INTO history(scope,id,provenance,at,path,revision,hash,raw) VALUES (?,?,?,?,?,?,?,?)").run(key, prior.id!, "external-unavailable", new Date().toISOString(), prior.path!, Number(prior.revision) + 1, "", "");
         db.prepare("UPDATE observations SET hash='',revision=revision+1 WHERE scope=? AND id=?").run(key, prior.id!);
       }

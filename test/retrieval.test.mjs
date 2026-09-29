@@ -251,3 +251,12 @@ test('editing a legacy page removes approval metadata through journaled publicat
   assert.equal((await service.grep({ query: 'Original body' }, f.owner)).total, 1);
   for (const op of ['grep', 'lookup']) assert.equal(Check(contract.operations[op].input, { query: 'Legacy', acceptance: 'candidate' }), false);
 });
+
+test('an index built before row tracking is repopulated, never left empty and ready', async t => {
+  const f = await fixture(t);
+  await f.put('upgrade_note_1', 'Upgrade sentinel', 'lanternword body');
+  assert.equal((await f.service.grep({ query: 'lanternword' }, f.owner)).total, 1);
+  // Simulate the previous version: FTS rows and a matching state row, no tracking table.
+  f.store.withDatabase(db => { for (const { name } of db.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'keyword_rows_v1_%'").all()) db.exec(`DROP TABLE ${name}`); });
+  assert.equal((await f.service.grep({ query: 'lanternword' }, f.owner)).total, 1);
+});
