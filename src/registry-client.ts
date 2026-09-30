@@ -17,7 +17,9 @@ export class RegistryClient {
   current?: RegistrySnapshot;
   /** Set when the registry cannot be opened; every store is then unavailable. */
   failure?: RegistryUnavailable;
-  constructor(readonly stateRoot: string) {}
+  /** `stateRoot` resolves on first use: plugin registration may run where the
+   * host runtime is unavailable (CLI metadata), so construction must not ask. */
+  constructor(private readonly stateRoot: () => string) {}
 
   /** Call a registry operation. Operations that return a snapshot publish it. */
   async call<Op extends keyof RegistryOperations>(op: Op, ...args: Parameters<RegistryOperations[Op]>): Promise<ReturnType<RegistryOperations[Op]>> {
@@ -42,7 +44,7 @@ export class RegistryClient {
   }
   private start(): Worker {
     if (this.worker) return this.worker;
-    const worker = new Worker(new URL("./registry-worker.js", import.meta.url), { workerData: { sdk: sdkUrls(), stateRoot: this.stateRoot } });
+    const worker = new Worker(new URL("./registry-worker.js", import.meta.url), { workerData: { sdk: sdkUrls(), stateRoot: this.stateRoot() } });
     worker.unref();
     worker.on("message", (message: RegistryResponse) => {
       const call = this.pending.get(message.id);

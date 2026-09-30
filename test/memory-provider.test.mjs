@@ -323,6 +323,14 @@ test('entry retains native tools, denies untrusted provider callers and prompt h
   assert.deepEqual(buildKnowledgeMemoryPrompt({ availableTools: new Set() }), []);
 });
 
+test('entry registers without reading the host runtime, as CLI metadata loading requires', () => {
+  // The host's CLI-metadata runtime throws on any property read.
+  const runtime = new Proxy({}, { get(_t, key) { throw new Error(`runtime.${String(key)} is unavailable during registration`); } });
+  let capability;
+  plugin.register({ id: 'knowledge', pluginConfig: {}, runtime, registerMemoryCapability(c) { capability = c; }, registerService() {}, registerSessionAction() {}, registerTool() {} });
+  assert.ok(capability.providerRuntime);
+});
+
 test('flush plan provides tool persistence only for writable real vaults', async t => {
   const f = await fixture(t);
   const plan = f.capability.flushPlanResolver({ contextWindowTokens: 8_000 });

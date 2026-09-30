@@ -33,9 +33,8 @@ export class Stores {
   activeChange?: string;
   private epoch = 0;
   private current = true;
-  constructor(readonly api: Host, readonly policy: Policy, private readonly changed: () => void,
-    stateRoot = path.join(api.runtime.state.resolveStateDir(), "knowledge")) {
-    this.registry = new RegistryClient(stateRoot);
+  constructor(readonly api: Host, readonly policy: Policy, private readonly changed: () => void) {
+    this.registry = new RegistryClient(() => path.join(api.runtime.state.resolveStateDir(), "knowledge"));
   }
 
   hostConfig() { return this.api.runtime.config.current(); }
