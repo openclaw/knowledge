@@ -24,6 +24,7 @@ const host={pluginId:'knowledge',signal:new AbortController().signal,connection:
  onEvent:(name,fn)=>{events.set(name,fn);return()=>events.delete(name)},subscribe:fn=>{listeners.add(fn);return()=>listeners.delete(fn)},
  agents:{rows:[{id:'main',name:'Main',identity:{name:'Atlas'}},{id:'research',name:'Research'},{id:'ops',name:'Ops'}],selectedId:'main'},
  sessions:{create:async()=>'x',open:()=>{}},
+ navigation:{openPage:()=>{}},
  ui:{registerNavigation:()=>()=>{},registerPage:view=>{view.mount(document.querySelector('main'),{host,signal:new AbortController().signal});return()=>{}}}};
 plugin.activate(host);`;
 const bundle = await build({ stdin: { contents: entry, resolveDir: process.cwd() }, bundle: true, write: false, format: 'iife', loader: { '.css': 'empty' } });

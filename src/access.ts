@@ -9,7 +9,7 @@ export type Partition = Exclude<Scope, { visibility: "sample" }>;
 export type Principal = { agentId: string; scope: Partition };
 /** Resolved, live-checked access. `agentId` is the effective agent (reader and
  * writer); the store is chosen by membership, never by the caller. */
-export type VaultAccess = Principal & { assertCurrent: () => void };
+export type VaultAccess = Principal & { assertCurrent: () => void; activity?: import("./session-activity.js").ActivityOrigin };
 type MemoryAudience = NonNullable<Extract<MemoryCallerContext["authority"], { kind: "session" }>["audience"]>;
 /** Provider principals also say whether the lease may release content at all
  * (host readiness checks may not) and whether it is the owner's private audience. */

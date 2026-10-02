@@ -38,6 +38,7 @@ const host={pluginId:'knowledge',signal:new AbortController().signal,connection:
  onEvent:(name,fn)=>{events.set(name,fn);return()=>events.delete(name)},subscribe:fn=>{listeners.add(fn);return()=>listeners.delete(fn)},
  agents:{rows:[{id:'main',name:'Configured name',identity:{name:'Atlas'}},{id:'other',name:'Other agent'}],selectedId:'other'},
  sessions:{create:async(params)=>{window.createdChat=params;return "new-chat"},open:params=>{window.openedChat=params}},
+ navigation:{openPage:()=>{}},
  ui:{registerNavigation:()=>()=>{},registerPage:view=>{window.mount=()=>{controller=new AbortController();mounted=view.mount(document.querySelector('main'),{host,signal:controller.signal});};return()=>{}}}};
 window.renameAgent=name=>{host.agents.rows[0].identity.name=name;for(const fn of listeners)fn()};
 window.unmount=()=>{controller.abort();mounted.dispose()};

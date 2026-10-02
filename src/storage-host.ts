@@ -19,6 +19,7 @@ const attribution = (origin?: string, who?: string) => `Origin: ${origin || "not
 /** Every storage operation the main thread may request, by name. Each runs
  * entirely in the worker; `access.assertCurrent` calls back to the main thread. */
 export const operations = {
+  sessionActivity: (s: Storage, a: Access, input: import("./session-activity.js").ActivityInput) => s.sessionActivity(input, a),
   verify: (s: Storage, a: Access, input: In<Storage["verify"]>) => s.verify(input, a),
   sourceCheck: (s: Storage, a: Access, input: In<Storage["sourceCheck"]>) => s.sourceCheck(input, a),
   batch: (s: Storage, a: Access, input: In<Storage["batch"]>) => s.batch(input, a, "agent"),
@@ -74,7 +75,7 @@ export function serve(port: MessagePort, init: { config: StoreConfig; signal: Sh
   port.on("message", (message: HostMessage) => {
     if (message.type !== "call") return;
     queue = queue.then(async () => {
-      const access: Access = { scope: message.scope, agentId: message.agentId, assertCurrent() {
+      const access: Access = { scope: message.scope, agentId: message.agentId, activity: message.activity ? { ...message.activity, operation: message.op } : undefined, assertCurrent() {
         Atomics.store(signal, 0, 0);
         port.postMessage({ type: "assert", id: message.id } satisfies WorkerMessage);
         if (Atomics.wait(signal, 0, 0, 120_000) === "timed-out") throw Error("Knowledge authority check timed out.");
@@ -82,7 +83,7 @@ export function serve(port: MessagePort, init: { config: StoreConfig; signal: Sh
       } };
       try {
         const run = operations[message.op] as (s: Storage, a: Access, input: unknown) => unknown;
-        port.postMessage({ type: "done", id: message.id, ok: true, value: await run(storage, access, message.input) } satisfies WorkerMessage);
+        port.postMessage({ type: "done", id: message.id, ok: true, value: await storage.trackRead(access, message.op, () => run(storage, access, message.input)) } satisfies WorkerMessage);
       } catch (error) {
         port.postMessage({ type: "done", id: message.id, ok: false, message: error instanceof Error ? error.message : String(error) } satisfies WorkerMessage);
       }

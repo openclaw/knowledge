@@ -69,7 +69,10 @@ export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureE
         if (opened.kind === "unprovisioned" && whenEmpty) return whenEmpty();
         throw Error(opened.message);
       }
-      const result = await opened.runtime.enqueue(opened.access.assertCurrent, () => work(opened.runtime, opened.access));
+      const access = { ...opened.access, ...(context.source === "tool" && context.tool.sessionKey && context.tool.sessionId && context.toolCallId ? {
+        activity: { sessionKey: context.tool.sessionKey, sessionId: context.tool.sessionId, toolCallId: context.toolCallId, operation: "knowledge", at: new Date().toISOString() },
+      } : {}) };
+      const result = await opened.runtime.enqueue(access.assertCurrent, () => work(opened.runtime, access));
       if (write && opened.access.scope.visibility === "private") opened.runtime.live.invalidate();
       return result;
     };
@@ -84,6 +87,7 @@ export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureE
       use(context, true, (runtime, access) => (runtime.client.call as (op: Op, access: VaultAccess, input: unknown) => Promise<Awaited<ReturnType<StorageOperations[Op]>>>)(op, access, { value: input, actor: context.source === "tool" ? "agent" : "operator" }));
     const now = () => new Date().toISOString();
     return {
+      session_activity: (input, context) => context.source !== "session-action" ? Promise.reject(operatorOnly()) : call("sessionActivity", false, () => ({ upper: 0, nextBefore: null, items: [] }))(input, context),
       verify: call("verify"),
       source_check: call("sourceCheck"),
       publish_batch: agentChange("batch"),

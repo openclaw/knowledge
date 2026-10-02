@@ -1,3 +1,4 @@
+import { registerSessionPanel } from "./session-panel.js";
 import { defineControlUiPlugin } from "openclaw/plugin-sdk/control-ui";
 import { createFeatureClient, type FeatureOutput } from "openclaw/plugin-sdk/feature-contract";
 import { contract } from "./contract.js";
@@ -9,6 +10,7 @@ import { confidenceView, identityTag, assertionOrigin as origin, agentDisplayNam
 import { formatSourceDate, sourceDateNote } from "./temporal.js";
 import { captureReadingState } from "./reading-state.js";
 import { markdownView } from "./markdown-view.js";
+import { readLocation, locationParams, locationKey } from "./page-location.js";
 import { viewingClient } from "./store-view-client.js";
 import { accessText, settingsShell, storeBar, storeDialog, storeLabel, storeNotice, storeOf, storesSection, vaultFacts, type SettingsSection } from "./stores-view.js";
 import "./control-ui.css";
@@ -52,13 +54,17 @@ const rawBlock = (label: string, text: string) => { const n = el("details"); n.a
 export default defineControlUiPlugin({
   id: contract.pluginId,
   activate(host) {
+    const removeSessionPanel = registerSessionPanel(host);
     const removeNavigation = host.ui.registerNavigation({ id: "knowledge", label: "Knowledge", page: { id: "overview" }, icon: "book" });
     const removePage = host.ui.registerPage({ id: "overview", label: "Knowledge", mount(container, context) {
       const base = createFeatureClient(contract, context.host);
       // Store settings and the viewing selector. Every other call goes through
       // `feature`, which reads as the selected agent's effective store.
       type StoresSnapshot = FeatureOutput<typeof contract, "stores_snapshot">;
-      let storesSnapshot: StoresSnapshot | undefined, viewing: string | undefined, settingsSection: SettingsSection = "stores";
+      const initialLocation = readLocation(context.props);
+      let { agent: viewing, vault: expectedVault, section: settingsSection } = initialLocation;
+      let storesSnapshot: StoresSnapshot | undefined;
+      let routeKey = locationKey(initialLocation), scopeChecked = false, scopeMismatch = false;
       let storeState: FeatureOutput<typeof contract, "status">["store"] = "ready", storeMessage: string | undefined;
       const feature = viewingClient(base, () => ({ agent: viewing, defaultAgent: storesSnapshot?.defaultAgent }));
       const root = el("section", undefined, "knowledge-page"), header = el("header", undefined, "knowledge-header"), title = el("div"), actions = el("div", undefined, "knowledge-actions");
@@ -77,10 +83,10 @@ export default defineControlUiPlugin({
       const body = el("div", undefined, "knowledge-page-body"); const loading = el("div", "", "knowledge-loading knowledge-muted"); loading.hidden = true; loading.setAttribute("role", "status"); loading.setAttribute("aria-live", "polite");
       body.append(banner, toolbar, loading, content);
       root.append(header, body); container.append(root);
-      let tab: "recent" | "browse" | "search" | "settings" = "recent", selectedId = "", query = "", kind: "page" | "claim" | "relationship" = "page", type = "", offset = 0;
+      let { tab, record: selectedId, query, kind, type, offset, back: browseBack } = initialLocation;
       type RecentCursor = { upperSequence: number; beforeSequence: number } | undefined;
-      let recentCursor: RecentCursor;
-      let includeHistory = false, browseQuery = "", originFilter = "";
+      let recentCursor: RecentCursor = initialLocation.cursor;
+      let { history: includeHistory, filter: browseQuery, origin: originFilter } = initialLocation;
       let recentSequence = 0, lastChecked = "", pendingSnapshot: string | undefined;
       const updates = button("", () => { updates.hidden = true; void load(true).then(ok => { if (ok) { snapshot = pendingSnapshot; pendingSnapshot = undefined; } }); }, "knowledge-new-saves"); updates.hidden = true; toolbar.after(updates);
       const recentBack: RecentCursor[] = [];
@@ -95,7 +101,7 @@ export default defineControlUiPlugin({
       let displayGeneration = 0, viewReady = false, snapshot: string | undefined;
       let staging: HTMLElement | undefined;
       let loadingGeneration = 0, displayView = "", displayScreen = "";
-      const viewKey = () => JSON.stringify([viewing, storeState, tab, settingsSection, selectedId, kind, type, offset, includeHistory, browseQuery, originFilter, query, recentCursor]);
+      const viewKey = () => JSON.stringify([viewing, expectedVault, scopeMismatch, storeState, tab, settingsSection, selectedId, kind, type, offset, includeHistory, browseQuery, originFilter, query, recentCursor]);
       let connectionPages = 1;
       const evidenceLoaders = new WeakMap<HTMLDetailsElement, () => Promise<void>>();
       let timer: ReturnType<typeof setTimeout> | undefined, suggestGeneration = 0;
@@ -104,10 +110,29 @@ export default defineControlUiPlugin({
       const errorText = (error: unknown) => context.host.redact(error instanceof Error ? error.message : String(error));
       const failure = (error: unknown) => el("p", errorText(error), "knowledge-error");
       const empty = (heading: string, text: string) => { const n = el("div", undefined, "knowledge-empty"); n.append(el("h2", heading), el("p", text)); return n; };
+      const currentLocation = () => ({ agent: viewing, vault: expectedVault, tab, record: selectedId, section: settingsSection, kind, type, query, filter: browseQuery, history: includeHistory, origin: originFilter, offset, back: browseBack.filter(n => n < offset), cursor: recentCursor });
+      function writeLocation(replace = false) {
+        if (!scopeChecked) return;
+        const state = currentLocation(), key = locationKey(state);
+        if (routeKey === key) return;
+        routeKey = key; // The host echoes navigation through update; do not reload twice.
+        context.host.navigation.openPage({ id: "overview", params: locationParams(state) }, { replace });
+      }
+      function restoreLocation(props: Readonly<Record<string, string>>) {
+        const next = readLocation(props), key = locationKey(next);
+        if (key === routeKey) return;
+        routeKey = key;
+        ({ agent: viewing, vault: expectedVault, tab, record: selectedId, section: settingsSection, kind, type, query, filter: browseQuery, history: includeHistory, origin: originFilter, offset, back: browseBack, cursor: recentCursor } = next);
+        ++generation; ++statusGeneration; ++suggestGeneration; loadingGeneration = 0;
+        scopeChecked = false; scopeMismatch = false; identity = ""; snapshot = undefined; searchSnapshot = undefined; vocabulary = undefined; viewReady = false;
+        recentBack.length = 0; recentExpanded.clear(); updates.hidden = true; pendingSnapshot = undefined;
+        root.querySelector(".knowledge-chat-handoff")?.remove(); content.replaceChildren();
+        renderToolbar(); void refresh();
+      }
       function navigate(next: typeof tab) { updates.hidden = true; pendingSnapshot = undefined; tab = next; selectedId = ""; offset = 0; recentCursor = undefined; recentBack.length = 0; renderToolbar(); void load(); }
       /** Host roster names first; agent IDs are never shown when a name exists. */
       const displayName = (id: string) => agentDisplayName(id, context.host.agents.rows) ?? storesSnapshot?.agents.find(a => a.id === id)?.name ?? id;
-      const viewedAgent = () => viewing ?? storesSnapshot?.defaultAgent ?? agentId;
+      const viewedAgent = () => viewing || storesSnapshot?.defaultAgent || agentId;
       const announce = (text: string) => { announcer.textContent = ""; announcer.textContent = text; };
       function openSettings(section: SettingsSection) { settingsSection = section; navigate("settings"); }
       function renderStoreContext() {
@@ -118,12 +143,13 @@ export default defineControlUiPlugin({
       /** Switch the viewed agent. Store-bound state resets; nothing is provisioned. */
       function selectAgent(agent: string) {
         if (agent === viewedAgent()) return;
-        viewing = agent; identity = ""; snapshot = undefined; ++generation; ++suggestGeneration; viewReady = false; vocabulary = undefined;
+        ++statusGeneration; loadingGeneration = 0;
+        viewing = agent; expectedVault = ""; scopeChecked = false; scopeMismatch = false; identity = ""; snapshot = undefined; ++generation; ++suggestGeneration; viewReady = false; vocabulary = undefined;
         root.querySelector(".knowledge-chat-handoff")?.remove(); content.replaceChildren();
         const entry = storesSnapshot && storeOf(storesSnapshot, agent);
         announce(`Viewing ${displayName(agent)}’s knowledge${entry ? `: ${storeLabel(entry, displayName)}` : ""}.`);
         renderStoreContext(); tab = tab === "settings" ? "settings" : "recent"; selectedId = ""; offset = 0; recentCursor = undefined; recentBack.length = 0; renderToolbar();
-        void refresh();
+        void refresh(false);
       }
       // After an applied assignment, refresh facts; reset the reading view if the viewed store moved.
       function assignmentApplied(result: FeatureOutput<typeof contract, "stores_change">, agent: string) {
@@ -177,7 +203,7 @@ export default defineControlUiPlugin({
         }
         target.replaceChildren(shell.root, announcer);
       }
-      function open(id: string) { updates.hidden = true; pendingSnapshot = undefined; selectedId = id; renderToolbar(); void load(); }
+      function open(id: string) { if (tab === "settings") tab = "browse"; updates.hidden = true; pendingSnapshot = undefined; selectedId = id; renderToolbar(); void load(); }
       function ask(record: Pick<NonNullable<Detail["record"]>, "id" | "title" | "kind" | "revision" | "hash">, correct = false, candidate?: { id: string; title: string }) {
         root.querySelector(".knowledge-chat-handoff")?.remove();
         const previousFocus = document.activeElement as HTMLElement | null;
@@ -608,8 +634,9 @@ export default defineControlUiPlugin({
         const pages = el("div", undefined, "knowledge-pagination");
         const capped = result.nextOffset !== null && result.nextOffset > 500;
         pages.append(el("span", `${result.total ? offset + 1 : 0}–${offset + result.records.length} of ${result.total.toLocaleString()} · ${result.total > 550 ? "partial browse access" : `complete list${includeHistory ? " · including history" : ""}`}`));
-        const previous = button("Previous", () => { offset = Math.max(0, offset - 50); void load(); }); previous.disabled = !offset;
-        const next = button("Next", () => { offset = result.nextOffset!; void load(); }); next.disabled = result.nextOffset === null || capped; pages.append(previous, next); panel.append(pages);
+        const previousOffset = browseBack.filter(n => n < offset).at(-1);
+        const previous = button(previousOffset === undefined && offset ? "First" : "Previous", () => { offset = previousOffset ?? 0; browseBack = browseBack.filter(n => n < offset); void load(); }); previous.disabled = !offset;
+        const next = button("Next", () => { browseBack = [...browseBack.filter(n => n < offset), offset]; offset = result.nextOffset!; void load(); }); next.disabled = result.nextOffset === null || capped; pages.append(previous, next); panel.append(pages);
         if (capped) panel.append(el("p", "This server cannot page beyond 550 records. Narrow the type filter to see more.", "knowledge-notice"));
         const results = el("div", undefined, "knowledge-browse-results"); results.append(panel); layout.append(facets, results); target.replaceChildren(layout);
       }
@@ -731,12 +758,14 @@ export default defineControlUiPlugin({
         for (const save of looseSaves) { const mark = sourceMarkers.get(save.id); if (!mark) continue; mark(save.status); const section = save.row.parentElement; save.row.remove(); if (section && !section.querySelector("article")) section.remove(); }
         if (!activity.items.length) feed.append(empty("No recent activity", "Knowledge saved by your agent will appear here. Earlier revisions remain in each record’s history."));
         const pages = el("div", undefined, "knowledge-pagination");
-        if (recentBack.length) pages.append(button("Newer activity", () => { recentCursor = recentBack.pop(); void load(); }));
+        if (recentCursor) pages.append(button(recentBack.length ? "Newer activity" : "Latest activity", () => { recentCursor = recentBack.pop(); void load(); }));
         if (activity.nextBefore !== null) pages.append(button("Load older activity", () => { recentBack.push(recentCursor); recentCursor = { upperSequence: activity.upperSequence, beforeSequence: activity.nextBefore! }; void load(); }));
         feed.append(pages); target.replaceChildren(feed);
       }
       async function load(background = false): Promise<boolean> {
         if (disposed) return false;
+        if (!scopeChecked) { void refresh(); return false; }
+        writeLocation();
         const n = ++generation, nextView = viewKey(), nextScreen = JSON.stringify([tab, selectedId]);
         if (!context.host.connection.connected) { void refresh(); return false; }
         if (!background) connectionPages = 1;
@@ -749,6 +778,10 @@ export default defineControlUiPlugin({
         }
         try {
           await (async () => {
+          if (scopeMismatch) {
+            target.replaceChildren(empty("This link belongs to a different knowledge store", "The selected agent no longer uses the store named in this link. No page from another store has been opened."), button("Open current store", () => { expectedVault = ""; scopeChecked = false; scopeMismatch = false; selectedId = ""; tab = "recent"; offset = 0; recentCursor = undefined; void refresh(false); }));
+            return;
+          }
           if (tab === "settings") return await settings(n, target);
           // A store that isn't ready has nothing to read; say why instead.
           if (storeState !== "ready") { target.replaceChildren(storeNotice(storesSnapshot && viewedAgent() ? storeOf(storesSnapshot, viewedAgent()) : undefined, storeState, storeMessage, agentName() ?? "your agent", displayName, () => openSettings("stores"), () => void refresh())); return; }
@@ -758,7 +791,7 @@ export default defineControlUiPlugin({
           if (!query.trim()) { target.replaceChildren(empty("Search knowledge", "Enter a name or a few words to search all saved text.")); return; }
           const result = await feature.invoke("grep", { query: query.trim(), limit: 20, offset }); if (!live(n)) return;
           if (result.index.state !== "ready") { target.replaceChildren(empty("Search unavailable", result.index.message)); return; }
-          if (offset && searchSnapshot && searchSnapshot !== result.index.snapshot) { offset = 0; searchSnapshot = undefined; target.replaceChildren(empty("Knowledge changed", "Run the search again to restart from the current snapshot.")); return; }
+          if (offset && searchSnapshot && searchSnapshot !== result.index.snapshot) { offset = 0; searchSnapshot = undefined; writeLocation(true); target.replaceChildren(empty("Knowledge changed", "Run the search again to restart from the current snapshot.")); return; }
           searchSnapshot = result.index.snapshot;
           const list = el("div", undefined, "knowledge-surface"); list.append(el("p", `${result.total} matches · Ranked text search, not a complete inventory`, "knowledge-list-note"));
           if (!result.coverage.complete) list.append(el("p", result.coverage.message, "knowledge-notice"));
@@ -800,13 +833,13 @@ export default defineControlUiPlugin({
           if (loadingGeneration === n) { loadingGeneration = 0; content.removeAttribute("aria-busy"); if (!loading.querySelector(".knowledge-error")) loading.hidden = true; }
         }
       }
-      let refreshing = false, refreshAgain = false;
-      async function refresh() {
+      let refreshing = false, refreshAgain = false, pendingReplaceLocation = true;
+      async function refresh(replaceLocation = true) {
         if (disposed) return;
         if (!context.host.connection.connected) { ++statusGeneration; status.textContent = viewReady ? "Reconnecting…" : "Offline"; status.hidden = false; banner.hidden = false; banner.textContent = `Can’t reach the vault. ${viewReady ? `Showing the last readable view, checked at ${lastChecked ? time(lastChecked) : "an unknown time"}. Retrying.` : "Reconnect to read your agent’s knowledge."}`; return; }
-        if (refreshing) { refreshAgain = true; return; }
+        if (refreshing) { refreshAgain = true; pendingReplaceLocation &&= replaceLocation; return; }
         refreshing = true;
-        const n = ++statusGeneration, observedGeneration = generation;
+        const n = ++statusGeneration; let observedGeneration = generation;
         try {
           // Store facts first: with several agents and no default, the view
           // must name an agent before reading anything.
@@ -828,18 +861,26 @@ export default defineControlUiPlugin({
             // show one store's content under another's label: reset store-bound
             // navigation and say what happened.
             ++generation; ++suggestGeneration; root.querySelector(".knowledge-chat-handoff")?.remove();
-            selectedId = ""; if (tab !== "settings") tab = "recent"; offset = 0; recentCursor = undefined; recentBack.length = 0; snapshot = undefined; viewReady = false; vocabulary = undefined; content.replaceChildren(); renderToolbar();
+            if (!expectedVault) { selectedId = ""; if (tab !== "settings") tab = "recent"; offset = 0; recentCursor = undefined; recentBack.length = 0; }
+            snapshot = undefined; viewReady = false; vocabulary = undefined; content.replaceChildren(); renderToolbar();
             const entry = storesSnapshot && storeOf(storesSnapshot, report.agent);
-            announce(`${displayName(report.agent)}’s knowledge store changed${entry ? ` to ${storeLabel(entry, displayName)}` : ""}. Showing it now.`);
+            observedGeneration = generation;
+            announce(`${displayName(report.agent)}’s knowledge store changed${entry ? ` to ${storeLabel(entry, displayName)}` : ""}.${expectedVault && expectedVault !== report.vault ? " This link still points to the original store." : " Showing it now."}`);
           }
           const stateChanged = storeState !== report.store;
-          identity = nextIdentity; agentId = report.agent; storeState = report.store; storeMessage = report.message; renderAgentCopy();
+          scopeMismatch = Boolean(expectedVault && report.vault && expectedVault !== report.vault);
+          scopeChecked = true;
+          viewing = report.agent;
+          if (!expectedVault && report.vault) expectedVault = report.vault;
+          identity = nextIdentity; agentId = report.agent; storeState = report.store; storeMessage = report.message; renderStoreContext();
+          writeLocation(replaceLocation);
           if (stateChanged) renderToolbar();
           lastChecked = new Date().toISOString();
           status.textContent = ""; status.hidden = true;
           banner.hidden = true; banner.textContent = "";
           if (loadingGeneration || (viewReady && displayView === viewKey() && report.snapshot && snapshot === report.snapshot)) return;
           if (storeState !== "ready") { browseTab.replaceChildren(document.createTextNode("Browse")); if (!viewReady || displayView !== viewKey()) await load(); return; }
+          if (scopeMismatch) { await load(); return; }
           vocabulary = await loadVocabulary(feature); if (disposed || n !== statusGeneration) return;
           const pageCount = vocabulary.definitions.reduce((sum, d) => sum + d.recordCount, 0);
           const countBadge = el("span", pageCount.toLocaleString(), "knowledge-tab-count"); countBadge.setAttribute("aria-hidden", "true"); browseTab.replaceChildren(document.createTextNode("Browse"), countBadge);
@@ -852,7 +893,7 @@ export default defineControlUiPlugin({
           }
           if (await load(viewReady && displayView === viewKey())) snapshot = report.snapshot;
         } catch (error) { if (!disposed && n === statusGeneration) { status.textContent = "Refresh unavailable"; status.hidden = false; if (!viewReady) content.replaceChildren(failure(error)); } }
-        finally { refreshing = false; if (refreshAgain) { refreshAgain = false; void refresh(); } }
+        finally { refreshing = false; if (refreshAgain) { refreshAgain = false; const replace = pendingReplaceLocation; pendingReplaceLocation = true; void refresh(replace); } }
       }
       let connected = context.host.connection.connected;
       const rosterKey = () => JSON.stringify(context.host.agents.rows.map(agent => [agent.id, agent.name, agent.identity?.name]));
@@ -867,8 +908,8 @@ export default defineControlUiPlugin({
       const focusSearch = (event: KeyboardEvent) => { if (event.key !== "/" || event.ctrlKey || event.metaKey || event.altKey || event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || (event.target instanceof HTMLElement && event.target.isContentEditable)) return; const input = root.querySelector<HTMLInputElement>("input[type=search]"); if (input) { event.preventDefault(); input.focus(); } };
       document.addEventListener("keydown", focusSearch);
       renderToolbar(); renderAgentCopy(); void refresh();
-      return { dispose() { document.removeEventListener("keydown", focusSearch); disposed = true; ++generation; ++statusGeneration; ++suggestGeneration; clearTimeout(timer); clearInterval(resync); unwatch(); unsubscribe(); root.remove(); } };
+      return { update(next) { context = next; restoreLocation(next.props); }, dispose() { document.removeEventListener("keydown", focusSearch); disposed = true; ++generation; ++statusGeneration; ++suggestGeneration; clearTimeout(timer); clearInterval(resync); unwatch(); unsubscribe(); root.remove(); } };
     } });
-    return () => { removePage(); removeNavigation(); };
+    return () => { removeSessionPanel(); removePage(); removeNavigation(); };
   },
 });

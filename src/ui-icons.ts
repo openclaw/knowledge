@@ -1,6 +1,8 @@
 // Static glyphs from the supplied OpenClaw design kit (Lucide-style).
 // Only this trusted, bundled markup is parsed; record content is always text.
 const glyphs = {
+  "sortAscending": "<path d=\"m3 8 4-4 4 4M7 4v16M14 4h2M14 10h4M14 16h6\" />",
+  "sortDescending": "<path d=\"m3 16 4 4 4-4M7 20V4M14 4h6M14 10h4M14 16h2\" />",
   "plus": "<path d=\"M5 12h14M12 5v14\" />",
   "eye": "<path d=\"M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0\" /> <circle cx=\"12\" cy=\"12\" r=\"3\" />",
 

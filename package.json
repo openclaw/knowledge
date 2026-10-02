@@ -33,7 +33,8 @@
     "docs/INGESTION_OPERATIONS.md",
     "docs/CORRECTIONS.md",
     "docs/MARKDOWN_LINKS.md",
-    "docs/MEMORY_PROVIDER.md"
+    "docs/MEMORY_PROVIDER.md",
+    "docs/SESSION_ACTIVITY.md"
   ],
   "peerDependencies": {
     "openclaw": ">=2026.9.5"

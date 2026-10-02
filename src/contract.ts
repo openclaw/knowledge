@@ -1,3 +1,4 @@
+import { SessionActivityInput, SessionActivityOutput } from "./session-activity.js";
 import { BatchInput, SourceCheckInput, SourceCheckOutput, VerifyInput, VerifyOutput } from "./ingestion-contract.js";
 import { ConnectionsInput, ConnectionsOutput } from "./connections-contract.js";
 import { RecentInput, RecentOutput } from "./recent.js";
@@ -18,6 +19,7 @@ const issues = Type.Array(issue, { maxItems: 1000 });
 export const contract = defineFeatureContract({
   pluginId: "knowledge",
   operations: {
+    session_activity: { kind: "query", description: "Operator-only session activity inspection. Current eligible records only; reads are best effort, writes retain original host session provenance.", input: SessionActivityInput, output: SessionActivityOutput },
     verify: {
       kind: "query", description: "Verify up to 100 published record IDs in one bounded structural check. Prefer this after ingestion, not full-body reads. Checks active eligibility, references/links, retained evidence hashes/locators, optional expected revision/hash and owner/due/occurrence values, and reconciled keyword indexing. Returns counts and exceptions only (20/page, max 50); follow nextOffset with the same records and snapshot. Null expected owner/date asserts absence; omitted means do not compare. Not a semantic, speaker-attribution or source-completeness evaluation.",
       input: VerifyInput, output: VerifyOutput, tool: { name: "knowledge_verify", label: "Verify knowledge publication" },

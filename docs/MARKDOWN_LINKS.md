@@ -1,5 +1,36 @@
 # Readable source links and filenames
 
+## Knowledge page addresses
+
+The native Knowledge page persists navigation through the public Control UI
+`navigation.openPage` contract. The host encodes page parameters as `p.*` query
+parameters and delivers them through page `context.props` and `update`.
+
+- `p.agent` selects an authorized operator viewing context; `p.vault` pins the
+  observed store identity. It is not an access grant or an arbitrary vault path.
+  If that agent now uses a different store, the page explains the mismatch and
+  does not open a record there. An explicit “Open current store” action starts a
+  new view. Unknown agents do not fall back to the default agent.
+- `p.record` is the stable record ID, not its title or filesystem path. Renames
+  therefore do not change the page address.
+- `p.view`, `p.section`, `p.kind`, `p.type`, `p.q`, `p.filter`, `p.history`,
+  `p.origin`, and `p.offset` retain the selected view, submitted search, browse
+  filters, settings section, and pagination. `p.upper`/`p.before` retain a recent
+  activity cursor. `p.back` retains validated prior Browse offsets so Previous
+  survives host remounts, reloads, and variable-size pages. Links without that
+  trail offer First. Defaults are omitted; invalid bounds reset to safe defaults.
+- Navigation creates history entries; initial store resolution canonicalizes
+  the current entry. Refresh and browser back/forward restore the addressed
+  view. Restoring an older activity page offers “Latest activity” when its
+  in-memory newer-page stack is unavailable.
+- Expansion toggles, scroll position, unsent chat handoffs, and source passage
+  locators are not part of this URL contract yet. No chat citation renderer or
+  sidebar click routing is installed by this change.
+
+Use the host's `pageHref({id: "overview", params})` API when generating links
+from browser code so the configured Control UI base path is preserved. Do not
+hardcode the Gateway origin or put credentials in a page address.
+
 - Records keep immutable IDs in frontmatter; creation uses a title-based slug in
   the ontology's directory (`people/josh-lehman.md`). Collisions receive a short
   ID suffix. Saves retain the current path; external renames preserve identity.

@@ -38,7 +38,7 @@ export class StorageClient {
       this.calls.set(id, { access, resolve: resolve as (value: unknown) => void, reject });
       // Keep the process alive only while work is outstanding.
       worker.ref();
-      worker.postMessage({ type: "call", id, op, input: input[0], scope: access.scope, agentId: access.agentId } satisfies HostMessage);
+      worker.postMessage({ type: "call", id, op, input: input[0], scope: access.scope, agentId: access.agentId, activity: access.activity } satisfies HostMessage);
     });
   }
   /** Stop the worker. Outstanding calls fail; the next call starts a new worker. */

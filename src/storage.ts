@@ -1,3 +1,4 @@
+import { appendActivity, sessionActivity, returnedRecords, type ActivityOrigin, type ActivityInput } from "./session-activity.js";
 import { verifyRecords } from "./verification.js";
 import { BatchInput, SourceCheckInput, VerifyInput, type SourceIdentity, type VerifyOutput } from "./ingestion-contract.js";
 import { recordPath } from "./record-path.js";
@@ -35,7 +36,7 @@ export const scopeKey = (scope: Scope) => scope.visibility === "conversation" ? 
 const blocked = () => Error("Knowledge publication pending or conflicted; inspect mutation history and retry the original request. No partial catalog returned.");
 // `agentId` is the writing agent, fixed at acceptance so a resumed publication
 // keeps its original author whoever resumes it.
-type Plan = { rootIdentity: string; before: Manifest; after: Manifest; changes: FileChange[]; actor: string; agentId?: string; scope: string; record: LoadedRecord; records?: LoadedRecord[]; source?: SourceIdentity };
+type Plan = { activity?: ActivityOrigin; rootIdentity: string; before: Manifest; after: Manifest; changes: FileChange[]; actor: string; agentId?: string; scope: string; record: LoadedRecord; records?: LoadedRecord[]; source?: SourceIdentity };
 type Prepared = { record: LoadedRecord; artifacts: Record<string, string>; previous?: LoadedRecord; data: Awaited<ReturnType<SampleVault["scan"]>>; snapshot: string; additional?: { before?: LoadedRecord; after: LoadedRecord }[]; batch?: { items: NonNullable<Receipt["items"]>; source?: SourceIdentity; expectedPreviousRequestId?: string }; lifecycle?: CorrectInput | WithdrawInput; annotation?: boolean; metadataOnly?: boolean; annotationEvidence?: import("./model.js").Evidence[] };
 type Row = { scope: string; request: string; intent: string; state: Receipt["state"]; plan: string; receipt: string };
 export type PublicationHook = (stage: string) => void;
@@ -54,6 +55,27 @@ export class KnowledgeStorage {
     access.assertCurrent();
     this.assertReadable();
     return this.real.run(access, operation);
+  }
+  async trackRead<T>(access: VaultAccess, operation: string, read: () => T | Promise<T>): Promise<T> {
+    const result = await read();
+    if (access.activity && ["search", "lookup", "records", "record", "connections"].includes(operation)) {
+      const records = returnedRecords(result);
+      // Best effort: observation must not turn a successful read into a failed read.
+      // Authority failures still prevent delivery, even when telemetry fails.
+      access.assertCurrent();
+      try { this.store.withDatabase(db => appendActivity(db, scopeKey(access.scope), access.agentId, access.activity!, "read", records)); }
+      catch { /* This is a session explorer, not a complete security audit log. */ }
+    }
+    access.assertCurrent();
+    return result;
+  }
+  async sessionActivity(input: ActivityInput, access: VaultAccess) {
+    return this.run(access, async vault => {
+      const data = await vault.scan();
+      access.assertCurrent();
+      return this.store.withDatabase(db => sessionActivity(db, scopeKey(access.scope), access.agentId,
+        eligible(data, withdrawnIds(db, this.retrievalBinding(access)), false), input));
+    });
   }
   private retrievalBinding(access: VaultAccess) { return `${this.config.vaultId}:${scopeKey(access.scope)}`; }
   async search(input: SearchInput, access: VaultAccess) {
@@ -481,7 +503,7 @@ export class KnowledgeStorage {
         receipt.reason = prepared.lifecycle.reason;
         receipt.impact = lifecycleImpact(prepared.data.records, prepared.lifecycle.id);
       }
-      const plan: Plan = { rootIdentity: files.identity(), before, after, changes, actor, agentId: actor === "agent" ? access.agentId : undefined, scope, source: prepared.batch?.source, record: prepared.record, records: [prepared.record, ...(prepared.additional ?? []).map(c => c.after)] };
+      const plan: Plan = { activity: access.activity, rootIdentity: files.identity(), before, after, changes, actor, agentId: actor === "agent" ? access.agentId : undefined, scope, source: prepared.batch?.source, record: prepared.record, records: [prepared.record, ...(prepared.additional ?? []).map(c => c.after)] };
       access.assertCurrent();
       db.prepare("INSERT INTO mutations VALUES (?,?,?,?,?,?)").run(scope, requestId, intent, "accepted", JSON.stringify(plan), JSON.stringify(receipt));
     });
@@ -519,6 +541,7 @@ export class KnowledgeStorage {
         const records = plan.records ?? [plan.record];
         observeWithdrawals(db, records, this.retrievalBinding(access));
         for (const record of records) this.recordObservation(db, plan.scope, record, plan.actor, plan.agentId);
+        if (plan.activity && plan.agentId) appendActivity(db, plan.scope, plan.agentId, plan.activity, "write", records);
         this.enqueueGit(db, plan.scope, plan.changes.filter(c => c.path !== "vault.json").map(c => ({ path: c.path, raw: c.after })), plan.actor, this.publicationToken(plan.scope, requestId));
         receipt.git = { state: "pending", message: "Published; local Git checkpoint pending." };
       } catch (e) {
