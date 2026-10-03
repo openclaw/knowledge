@@ -319,7 +319,7 @@ test('entry retains native tools, denies untrusted provider callers and prompt h
   await assert.rejects(capability.providerRuntime.open({ cfg: {}, agentId: 'main', context: {} }), /authority/);
   assert.deepEqual(capability.promptBuilder({ availableTools: new Set() }), []);
   // Writes are on by default, so the provider owns the pre-compaction flush.
-  assert.deepEqual(capability.flushPlanResolver({}).persistenceToolNames, ['knowledge_save_page']);
+  assert.deepEqual(capability.providerFlushPlanResolver({}).persistenceToolNames, ['knowledge_save_page']);
   assert.deepEqual(buildKnowledgeMemoryPrompt({ availableTools: new Set() }), []);
 });
 
@@ -333,7 +333,7 @@ test('entry registers without reading the host runtime, as CLI metadata loading 
 
 test('flush plan provides tool persistence only for writable real vaults', async t => {
   const f = await fixture(t);
-  const plan = f.capability.flushPlanResolver({ contextWindowTokens: 8_000 });
+  const plan = f.capability.providerFlushPlanResolver({ contextWindowTokens: 8_000 });
   assert.deepEqual(plan.persistenceToolNames, ['knowledge_save_page']);
   assert.deepEqual(plan.lookupToolNames, ['knowledge_grep', 'knowledge_lookup', 'knowledge_record']);
   assert.equal(plan.relativePath, undefined);
@@ -354,12 +354,12 @@ test('flush plan provides tool persistence only for writable real vaults', async
     ['knowledge_grep', 'knowledge_lookup', 'knowledge_record', 'knowledge_save_page'],
   );
   assert.equal(
-    f.capability.flushPlanResolver({ nowMs: 0 }).prompt,
-    f.capability.flushPlanResolver({ nowMs: Date.UTC(2036, 0, 1) }).prompt,
+    f.capability.providerFlushPlanResolver({ nowMs: 0 }).prompt,
+    f.capability.providerFlushPlanResolver({ nowMs: Date.UTC(2036, 0, 1) }).prompt,
   );
 
   const readOnly = await fixture(t, { writesEnabled: false });
-  assert.equal(readOnly.capability.flushPlanResolver({}), null);
+  assert.equal(readOnly.capability.providerFlushPlanResolver({}), null);
 });
 
 test('flush save derives stable scoped request IDs and preserves exact retry semantics', async t => {

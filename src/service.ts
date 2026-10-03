@@ -50,9 +50,9 @@ export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureE
       recallToolNames: ["knowledge_grep", "knowledge_lookup", "knowledge_record"],
       // Every agent has an effective store, so every agent gets the guidance.
       promptBuilder: params => buildKnowledgeMemoryPrompt({ ...params, availableTools: policy.writesEnabled ? params.availableTools : new Set([...params.availableTools].filter(t => !WRITE_TOOLS.includes(t))) }),
-      // The selected provider owns persistence; write-disabled installs keep
-      // suppressing Memory Core's append-only file plan with an explicit null.
-      flushPlanResolver: () => policy.writesEnabled ? buildKnowledgeMemoryFlushPlan() : null,
+      // The selected provider owns persistence through the host-completed resolver;
+      // write-disabled installs suppress Memory Core's append-only file plan with an explicit null.
+      providerFlushPlanResolver: () => policy.writesEnabled ? buildKnowledgeMemoryFlushPlan() : null,
     });
   }
   api.registerService?.({ id: "knowledge:live-state", start() { stores.start(); }, stop() { stores.stop(); } });

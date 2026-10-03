@@ -1,8 +1,8 @@
 import type { MemoryPluginCapability } from "openclaw/plugin-sdk/memory-host-core";
 import { SILENT_REPLY_TOKEN } from "openclaw/plugin-sdk/reply-runtime";
 
-type MemoryFlushPlanResolver = NonNullable<MemoryPluginCapability["flushPlanResolver"]>;
-type MemoryFlushPlan = NonNullable<ReturnType<MemoryFlushPlanResolver>>;
+type MemoryProviderFlushPlanResolver = NonNullable<MemoryPluginCapability["providerFlushPlanResolver"]>;
+type MemoryFlushPlan = NonNullable<ReturnType<MemoryProviderFlushPlanResolver>>;
 
 const KNOWLEDGE_FLUSH_PROMPT = [
   "Before compaction, follow the knowledge-capture skill's rules for durable conversation-derived decisions, preferences, commitments, and facts about people or projects.",
