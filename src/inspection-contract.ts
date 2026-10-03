@@ -12,7 +12,7 @@ export const Summary = Type.Object({
   writtenByAgentId: Type.Optional(text(64)),
   recordedAt: Type.Optional(text(40)), updatedAt: Type.Optional(text(40)), occurredAt: Type.Optional(text(40)),
   from: Envelope.properties.from, to: Envelope.properties.to, label: Envelope.properties.label,
-  attributionConfidence: Envelope.properties.attribution_confidence,
+  attributionConfidence: Type.Optional(Type.Object({ level: Type.Union([Type.Literal("high"), Type.Literal("medium"), Type.Literal("low")]), basis: text(1000), evidence: Type.Optional(Type.Array(Evidence)) })),
   identityStatus: Type.Optional(text(20)), identityContext: Type.Optional(text(1000)), sourceEvent: Type.Optional(Type.Boolean()),
 });
 // Bounded card data, projected from the same authorized scan as the list.
@@ -30,11 +30,26 @@ export const ClaimCard = Type.Object({
 }, { additionalProperties: false });
 export const CardSummary = Type.Object({ ...Summary.properties, card: Type.Optional(ClaimCard) });
 const Issue = Type.Object({ path: text(500), code: text(80), message: text(1000) });
+export const CompactMetadata = Type.Object({
+  owner: Envelope.properties.owner, due_at: Envelope.properties.due_at, occurred_at: Envelope.properties.occurred_at,
+  source_page: Envelope.properties.source_page, source_event: Envelope.properties.source_event,
+  entities: Envelope.properties.entities, dependencies: Envelope.properties.dependencies,
+  from: Envelope.properties.from, to: Envelope.properties.to, label: Envelope.properties.label,
+  attribution: Envelope.properties.attribution, assertion_origin: Envelope.properties.assertion_origin,
+  claim_kind: Envelope.properties.claim_kind,
+  identity: Type.Optional(Type.Object({ status: Type.Union([Type.Literal("partial"), Type.Literal("resolved")]), context: text(1000),
+    candidates: Type.Optional(Type.Array(Type.Object({ id: text(96), basis: text(1000) }), { maxItems: 10 })) })),
+  attribution_confidence: Type.Optional(Type.Object({ level: Type.Union([Type.Literal("high"), Type.Literal("medium"), Type.Literal("low")]), basis: text(1000) })),
+}, { additionalProperties: false });
+export type CompactMetadata = Static<typeof CompactMetadata>;
 export const RecordInput = Type.Object({
   id: text(96),
   view: Type.Optional(Type.Union([Type.Literal("content"), Type.Literal("summary"), Type.Literal("raw")])),
   offset, maxChars,
-  includeMetadata: optionalBool(), includeEvidence: optionalBool(), includeReferences: optionalBool(),
+  metadataView: Type.Optional(Type.Union([Type.Literal("compact"), Type.Literal("full"), Type.Literal("none")], { description: "Default compact: structured associations, dates and uncertainty without evidence. Full for arbitrary ontology fields/provenance; none for text-only inspection. Do not combine with legacy includeMetadata." })),
+  includeMetadata: Type.Optional(Type.Boolean({ description: "Legacy full/none metadata selector. Omit for compact defaults; do not combine with metadataView." })),
+  includeEvidence: Type.Optional(Type.Boolean({ description: "Default false. Request verified evidence locators/excerpts and supporting previews for provenance review; use evidence pagination for completeness." })),
+  includeReferences: Type.Optional(Type.Boolean({ description: "Default false. Request connected record summaries; follow nextReferenceOffset." })),
   referenceOffset: offset, referenceLimit: limit,
   evidenceOffset: offset, evidenceLimit: limit,
   maxEvidenceChars: Type.Optional(Type.Integer({ minimum: 0, maximum: 20000 })),
@@ -45,12 +60,17 @@ export const RecordOutput = Type.Object({
   view: Type.Union([Type.Literal("content"), Type.Literal("summary"), Type.Literal("raw")]),
   record: Type.Union([Type.Intersect([Summary, Type.Object({
     hash: text(64), body: Type.Optional(text(65536)), raw: Type.Optional(text(65536)),
-    metadata: Type.Optional(Envelope), attribution: Type.Optional(text(1000)),
+    metadata: Type.Optional(Type.Object({ ...Type.Partial(Envelope).properties,
+      identity: Type.Optional(Type.Object({ status: Type.Union([Type.Literal("partial"), Type.Literal("resolved")]), context: text(1000),
+        candidates: Type.Optional(Type.Array(Type.Object({ id: text(96), basis: text(1000), evidence: Type.Optional(Type.Array(Evidence)) }))) })),
+      attribution_confidence: Type.Optional(Type.Object({ level: Type.Union([Type.Literal("high"), Type.Literal("medium"), Type.Literal("low")]), basis: text(1000), evidence: Type.Optional(Type.Array(Evidence)) })),
+    })), attribution: Type.Optional(text(1000)),
     assertionOrigin: Type.Optional(text(30)), claimKind: Type.Optional(text(30)),
     owner: Type.Optional(Summary), source: Type.Optional(Summary), about: Type.Optional(Type.Array(Summary, { maxItems: 2 })),
   })]), Type.Null()]),
   content: Type.Object({ offset: Type.Integer(), totalChars: Type.Integer(), nextOffset: nullableOffset }),
   issues: Type.Array(Issue, { maxItems: 1000 }),
+  omitted: Type.Optional(Type.Array(text(80), { maxItems: 10 })),
   sourceFiles: Type.Optional(Type.Array(Type.Object({ evidence: InspectedEvidence, citations: Type.Integer() }), { maxItems: 100 })),
   sourceFilesTotal: Type.Optional(Type.Integer()),
   identityEvidence: Type.Optional(Type.Array(Type.Object({ id: text(96), evidence: Type.Array(InspectedEvidence, { maxItems: 20 }) }), { maxItems: 10 })),

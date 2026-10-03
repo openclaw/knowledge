@@ -19,12 +19,19 @@ Read [shared conventions](references/conventions.md). This workflow is read-only
    exists. Preserve `ambiguous` as ambiguity and inspect candidates rather than
    choosing one.
 3. Inspect relevant hits with `knowledge_record`. Read enough context to support
-   the answer; follow body/evidence pagination as needed. Compare the hit's
+   the answer. Compact metadata is included by default; request
+   `includeEvidence: true` for source locators, excerpts and attribution support,
+   and `metadataView: "full"` for arbitrary domain fields. Connections default
+   to compact identities/endpoints/uncertainty; request `view: "full"` only for
+   richer metadata/evidence, and `includeCards: true` with full view for prose.
+   Follow body/evidence/connection pagination as needed. Compare the hit's
    citation hash/revision to the readback. Restart on changes rather than combine
    incompatible revisions. Use `includeReferences` only for declared structured
    connections; prose links do not populate that list automatically.
-4. Answer from the retrieved passages. Cite the title/ID/path and relevant source
-   locator; propagate original evidence, not only the generated summary. Label
+4. Answer from the retrieved passages. In Control UI chat, cite readable titles
+   linked to the dedicated Knowledge record page using the shared conventions'
+   chat-link contract. Retain relevant source locators and propagate original
+   evidence, not only the generated summary. Label
    synthesis and disagreements. Use lifecycle history filters explicitly for
    historical questions; do not present superseded material as current.
 5. Distinguish no matches from inaccessible, invalid, incomplete or failed reads.

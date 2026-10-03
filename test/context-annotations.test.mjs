@@ -37,7 +37,7 @@ async function setup(t) {
   f.evidence = [{...upload.evidence,start_line:1,end_line:1}];
   f.claim = async (extra={}) => f.service.create_claim({requestId:randomUUID(),expectedOntologyFingerprint:f.fingerprint,title:'Investigate',body:'Alex will investigate.',claim_kind:'commitment',assertion_origin:'source',attribution:'Alex, source line 1',evidence:f.evidence,source_page:f.source.id,...extra},f.owner);
   f.annotate = async (id,annotations,extra={}) => {
-    const r=(await f.service.record({id,includeMetadata:true},f.owner)).record;
+    const r=(await f.service.record({id,includeMetadata:true,includeEvidence:true},f.owner)).record;
     const input={requestId:randomUUID(),id,expectedRevision:r.revision,expectedHash:r.hash,reason:'Evidence-backed context update',annotations,...extra};
     const result=await f.service.annotate(input,f.owner);
     assert.ok(Check(contract.operations.annotate.output,result));return {input,result};
@@ -49,13 +49,13 @@ test('context annotations preserve assertion text/lifecycle, append evidence, an
   const f=await setup(t), original=await f.claim();
   const second=await f.claim({body:'Alex reaffirmed the investigation.',title:'Reaffirmed investigation'});
   const {input,result}=await f.annotate(second.id,{continuity:[{id:original.id,relation:'reaffirms',basis:'Explicit reaffirmation in the next source line',evidence:f.evidence}]},{addEvidence:f.evidence});
-  const read=await f.service.record({id:second.id,includeMetadata:true},f.owner);
+  const read=await f.service.record({id:second.id,includeMetadata:true,includeEvidence:true},f.owner);
   assert.equal(read.record.body,'Alex reaffirmed the investigation.');
   assert.equal(read.record.lifecycle,'active');assert.equal(read.record.metadata.supersedes,undefined);
   assert.equal(read.record.metadata.evidence.length,1,'Identical support is not duplicated');
   assert.equal(read.record.metadata.continuity[0].id,original.id);
   assert.equal(read.relatedStatements[0].incoming,false);
-  const reverse=await f.service.record({id:original.id},f.owner);
+  const reverse=await f.service.record({id:original.id,includeEvidence:true},f.owner);
   assert.equal(reverse.relatedStatements[0].record.id,second.id);
   assert.equal(reverse.relatedStatements[0].incoming,true);
   assert.equal(reverse.relatedStatements[0].source.id,f.source.id);
@@ -76,7 +76,7 @@ test('uncertain identity and attribution retain evidence; cross-scope guesses an
   await f.annotate(claim.id,{attribution_confidence:{level:'medium',basis:'Direct roll call; source track remains uncertain',evidence:f.evidence}});
   await assert.rejects(f.annotate(person.id,{identity:{status:'partial',context:'Unknown',candidates:[{id:randomUUID(),basis:'Guessed hidden person',evidence:f.evidence}]}}),/reference/);
   await assert.rejects(f.annotate(claim.id,{attribution_confidence:{level:'high',basis:'Bad evidence',evidence:[{...f.evidence[0],sha256:'0'.repeat(64)}]}}),/hash|match/i);
-  const read=await f.service.record({id:person.id,includeMetadata:true},f.owner);
+  const read=await f.service.record({id:person.id,includeMetadata:true,includeEvidence:true},f.owner);
   assert.equal(read.record.metadata.identity.status,'partial');
   assert.equal((await f.service.records({type:'person'},f.owner)).total,2,'Candidates never merge identities');
 });
@@ -90,7 +90,7 @@ test('fixture classification consistently removes records from current views wit
   assert.equal((await f.service.connections({id:f.source.id},f.owner)).connections.some(r=>r.record.id===claim.id),false);
   assert.equal((await f.service.recent({},f.owner)).items.some(r=>r.id===claim.id),false);
   assert.equal((await f.service.records({kind:'claim',lifecycle:'all'},f.owner)).total,1);
-  const exact=await f.service.record({id:claim.id,includeMetadata:true},f.owner);
+  const exact=await f.service.record({id:claim.id,includeMetadata:true,includeEvidence:true},f.owner);
   assert.equal(exact.record.body,'Alex will investigate.');assert.equal(exact.record.metadata.record_class,'fixture');
   assert.ok((await f.service.history({id:claim.id},f.owner)).entries.length>=2);
 });
@@ -105,7 +105,7 @@ test('new records with shared annotation evidence serialize without YAML aliases
   const page=await f.service.save_page({requestId:randomUUID(),type:'person',title:'Another person',body:'Source-qualified profile.',
     attachments:f.evidence,attribution_confidence:confidence},f.owner);
   for(const receipt of [claim,relationship,page]) {
-    const read=await f.service.record({id:receipt.id,includeMetadata:true},f.owner);
+    const read=await f.service.record({id:receipt.id,includeMetadata:true,includeEvidence:true},f.owner);
     assert.ok(read.record,'Published serialization must survive an independent vault scan');
     assert.equal(read.record.valid,true);
     assert.equal(read.evidence[0].verified,true);
@@ -114,13 +114,13 @@ test('new records with shared annotation evidence serialize without YAML aliases
   const next=await f.claim(), third=await f.claim();
   const continuity=[next,third].map(r=>({id:r.id,relation:'reaffirms',basis:'Same source context',evidence:f.evidence}));
   await f.annotate(claim.id,{continuity});
-  assert.equal((await f.service.record({id:claim.id,includeMetadata:true},f.owner)).record.metadata.continuity.length,2);
+  assert.equal((await f.service.record({id:claim.id,includeMetadata:true,includeEvidence:true},f.owner)).record.metadata.continuity.length,2);
   const saved=(await f.service.record({id:page.id},f.owner)).record;
   const candidate=await f.page('Alex candidate','person');
   const identity={status:'partial',context:'Unresolved source name',candidates:[person,candidate].map(r=>({id:r.id,basis:'Possible name match',evidence:f.evidence}))};
   await f.service.save_page({requestId:randomUUID(),id:page.id,expectedRevision:saved.revision,expectedHash:saved.hash,
     title:saved.title,body:saved.body,identity},f.owner);
-  assert.equal((await f.service.record({id:page.id,includeMetadata:true},f.owner)).record.metadata.identity.candidates.length,2);
+  assert.equal((await f.service.record({id:page.id,includeMetadata:true,includeEvidence:true},f.owner)).record.metadata.identity.candidates.length,2);
   assert.equal((await f.service.diagnostics({},f.owner)).total,0);
 });
 

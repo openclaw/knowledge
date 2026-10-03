@@ -25,6 +25,7 @@ const holdRequest = operation => {
   heldRequest = { operation, gate, started, finished };
   return { release, entered, completed };
 };
+let summaryOnlyRecent = false, boundedBrowse = false;
 let evidenceFailure, evidenceHashMismatch = false, hiddenEndpoint, relationshipWithoutReferences;
 const api=apiFor(base,{root:base+'/vault',statePath:base+'/state.sqlite',vaultId:manifest.vaultId,publicationId:manifest.publicationId,operatorRead:true,writesEnabled:true},{agents:['main','other'],extra:{registerService:s=>services.push(s)}});
 const service=createKnowledgeService(api,{emit:(event,payload)=>{void page?.evaluate(({event,payload})=>window.emit?.(event,payload),{event,payload}).catch(()=>{});}});
@@ -69,6 +70,8 @@ try {
     if (operation === 'record' && input.id === hiddenEndpoint) result.record = null;
     if (operation === 'record' && input.includeEvidence && evidenceHashMismatch && result.record) result.record.hash = '0'.repeat(64);
     if (operation === 'grep' && cappedSearch) { result.nextOffset=520; result.total=600; }
+    if (operation === 'records' && boundedBrowse && input.kind === 'claim') { result.records = result.records.slice(0,1); result.nextOffset = (input.offset ?? 0) + result.records.length < result.total ? (input.offset ?? 0) + result.records.length : null; for (const row of result.records) delete row.card; }
+    if (operation === 'recent' && summaryOnlyRecent) for (const item of result.items) for (const record of item.group?.records ?? []) delete record.card;
     JSON.stringify(result);
     held?.finished();
     return result;
@@ -571,6 +574,34 @@ try {
   await page.getByText(/Can’t reach the vault/).waitFor();
   await page.evaluate(()=>window.connect(true));
   await page.screenshot({animations:'disabled',path:base+'/v4-source-groups.png',fullPage:true});
+  summaryOnlyRecent = true;
+  await page.evaluate(()=>window.remount());
+  const fallbackGroup=page.locator('.knowledge-activity-details').filter({has:page.locator('.knowledge-feed-title').filter({hasText:'V4 source — verbatim title'})});
+  await fallbackGroup.waitFor();
+  if(await fallbackGroup.getAttribute('open')===null) await fallbackGroup.locator(':scope > summary').click();
+  await fallbackGroup.getByRole('button',{name:/Investigate/}).click();
+  await page.locator('.knowledge-claim-standalone').waitFor();
+  assert.ok((await page.locator('.knowledge-claim-standalone').innerText()).includes('kestrel will investigate.'),'Summary-only Recent claims remain clickable and open full detail');
+  summaryOnlyRecent = false;
+  boundedBrowse = true;
+  await page.getByRole('button',{name:'Browse',exact:true}).click();
+  await page.getByRole('button',{name:'Claims',exact:true}).click();
+  await page.getByLabel('Filter claim text').fill('');
+  await page.getByLabel('Filter claim text').press('Enter');
+  await page.locator('.knowledge-pagination').getByText(/^1–1 of/).waitFor();
+  const firstBrowseTitle=await page.locator('.knowledge-browse-results .knowledge-record-title').first().innerText();
+  await page.getByRole('button',{name:'Next',exact:true}).click();
+  await page.locator('.knowledge-pagination').getByText(/^2–2 of/).waitFor();
+  await page.getByRole('button',{name:'Next',exact:true}).click();
+  await page.locator('.knowledge-pagination').getByText(/^3–3 of/).waitFor();
+  await page.getByRole('button',{name:'Previous',exact:true}).click();
+  await page.locator('.knowledge-pagination').getByText(/^2–2 of/).waitFor();
+  await page.getByRole('button',{name:'Previous',exact:true}).click();
+  await page.locator('.knowledge-pagination').getByText(/^1–1 of/).waitFor();
+  assert.equal(await page.locator('.knowledge-browse-results .knowledge-record-title').first().innerText(),firstBrowseTitle);
+  await page.locator('.knowledge-browse-results .knowledge-record-link').first().click();
+  await page.locator('.knowledge-claim-standalone').waitFor();
+  boundedBrowse = false;
   assert.deepEqual(errors,[]);
   console.log(JSON.stringify({passed:['Retained DOM during navigation, rapid-switch fencing and retry','Connections endpoints batched without per-row record calls','Offline navigation resumes on reconnect','V4 source groups and relationship-only attendance','V4 deferred Show updates and disconnect DOM preservation','V4 server-side claim filtering and explicit unknown commitment details','V4 modal Escape and exact record reference','wikilink navigation, reverse backlinks, code exclusion, missing targets and source originals','quote-first evidence, compact attribution and icon action row in dark/light','standalone claim details, scoped correction actions, and about links','grouped file details, history and hash-checked Markdown in light mode','light/dark text-tab styling under the production host cascade','reference layout measurements and type icons','search keyboard shortcut','read-only browser contract','agent correction live refresh and historical linkage','one logical lifecycle event, redacted historical assertions and explicit history navigation','search offset cap','design-token dark screenshots','recent default and observed history','ontology-derived browse','native commitment/event/inference cards','attribution and retained inference premise evidence','byte-exact evidence download','revision/hash chat request and no autosend','handoff preserved across periodic refresh','exact name suggestions','ranked search','disconnect and reconnect','subscription cleanup','mobile overflow','no page errors'],artifacts:base},null,2));
 } catch (error) {

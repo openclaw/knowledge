@@ -51,7 +51,7 @@ test('structured UI/agent service parity: decision, owned commitment, event, edg
   const edge=await f.service.create_relationship(f.edge(),f.operator);
   for(const receipt of [decision,commitment,event,edge]) {
     assert.equal(receipt.state,'published'); assert.ok(Check(contract.operations.create_claim.output,receipt));
-    const read=await f.service.record({id:receipt.id,includeMetadata:true},f.owner);
+    const read=await f.service.record({id:receipt.id,includeMetadata:true,includeEvidence:true},f.owner);
     assert.ok(Check(contract.operations.record.output,read));assert.equal(read.evidence[0].verified,true);assert.equal(read.evidence[0].quote,'We chose option B.');
     assert.equal((await f.service.lookup({query:receipt.id},f.owner)).outcome,'found');
   }

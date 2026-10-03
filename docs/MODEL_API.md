@@ -45,20 +45,21 @@ mode. Behavior flags describe vocabulary and do not enable unimplemented workflo
 
 ## Records: content once, extras on request
 
-`knowledge_record({id})` returns body text, identity, revision/hash, lifecycle, attribution/assertion origin when present, validation issues and verified
-evidence. It does **not** return original Markdown a second time, full frontmatter,
+`knowledge_record({id})` returns body text, identity, revision/hash, lifecycle, attribution/assertion origin when present, validation issues and compact structured metadata (owner/dates, associations, endpoints, attribution and identity uncertainty). It does **not** return original Markdown a second time, full frontmatter, evidence descriptors/excerpts,
 or connected-record lists by default.
 
 - `view: "summary"`: omit text and evidence by default; inspect identity/state.
 - `view: "raw"`: original Markdown **instead of** body, for exact-file inspection.
-- `includeMetadata: true`: full frontmatter as a structured object, not a JSON string.
+- `metadataView: "compact"` (default): structured associations, dates, endpoints and uncertainty, without evidence descriptors or arbitrary domain fields.
+- `metadataView: "none"`: omit structured metadata.
+- `metadataView: "full"`: full frontmatter as a structured object, not a JSON string.
   Use this to inspect domain fields before replacing the `fields` object in an edit.
-  Omitting `fields` from a save preserves existing fields.
+  Omitting `fields` from a save preserves existing fields. Legacy `includeMetadata: true/false` selects full/none; combining it with `metadataView` is an error.
 - `includeReferences: true`: connected summaries, default 20/page, with
   `referenceTotal` and `nextReferenceOffset`. Continue with `referenceOffset`;
   `referenceLimit` accepts 1–100.
 - `evidenceOffset` / `evidenceLimit`: page through source references (default 20, max 100 **per response**, not per record), following `nextEvidenceOffset`; `evidenceTotal` reports the full count.
-- `includeEvidence`: override the view's default. `maxEvidenceChars` limits the
+- `includeEvidence: true`: opt into verified citation locators, source previews and related statements for provenance review (off by default in all views). `maxEvidenceChars` limits the
   **combined excerpt text** (default 4,000; range 0–20,000). Citation locators and
   verification remain present even if excerpts are shortened; each excerpt has
   `excerptTruncated`. Verification describes the full locator, not just its excerpt.
@@ -67,9 +68,15 @@ or connected-record lists by default.
   Compare hashes across chunks and restart if the record changes. Never replace a
   page using an incomplete body. Missing/duplicate IDs return `record: null`.
 
-The browser explicitly requests complete bodies and metadata for editing, fetches
-raw files on demand, and follows ontology pagination. Opt-in full metadata and
-large custom definitions can still be large; normal discovery does not fetch them.
+Complete record responses are limited to 24 KiB of serialized UTF-8 JSON. Text,
+evidence and references may return smaller pages; always use returned continuation
+offsets, not requested lengths. Supplemental previews excluded to fit are named in
+`omitted`; inspect connections, attachments or paged raw text for complete detail.
+Oversized metadata or individual evidence items produce a small explicit error,
+not broken JSON or silently truncated metadata. Use `view: "raw", metadataView: "none"`
+without evidence/references to read the original file in bounded chunks.
+The browser explicitly requests rich metadata and evidence for inspection. These
+are response projections, not storage changes or permission to skip source review.
 
 ## Drafts and publication are different
 
@@ -263,15 +270,30 @@ payload or operation under an existing request ID fails. Creates generate their
 own ID/path. These create APIs do not overwrite assertions. Use `knowledge_correct` and
 `knowledge_withdraw` for explicit lifecycle changes; see [CORRECTIONS.md](CORRECTIONS.md).
 
-`knowledge_record({id, includeMetadata:true})` returns all portable assertion
-fields as a typed object. `knowledge_connections({id})` returns paginated incoming
-and outgoing explicit relationships, reverse dependencies, and entity/owner claims.
-Filter `direction` with incoming/outgoing/dependents/claims, use `limit` (1–100,
-default 20), follow `nextOffset`, and compare `snapshot` between pages. Access and
-active temporal/lifecycle filtering happen before counts. Historical queries opt
-in with `historical:true`; withdrawn records remain excluded. Evidence is limited
-to three references per connection; `evidenceTruncated` signals further evidence
-available from record inspection. Markdown links are not relationship assertions.
+`knowledge_connections({id})` defaults to compact identities, directions, typed
+endpoints and identity/attribution uncertainty. It omits evidence descriptors,
+paths, timestamps and card bodies. `view:"full"` adds those record details and up
+to three evidence references (`evidenceTruncated` signals more). Use
+`includeCards:true` with full view for claim prose, or `knowledge_record` for
+complete provenance. `includeEndpoints:true` adds deduplicated endpoint identities
+in the selected view. The UI explicitly requests full view for its rich cards.
+
+Directions: `incoming`/`outgoing` typed relationships, `dependents`, `claims`,
+`links` authored Markdown references, and `backlinks` derived reverse navigation.
+A backlink does not prove an authored link in the opposite direction. Default
+20 rows, max 100; the complete JSON response is bounded to 24 KiB, so a page may
+be shorter. Follow `nextOffset` (actual rows returned), keeping filters and view
+unchanged, and compare `snapshot`. Access and active eligibility precede counts.
+`historical:true` includes inactive/superseded, never withdrawn records. An
+oversized single full row returns an explicit error; use compact mode and inspect
+that record separately. Rows are never silently skipped or cut mid-JSON.
+
+Browse (`knowledge_records`) and Recent bound the entire response by both UTF-8
+bytes and nested JSON values, not just row count. Pages may be shorter than the
+requested limit: follow `nextOffset` for Browse and `nextBefore`/`nextRecordOffset`
+for Recent. An individually oversized card is returned as a navigable summary;
+inspect `knowledge_record` for its full text and provenance. Attribution level
+and basis remain visible even when evidence previews are omitted to fit.
 
 `includeEndpoints:true` adds deduplicated, currently eligible endpoint summaries
 for only the returned connection page. Historical edges never expose withdrawn

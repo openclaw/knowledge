@@ -6,18 +6,34 @@ no browser write flow, dependency, connector, scheduler or extraction engine.
 ## APIs
 
 - **knowledge_verify**: 1–100 unique IDs and optional expectedRevision,
-  expectedHash, owner, due_at, occurred_at. Explicit null means expected absence;
-  omit to skip. One authorized scan validates evidence hashes/locators, references,
+  expectedHash, owner, due_at, occurred_at, source_page, from, to, label. Explicit
+  null on scalar metadata means expected absence; omit to skip.
+  `expectedEntities` and `expectedDependencies` require the supplied IDs to be
+  present and eligible, allowing extra associations. `expectedLinks` contains
+  `{id, href?}` expectations: an authored link must resolve to that stable ID;
+  optional `href` selects the exact resolver href (for a wikilink, `#wiki=` plus
+  its encoded target). Omitting href checks for any authored link to that ID.
+  Check both records for required authored directions; an automatic backlink
+  cannot satisfy a reverse authored link. Build expectations from the intended
+  ingestion, not by copying the saved record being tested.
+  One authorized scan validates evidence hashes/locators, references,
   links and active eligibility; reconciles keyword indexing and checks membership.
   Returns checked/passed/failed counts and exceptions only (20 default, 50 max).
   Paginate with unchanged records + snapshot; a changed snapshot is rejected.
   No body, quote, raw YAML, inaccessible target ID or full index result is returned.
-  This proves structure, not truth, attribution, source completeness or intended
-  link target correctness. A vault scan failure rejects instead of returning a
+  This proves structure and supplied target identity, not truth, attribution,
+  chronology, quote wording or source completeness. Missing/mismatched expected
+  links and associations return compact problem codes without target data.
+  Expectations and record paths participate in snapshot validation.
+  A vault scan failure rejects instead of returning a
   misleading partial success. Existing scan-scale ceilings remain.
 - **knowledge_publish_batch**: 1–25 items; max 1 MiB. Shape:
   `{ key, kind: "page" | "claim" | "relationship", input }`.
-  Input matches kind. Shared UUID/vault/ontology at batch level. Unknown fields
+  Each item key is unique and matches `^[a-z][a-z0-9_-]{0,39}$`: 1–40
+  characters, starting with a lowercase ASCII letter; remaining characters are
+  lowercase ASCII letters, digits, `_` or `-`. Use `josh_lehman`, not `JoshLehman`;
+  references such as `@josh_lehman` must match exactly. Titles are unrestricted by
+  this key rule. Input matches kind. Shared UUID/vault/ontology at batch level. Unknown fields
   reject. Required fields/evidence stay required. Schema uses shared `$defs`;
   compact enough to keep agent-visible types. TypeScript infers same union.
   Refs: `@key`. Body links: `[[@key|label]]`. Prose/evidence untouched.

@@ -6,7 +6,7 @@ export function agentDisplayName(id: string | undefined, agents: readonly Contro
   const agent = agents.find(agent => agent.id === id);
   return agent?.identity?.name?.trim() || agent?.name?.trim() || id;
 }
-export function confidenceView(confidence?: Envelope['attribution_confidence'], compact = false) {
+export function confidenceView(confidence?: Pick<NonNullable<Envelope['attribution_confidence']>, 'level' | 'basis'>, compact = false) {
   const node = document.createElement('span'); node.className = 'knowledge-confidence';
   // Compact rows omit an unrecorded level: most records lack one, so repeating
   // "not recorded" on every row adds noise. Evidence captions still state it.

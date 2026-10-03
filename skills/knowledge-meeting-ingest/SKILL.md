@@ -256,10 +256,13 @@ Run every check for every meeting, including quick logistics meetings.
 - **V2 — Every entity link has a page AND timeline backlink.** Read each linked
   page; verify the source backlink, dated context, connected event claims and
   evidenced attendance edges where applicable. Inspect all changed records,
-  metadata and evidence, following pagination. No guessed paths or empty stubs.
-  Apply the shared resolved-link and derived-backlink checks: expected IDs in
-  `knowledge_record.links`, plus `links`/`backlinks` connection readback. Verify
-  authored contextual links both ways, not only automatic reverse navigation.
+  compact metadata and relevant evidence (`includeEvidence: true`), following
+  pagination. No guessed paths or empty stubs. Use `knowledge_verify` with
+  independently planned `expectedLinks` for both authored directions and expected
+  event associations/attendance endpoints. Discover graph context or investigate
+  failures with compact connections and record links; do not repeat successful
+  structural checks merely to obtain larger responses. Automatic reverse
+  navigation does not prove an authored contextual link.
 - **V3 — Speaker map resolved or flagged.** No raw label silently masquerades as
   a known person. Every named speaker has an evidence basis/confidence.
 - **Structured readback.** Known commitment owners are resolved page IDs, not just
@@ -267,7 +270,10 @@ Run every check for every meeting, including quick logistics meetings.
   Attendance edges have `source_page`; qualitative speaker-attribution confidence
   carries its basis and retained evidence in `attribution_confidence`. Unknown
   values stay absent. Meeting-event associations use `source_event` only for the
-  meeting itself. Verify these through metadata readback, not a reassuring summary.
+  meeting itself. Use aggregate expectations for exact owners/dates/source pages,
+  associations and endpoints. Read compact metadata and explicitly requested
+  evidence to judge attribution confidence and its basis; structural success
+  does not replace that semantic review.
 - **V4 — Every quote grounded VERBATIM.** Locate each quoted span in retained
   transcript text. Read the exact lines, not just `evidence.verified`. Restore
   spoken phrasing or choose a supported contiguous span if it fails; never keep

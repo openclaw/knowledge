@@ -103,34 +103,82 @@ existing tools, not a separate ingestion engine.
 
 ## Readback and reporting
 
+### Links in chat replies
+
+- When citing saved Knowledge or reporting a verified save in Control UI chat,
+  link the readable record title inline to its dedicated Knowledge page. Use
+  ordinary Markdown, not a bare UUID, a local filesystem link, or a chat wikilink.
+- For a Control UI hosted at the origin root, the supported template is
+  `[Title](/plugin?plugin=knowledge&id=overview&p.agent=AGENT&p.vault=VAULT&p.record=RECORD)`.
+  Replace AGENT and VAULT with the `agent` and `vault` returned by
+  `knowledge_status({})` for the record's scope, and RECORD with its observed
+  stable ID from a read or verified write. URL-encode each value. Reuse current
+  scoped status when available; never use `writtenByAgentId` as the viewing agent.
+- Preserve a known Control UI base path (for example `/console/plugin?...`),
+  or reuse a verified host-provided page URL. Do not guess the deployment base
+  path or invent an origin, port, credential, record ID, agent or vault. If the
+  UI location or scope cannot be established, use the readable title and observed
+  ID/path without a fabricated link. Outside Control UI, use an absolute link
+  only when its reachable base URL is known; a relative link is not portable.
+- Put citations beside the supported statement and retain original provenance
+  and verified passage locators in readable text. These links open the dedicated
+  plugin page, not a sidebar or a specific source line; do not promise otherwise.
+  Do not open the page automatically unless asked. Respect disabled citations
+  unless the user requests a link. Inside saved pages, continue using the
+  portable wikilinks/relative Markdown links described above.
+
+### Verification and reporting
+
 - First run `knowledge_verify` over all published IDs (up to 100/call), using
-  receipt revision/hash and independently supplied owner/due/occurrence expectations.
+  receipt revision/hash and independently supplied owner/due/occurrence,
+  `source_page`, `from`, `to` and `label` expectations. Supply `expectedEntities`
+  and `expectedDependencies` for required memberships (extra associations are
+  allowed), and `expectedLinks: [{id, href?}]` for authored links to intended
+  stable IDs. Optional `href` selects the resolver's exact href; wikilinks use
+  `#wiki=` plus the encoded target. Include both pages when both authored
+  directions are required. Derive expectations from the intended source-grounded
+  work, never by copying the saved output under test.
   `null` asserts absence; omission skips a comparison. It validates all retained
   evidence and references, current eligibility and reconciled indexing, returning
   exceptions only. Follow `nextOffset` with the same records and returned snapshot.
   A changed snapshot means restart. This replaces repetitive structural readbacks,
-  not source reading, semantic checks, or checking that intended links target the
-  correct entity. Investigate exceptions before marking complete.
+  including supplied link-target identity checks, not source reading or semantic
+  checks. Investigate exceptions before marking complete.
 - For identity/revision checks use `knowledge_record({id, view: "summary"})`.
-  Request metadata only when needed; keep evidence previews bounded (for example
-  `evidenceLimit: 3, maxEvidenceChars: 1000`). Do not fetch every body or download
+  Compact structured metadata is included by default, without evidence arrays.
+  Use `metadataView: "full"` for arbitrary ontology fields, or `"none"` for text
+  only. Request `includeEvidence: true` for provenance/attribution review and keep
+  previews bounded (for example `evidenceLimit: 3, maxEvidenceChars: 1000`).
+  Do not fetch every body or download
   every original merely to confirm publication. Full source reads remain required
   when substantive verification needs them.
-- Inspect substantive saved prose with `knowledge_record`; follow `content.nextOffset` and
-  `nextEvidenceOffset` independently. Compare record hashes across chunks and
-  restart if changed. A preview is not the complete source.
-- Check `knowledge_record({id, view: "content"})` results: each intended inline
+- Inspect substantive saved prose with `knowledge_record`; opt into evidence
+  when reviewing source support. Follow `content.nextOffset` and
+  `nextEvidenceOffset` independently. Record and connection responses are bounded
+  to 24 KiB; use returned offsets, not requested lengths. Compare record hashes
+  across chunks and restart if changed. Inspect `omitted` for excluded previews;
+  use connections, attachments or paged `view: "raw", metadataView: "none"`
+  without evidence/references for complete detail. A preview is not the complete source.
+- For a failed expectation or link-specific investigation, inspect
+  `knowledge_record({id, view: "content"})`: each intended inline
   page link in `links` must have `status: "resolved"` and the expected stable `id`,
   not merely a matching label. Repair missing/ambiguous targets using observed
   paths. `linksTruncated: true` means this check is incomplete; do not claim all
   links verified from the bounded result.
-- Inspect `knowledge_connections({id, direction: "links"})` and
+- For graph discovery or failed checks, inspect
+  `knowledge_connections({id, direction: "links"})` and
   `knowledge_connections({id, direction: "backlinks"})` for the expected distinct
   neighbors. Follow `nextOffset`; restart if `snapshot` changes between pages.
+  Connections default to compact identities, endpoints and uncertainty without
+  evidence or prose cards. Keep view/filters unchanged across pages. Request
+  `view: "full"` for metadata/evidence previews and `includeCards: true` with
+  full view when claim prose is needed; read the record for complete provenance.
   A source → entity link gives the entity a derived backlink; it does NOT author
   the entity's contextual source/timeline link. Verify both authored directions
   when required. Do not write generated References/Referenced by lists into page
   bodies. Check typed claims/relationships separately; navigation is not evidence.
+  Successful expected-link/endpoint checks do not need duplicate graph reads
+  solely to reconfirm structure; saved contextual prose still needs review.
 - Read the saved prose for readable citations and absence of redundant Sources
   appendices. Verify original retention and exact evidence independently: a
   resolved page link alone does not establish that its citation is supported.
@@ -142,9 +190,10 @@ existing tools, not a separate ingestion engine.
   keyword when evaluating retrieval quality beyond structural membership. Failed retrieval
   (`index.state: unavailable`, `total: null`) is not an empty vault; incomplete
   coverage is not proof of absence. Use diagnostics when warranted.
-- Report created/updated/reused pages with title, stable ID and returned local
-  vault path. Use a verified host link if available; do not invent Knowledge deep
-  links, absolute vault roots, hosted URLs, or push private vaults to make links.
+- Report created/updated/reused pages with readable linked titles using the
+  chat-link contract above when available; keep IDs and paths out of the primary
+  reading flow unless needed for disambiguation or requested. Do not invent
+  absolute vault roots or hosted URLs, or push private vaults to make links.
   State retained sources, verification performed, unresolved identities, conflicts
   and partial work. Do not call a multi-page workflow complete from one receipt.
 

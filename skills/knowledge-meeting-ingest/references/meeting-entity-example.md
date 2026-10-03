@@ -99,12 +99,19 @@ For the noncontiguous State citation attach separate line-2 and line-5 evidence.
 - Inspect the ontology before publishing the evidenced `attended` relationship
   from Morgan → meeting. Retain the source speaker-mapping basis in qualitative
   `attribution_confidence`; this is attribution confidence, not truth scoring.
-- Read both complete page bodies, metadata and evidence. All intended `links`
-  must resolve to the observed IDs. Meeting `links` includes Morgan; Morgan
+- Verify planned `expectedLinks` on both pages: meeting → Morgan and Morgan →
+  meeting, plus the event's `expectedEntities`/`expectedDependencies` and the
+  attendance edge's `from`/`to`/`label`/`source_page`. Use the intended plan, not
+  copied saved metadata. Read both complete page bodies and compact metadata;
+  request `includeEvidence: true` to check cited passages and attribution.
+  Investigate failed links or discover context with compact connections:
+  meeting `links` includes Morgan; Morgan
   `backlinks` includes the meeting. Morgan `links` includes the meeting; meeting
   `backlinks` includes Morgan. Follow connection pagination and check stable
   snapshots. Repeated citations yield one neighbor, not one edge per citation.
-- Separately read `claims` and typed `incoming`/`outgoing` connections and verify
-  retained passages. Source self-links open retained originals, not a specific
+- Use `claims` and typed `incoming`/`outgoing` connections for related context
+  as needed; successful aggregate expectations do not require duplicate graph
+  reads. Structural checks do not verify meaning or quote wording; read retained
+  passages. Source self-links open retained originals, not a specific
   transcript line. No hash inventory, raw filename citation, Sources footer or
   hand-written derived backlink list belongs in either page.

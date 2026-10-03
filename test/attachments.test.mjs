@@ -43,7 +43,7 @@ test('large Unicode source survives chunking, bounded preview, restart, search a
   const evidence = await upload(f, bytes);
   assert.deepEqual(await readFile(path.join(f.root, 'private', evidence.path)), bytes);
   const receipt = await f.service.save_page(draft([evidence]), f.owner);
-  const service = createKnowledgeService(f.api), read = await service.record({ id: receipt.id }, f.owner);
+  const service = createKnowledgeService(f.api), read = await service.record({ includeEvidence: true, id: receipt.id }, f.owner);
   assert.ok(read.record.valid); assert.equal(read.evidence[0].verified, true); assert.equal(read.evidence[0].excerpt.length, 4000);
   assert.equal(read.evidence[0].excerptTruncated, true); assert.ok(Check(contract.operations.record.output, read));
   const chunks = []; let offset = 0;
@@ -63,7 +63,7 @@ test('binary/PDF originals are never coerced into UTF-8; media remains outside a
   const pdf = await upload(f, bytes, { filename: 'scan.pdf', mediaType: 'application/pdf' });
   const media = await upload(f, bytes, { filename: 'photo.png', mediaType: 'image/png' });
   const saved = await f.service.save_page(draft([pdf, media]), f.owner);
-  const read = await f.service.record({ id: saved.id }, f.owner);
+  const read = await f.service.record({ includeEvidence: true, id: saved.id }, f.owner);
   assert.ok(read.evidence.every(e => e.verified && !e.excerpt));
   assert.deepEqual(execFileSync('git', ['show', `HEAD:private/${pdf.path}`], { cwd: f.root }), bytes);
   const tracked = execFileSync('git', ['ls-tree', '-r', '--name-only', 'HEAD'], { cwd: f.root, encoding: 'utf8' });
@@ -75,9 +75,9 @@ test('more than twenty sources save and enumerate without truncating stored evid
   const f = await fixture(t), sources = [];
   for (let i = 0; i < 27; i++) sources.push(await upload(f, Buffer.from(`Source ${i}`), { filename: `${i}.txt` }));
   const saved = await f.service.save_page(draft(sources), f.owner);
-  const first = await f.service.record({ id: saved.id }, f.owner);
+  const first = await f.service.record({ includeEvidence: true, id: saved.id }, f.owner);
   assert.equal(first.evidenceTotal, 27); assert.equal(first.evidence.length, 20); assert.equal(first.nextEvidenceOffset, 20);
-  const second = await f.service.record({ id: saved.id, evidenceOffset: first.nextEvidenceOffset }, f.owner);
+  const second = await f.service.record({ includeEvidence: true, id: saved.id, evidenceOffset: first.nextEvidenceOffset }, f.owner);
   assert.equal(second.evidence.length, 7); assert.equal(second.nextEvidenceOffset, null);
   assert.deepEqual([...first.evidence, ...second.evidence].map(e => e.path), sources.map(e => e.path));
 });
@@ -108,7 +108,7 @@ test('attachment authority, record-scoped reads, tampering, paths and links are 
   const saved = await f.service.save_page(draft([evidence]), f.owner);
   const file = path.join(f.root, 'private', evidence.path);
   await writeFile(file, 'tampered');
-  assert.equal((await f.service.record({ id: saved.id }, f.owner)).evidence[0].verified, false);
+  assert.equal((await f.service.record({ includeEvidence: true, id: saved.id }, f.owner)).evidence[0].verified, false);
   await assert.rejects(f.service.attachment({ id: saved.id, path: evidence.path, sha256: evidence.sha256 }, f.owner), /hash/);
   await rm(file); await symlink(path.join(f.base, 'outside'), file);
   await assert.rejects(f.service.attachment({ id: saved.id, path: evidence.path, sha256: evidence.sha256 }, f.owner), /Unsafe/);
@@ -120,11 +120,11 @@ test('source files are independent of the catalog scan byte budget; legacy large
   const f = await fixture(t), bytes = Buffer.alloc(9 * 1024 * 1024, 65);
   const evidence = await upload(f, bytes);
   const saved = await f.service.save_page(draft([evidence]), f.owner);
-  assert.equal((await f.service.record({ id: saved.id }, f.owner)).record.valid, true);
+  assert.equal((await f.service.record({ includeEvidence: true, id: saved.id }, f.owner)).record.valid, true);
   const source = { text: 'Legacy source\n'.repeat(8000), attribution: 'Older client' };
   assert.ok(Check(contract.operations.save_page.input, { ...draft([]), source }));
   const legacy = await f.service.save_page({ ...draft([]), source }, f.owner);
-  const record = await f.service.record({ id: legacy.id }, f.owner);
+  const record = await f.service.record({ includeEvidence: true, id: legacy.id }, f.owner);
   assert.equal(record.evidence[0].sha256, createHash('sha256').update(source.text).digest('hex'));
   assert.deepEqual(await readFile(path.join(f.root, 'private', record.evidence[0].path)), Buffer.from(source.text));
 });
@@ -151,8 +151,8 @@ test('conversation uploads and downloads cannot reach private originals or recei
   const sharedFile = await f.service.attach({ ...input, data: Buffer.from('SHARED').toString('base64') }, group);
   assert.notEqual(sharedFile.evidence.sha256, privateFile.evidence.sha256);
   const sharedPage = await f.service.save_page(draft([sharedFile.evidence]), group);
-  assert.equal((await f.service.record({ id: sharedPage.id }, f.owner)).record, null);
-  assert.equal((await f.service.record({ id: sharedPage.id }, group)).evidence[0].excerpt, 'SHARED');
+  assert.equal((await f.service.record({ includeEvidence: true, id: sharedPage.id }, f.owner)).record, null);
+  assert.equal((await f.service.record({ includeEvidence: true, id: sharedPage.id }, group)).evidence[0].excerpt, 'SHARED');
   assert.deepEqual(await readFile(path.join(f.root, 'private', privateFile.evidence.path)), Buffer.from('PRIVATE'));
 });
 

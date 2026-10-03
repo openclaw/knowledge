@@ -198,8 +198,15 @@ appendix to Knowledge's File details disclosure: hashes and exact locators remai
 in structured evidence; useful speaker mapping and coverage context remain in
 prose/allowed fields. No provenance is discarded to simplify presentation.
 
-Shared readback checks inspect resolved link IDs and paginated `links`/`backlinks`
-connections separately from typed assertions. The paired meeting/entity example
+Shared readback checks verify independently planned authored link IDs, entity/
+dependency membership and exact relationship endpoints in `knowledge_verify`.
+Both authored directions require expectations; derived backlinks do not count.
+Compact record/connection defaults support inspection without repeating evidence
+arrays; evidence and full metadata remain explicit opt-ins. Paginated
+`links`/`backlinks` connections support discovery and exception investigation,
+separately from typed assertions. Source review, attribution, verbatim quotes,
+substantive profile synthesis and chronology remain agent checks; aggregate
+structural success cannot replace them. The paired meeting/entity example
 is authored in `skills/shared/meeting-entity-example.md` and synchronized into
 both relevant skill bundles. It illustrates the final prose and evidence mapping;
 it is not an unseen-source behavioral evaluation or a live-vault fixture.

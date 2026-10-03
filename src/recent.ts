@@ -1,3 +1,4 @@
+import { withinBudget, compactSummary } from "./response-budget.js";
 import { Type, type Static } from "typebox";
 import type { DatabaseSync } from "node:sqlite";
 import type { LoadedRecord } from "./model.js";
@@ -116,5 +117,32 @@ export function recentActivity(db: DatabaseSync, scope: string, active: LoadedRe
     }
     return item;
   });
-  return { items, upperSequence, nextBefore: rows.length > items.length ? items.at(-1)!.sequence : null };
+  const bounded: Item[] = [];
+  const response = (entries: Item[]) => ({ items: entries, upperSequence, nextBefore: rows.length > entries.length ? entries.at(-1)!.sequence : null });
+  for (const item of items) {
+    // Do not shrink later groups to fill the page: resume them intact on Older.
+    if (!withinBudget(response([...bounded, item])) && bounded.length) break;
+    const group = item.group;
+    if (group) {
+      while (!withinBudget(response([item])) && group.records.length > 1) {
+        group.records.pop();
+        group.truncated = true;
+        group.nextRecordOffset = (input.recordOffset ?? 0) + group.records.length;
+        if (group.endpoints) {
+          const ids = new Set(group.records.filter(r => r.kind === "relationship").flatMap(r => [r.from, r.to]));
+          group.endpoints = group.endpoints.filter(r => ids.has(r.id));
+        }
+      }
+      if (!withinBudget(response([item]))) {
+        // A single unusually rich record still needs to be reachable. Return its
+        // clickable summary; full content and evidence remain on record detail.
+        group.source = compactSummary(group.source);
+        group.records = group.records.map(({ card: _card, ...record }) => compactSummary(record));
+        if (group.endpoints) group.endpoints = group.endpoints.map(compactSummary);
+      }
+    }
+    if (!withinBudget(response([item]))) throw new Error("Recent activity summary exceeds the response budget; open the record from Browse.");
+    bounded.push(item);
+  }
+  return response(bounded);
 }

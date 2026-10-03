@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { Check } from 'typebox/value';
 import { SampleVault, SAMPLE_ROOT } from '../dist/vault.js';
-import { inspectRecord, inspectOntology } from '../dist/inspection.js';
+import { inspectRecord, inspectOntology, RECORD_RESPONSE_BYTES } from '../dist/inspection.js';
 import { contract } from '../dist/contract.js';
 import { loadVocabulary } from '../dist/inspection-client.js';
 
@@ -17,11 +17,11 @@ async function fixture(t) {
   return { root, vault: new SampleVault(root) };
 }
 
-test('record defaults return content once, provenance and evidence, without raw or full metadata', async () => {
+test('record defaults return content once and compact metadata without evidence', async () => {
   const vault = new SampleVault(), result = checked('record', await inspectRecord(vault, { id: 'sample_claim_pilot' }));
-  assert.ok(result.record.body); assert.equal(result.record.raw, undefined); assert.equal(result.record.metadata, undefined);
+  assert.ok(result.record.body); assert.equal(result.record.raw, undefined); assert.ok(result.record.metadata); assert.equal(result.record.metadata.evidence, undefined);
   assert.equal(result.references, undefined); assert.ok(result.record.attribution); assert.ok(result.record.assertionOrigin);
-  assert.equal(result.evidence[0].verified, true); assert.equal(result.content.nextOffset, null);
+  assert.equal(result.evidence, undefined); assert.equal(result.content.nextOffset, null);
   for (const id of ['missing-id', 'sample_duplicate_id']) assert.equal(checked('record', await inspectRecord(vault, { id })).record, null);
 });
 
@@ -36,7 +36,7 @@ test('record text pages reassemble the exact observed body; raw is an alternativ
   } while (offset !== null);
   assert.equal(body, original.record.body);
   const raw = checked('record', await inspectRecord(vault, { id: 'sample_person_alex', view: 'raw', maxChars: 65536 }));
-  assert.equal(raw.record.raw, original.record.raw); assert.equal(raw.record.body, undefined); assert.equal(raw.evidence, undefined);
+  assert.equal(raw.record.raw, original.record.raw.slice(0, raw.record.raw.length)); assert.ok(raw.content.nextOffset); assert.equal(raw.record.body, undefined); assert.equal(raw.evidence, undefined);
   const summary = checked('record', await inspectRecord(vault, { id: 'sample_person_alex', view: 'summary', includeMetadata: true }));
   assert.equal(summary.record.body, undefined); assert.equal(summary.record.metadata.custom_note, 'Unknown user metadata is preserved.');
   const beyond = checked('record', await inspectRecord(vault, { id: 'sample_person_alex', offset: 999999 }));
@@ -45,7 +45,7 @@ test('record text pages reassemble the exact observed body; raw is an alternativ
 
 test('evidence budgets disclose truncation; references are paginated separately', async () => {
   const vault = new SampleVault();
-  const small = checked('record', await inspectRecord(vault, { id: 'sample_claim_pilot', maxEvidenceChars: 8, includeReferences: true, referenceLimit: 1 }));
+  const small = checked('record', await inspectRecord(vault, { id: 'sample_claim_pilot', includeEvidence: true, maxEvidenceChars: 8, includeReferences: true, referenceLimit: 1 }));
   assert.equal(small.evidence[0].excerpt.length, 8); assert.equal(small.evidence[0].excerptTruncated, true);
   assert.equal(small.evidence[0].verified, true); assert.equal(small.references.length, 1);
   const refs = [...small.references]; let offset = small.nextReferenceOffset;
@@ -118,4 +118,56 @@ test('every ontology definition is JSON-safe before host serialization, includin
     total += result.definitions.length; offset = result.nextOffset;
   } while (offset !== null);
   assert.equal(total, 38);
+});
+
+
+test('record byte limit traverses escaped Unicode text losslessly', async t => {
+  const { root, vault } = await fixture(t), file = path.join(root, 'people/alex-rivera.md');
+  await writeFile(file, (await readFile(file, 'utf8')) + '\n' + '🦞\"\\\n'.repeat(9000));
+  const original = (await vault.detail('sample_person_alex')).record.raw;
+  let offset = 0, raw = '';
+  do {
+    const page = checked('record', await inspectRecord(vault, { id: 'sample_person_alex', view: 'raw', metadataView: 'none', maxChars: 65536, offset }));
+    assert.ok(Buffer.byteLength(JSON.stringify(page)) <= RECORD_RESPONSE_BYTES);
+    raw += page.record.raw;
+    assert.ok(page.content.nextOffset === null || page.content.nextOffset > offset);
+    offset = page.content.nextOffset;
+  } while (offset !== null);
+  assert.equal(raw, original);
+});
+
+test('compact metadata preserves uncertainty without nested evidence; explicit selectors and oversized full metadata', async () => {
+  const vault = new SampleVault(), detail = await vault.detail('sample_claim_pilot');
+  const metadata = JSON.parse(detail.record.metadata);
+  metadata.attribution_confidence = { level: 'low', basis: 'Unclear speaker', evidence: [{path:'secret-evidence',sha256:'a'.repeat(64)}] };
+  metadata.identity = { status: 'partial', context: 'Handle only', candidates: [{id:'candidate_id',basis:'Unresolved match',evidence:metadata.attribution_confidence.evidence}] };
+  metadata.fields = { huge: 'x'.repeat(40000) };
+  detail.record.metadata = JSON.stringify(metadata);
+  detail.record.attributionConfidence = metadata.attribution_confidence;
+  const fake = { detail: async () => structuredClone(detail) };
+  const result = checked('record', await inspectRecord(fake, {id:detail.record.id}));
+  assert.equal(result.record.metadata.attribution_confidence.level, 'low');
+  assert.equal(result.record.metadata.identity.candidates[0].basis, 'Unresolved match');
+  assert.ok(!JSON.stringify(result).includes('secret-evidence'));
+  assert.equal(result.record.metadata.fields, undefined);
+  await assert.rejects(inspectRecord(fake, {id:detail.record.id, metadataView:'compact', includeMetadata:false}), /not both/);
+  await assert.rejects(inspectRecord(fake, {id:detail.record.id, view:'summary', metadataView:'full'}), /exceeds response budget/);
+  const explicit = checked('record', await inspectRecord(vault, {id:'sample_claim_pilot', includeEvidence:true}));
+  assert.equal(explicit.evidence[0].verified, true);
+});
+
+
+test('byte-bounded evidence pages preserve every locator and make progress', async () => {
+  const vault = new SampleVault(), detail = await vault.detail('sample_claim_pilot');
+  const evidence = Array.from({length:30}, (_, i) => ({...detail.evidence[0], path:'evidence-'+i, attribution:'x'.repeat(1000), quote:'🦞'.repeat(1500)}));
+  const fake = { detail: async (_, start, limit) => ({ ...structuredClone(detail), evidence: evidence.slice(start, start+limit), evidenceTotal:evidence.length, sourceFiles:[], identityEvidence:[], relatedStatements:[] }) };
+  let offset=0, paths=[];
+  do {
+    const result = checked('record', await inspectRecord(fake, {id:detail.record.id, view:'summary', includeEvidence:true, evidenceOffset:offset}));
+    assert.ok(Buffer.byteLength(JSON.stringify(result)) <= RECORD_RESPONSE_BYTES);
+    paths.push(...result.evidence.map(e=>e.path));
+    assert.ok(result.nextEvidenceOffset===null || result.nextEvidenceOffset>offset);
+    offset=result.nextEvidenceOffset;
+  } while(offset!==null);
+  assert.deepEqual(paths,evidence.map(e=>e.path));
 });

@@ -1,3 +1,4 @@
+import { withinBudget, compactSummary } from "./response-budget.js";
 import { resolveLinks } from "./markdown-links.js";
 import { claimCard } from "./claim-card.js";
 import { annotationEvidence, annotationProblems } from "./annotations.js";
@@ -223,13 +224,27 @@ export class SampleVault {
     const matched = (input.lifecycle === "all" ? data.records : current).filter(r => (!input.kind || r.kind === input.kind) && (!input.assertionOrigin || (r.metadata.assertion_origin ?? "unknown") === input.assertionOrigin) && (!types || (r.kind === "page" ? types.has(r.type) : r.type === input.type)) && (!query || [r.id, r.title, ...(r.kind === "claim" ? [r.body] : []), ...(r.metadata.aliases ?? [])].some(v => v.toLowerCase().includes(query))));
     matched.sort((a, b) => b.metadata.updated_at.localeCompare(a.metadata.updated_at) || a.id.localeCompare(b.id));
     const offset = input.offset ?? 0, limit = input.limit ?? 50;
-    const page = matched.slice(offset, offset + limit);
-    // Resolve only this page's endpoints, once, within the same authorized scan.
-    // Historical edges must not expose unavailable/ambiguous endpoint content.
-    const endpointIds = new Set(page.filter(r => r.kind === "relationship").flatMap(r => [r.metadata.from!, r.metadata.to!]));
-    return { facets, records: page.map(r => ({ ...summary(r), ...(input.includeCards && r.kind === "claim" ? { card: claimCard(r, current) } : {}) })),
-      ...(input.includeEndpoints ? { endpoints: current.filter(r => endpointIds.has(r.id)).map(summary) } : {}),
-      total: matched.length, offset, nextOffset: offset + limit < matched.length ? offset + limit : null, checkedAt: data.checkedAt };
+    type Row = ReturnType<typeof summary> & { card?: ReturnType<typeof claimCard> };
+    const envelope = (records: Row[], compactEndpoints = false) => {
+      // Resolve only the returned page's endpoints within this authorized scan.
+      const endpointIds = new Set(records.filter(r => r.kind === "relationship").flatMap(r => [r.from, r.to]));
+      return { facets, records,
+        ...(input.includeEndpoints ? { endpoints: current.filter(r => endpointIds.has(r.id)).map(r => compactEndpoints ? compactSummary(summary(r)) : summary(r)) } : {}),
+        total: matched.length, offset, nextOffset: offset + records.length < matched.length ? offset + records.length : null, checkedAt: data.checkedAt };
+    };
+    let result = envelope([]);
+    for (const record of matched.slice(offset, offset + limit)) {
+      const row: Row = { ...summary(record), ...(input.includeCards && record.kind === "claim" ? { card: claimCard(record, current) } : {}) };
+      let candidate = envelope([...result.records, row]);
+      if (!withinBudget(candidate)) {
+        if (result.records.length) break;
+        // Keep oversized records reachable; full prose/provenance stays in detail.
+        candidate = envelope([compactSummary(summary(record))], true);
+        if (!withinBudget(candidate)) throw Error("Record summary exceeds the response budget; inspect the record by ID.");
+      }
+      result = candidate;
+    }
+    return result;
   }
   async inspectOntology() {
     const data = await this.scan(), o = data.ontology;

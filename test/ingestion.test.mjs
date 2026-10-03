@@ -173,12 +173,56 @@ test('verification checks page occurrence fields and claim dates consistently wi
   }
 });
 
+test('expected graph checks authored links in both directions, subset associations and exact endpoints', async t => {
+  const f = await batchFixture(t), receipt = await f.service.publish_batch(f.input, f.owner);
+  const ids = Object.fromEntries(receipt.items.map(r => [r.key, r.id]));
+  const records = [
+    { id: ids.meeting, expectedLinks: [{ id: ids.morgan, href: '#wiki=' + ids.morgan }, { id: ids.meeting }] },
+    { id: ids.morgan, expectedLinks: [{ id: ids.meeting }] },
+    { id: ids.action, expectedEntities: [ids.morgan], expectedDependencies: [ids.meeting], source_page: ids.meeting, from: null },
+    { id: ids.attendance, from: ids.morgan, to: ids.meeting, label: 'attended', source_page: null },
+  ];
+  assert.ok(Check(contract.operations.verify.input, { records }));
+  const result = await f.service.verify({ records }, f.owner);
+  assert.equal(result.passed, 4); assert.equal(result.totalProblems, 0);
+  assert.ok(Buffer.byteLength(JSON.stringify(result)) < 1200);
+  const wrong = await f.service.verify({ records: [
+    { id: ids.meeting, expectedLinks: [{ id: ids.meeting, href: '#wiki=' + ids.morgan }, { id: randomUUID() }] },
+    { id: ids.action, expectedEntities: [ids.meeting], expectedDependencies: [ids.morgan], source_page: null },
+    { id: ids.attendance, from: ids.meeting, to: ids.morgan, label: 'knows' },
+  ], limit: 50 }, f.owner);
+  assert.equal(wrong.failed, 3);
+  assert.deepEqual(new Set(wrong.problems.map(p => p.code)), new Set(['expected-link-mismatch', 'missing-expected-link', 'missing-expected-entities', 'missing-expected-dependencies', 'source_page-mismatch', 'from-mismatch', 'to-mismatch', 'label-mismatch']));
+  await assert.rejects(f.service.verify({ records: [{ ...records[0], expectedLinks: [] }], snapshot: result.snapshot }, f.owner), /snapshot changed/);
+  assert.equal((await f.service.verify({ records: [{ id: ids.action, expectedEntities: [], expectedDependencies: [] }] }, f.owner)).passed, 1, 'Subset expectations permit extra associations');
+  const person = (await f.service.record({ id: ids.morgan }, f.owner)).record;
+  await f.service.save_page(edit(person, { body: 'Morgan profile without authored meeting link.' }), f.owner);
+  const reverse = await f.service.verify({ records: records.slice(0, 2) }, f.owner);
+  assert.equal(reverse.passed, 1); assert.equal(reverse.failed, 1);
+  assert.deepEqual(reverse.problems.map(p => [p.id, p.code]), [[ids.morgan, 'missing-expected-link']], 'Derived backlink cannot satisfy an authored reverse link');
+});
+
+test('expected link identities stay bound to stable IDs across renames and fail closed for ambiguity', async t => {
+  const f = await batchFixture(t), receipt = await f.service.publish_batch(f.input, f.owner);
+  const ids = Object.fromEntries(receipt.items.map(r => [r.key, r.id]));
+  const personPath = path.join(f.root, 'private', receipt.items.find(r => r.key === 'morgan').path);
+  const input = { records: [{ id: ids.meeting, expectedLinks: [{ id: ids.morgan }] }] };
+  const before = await f.service.verify(input, f.owner);
+  await rename(personPath, path.join(path.dirname(personPath), 'renamed-morgan.md'));
+  await assert.rejects(f.service.verify({ ...input, snapshot: before.snapshot }, f.owner), /snapshot changed/);
+  assert.equal((await f.service.verify(input, f.owner)).passed, 1);
+  const meeting = (await f.service.record({ id: ids.meeting }, f.owner)).record;
+  await f.service.save_page(edit(meeting, { body: 'Review with [[Morgan]].' }), f.owner);
+  await f.service.save_page({ ...draft(), title: 'Morgan', type: 'person' }, f.owner);
+  assert.equal((await f.service.verify(input, f.owner)).failed, 1);
+});
+
 test('group scope cannot discover private source receipts or verification content', async t => {
   const f = await batchFixture(t), receipt = await f.service.publish_batch(f.input, f.owner);
   f.setAudience({ kind: 'conversation', agentId: 'main', sessionKey: 'agent:main:group', sessionId: randomUUID() });
   const source = await f.service.source_check(f.input.source, f.owner);
   assert.equal(source.state, 'missing'); assert.equal(source.receipt, null);
-  const checked = await f.service.verify(verifyInput(receipt), f.owner);
+  const checked = await f.service.verify({ records: receipt.items.map(r => ({ id: r.id, expectedLinks: [{ id: receipt.items[0].id }], expectedEntities: [receipt.items[0].id] })) }, f.owner);
   assert.equal(checked.failed, 4); assert.ok(checked.problems.every(p => p.code === 'unavailable'));
   assert.ok(!JSON.stringify(checked).includes('Morgan'));
 });

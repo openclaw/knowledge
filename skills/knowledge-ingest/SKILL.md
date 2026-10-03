@@ -105,9 +105,14 @@ private vault files yourself.
 
 ## Verify before declaring done
 
-Read every changed page/claim/relationship back, including metadata and all
-cited evidence. Verify exact quotes/locators, actual link destinations, entity
-back-links and connected claims/edges. Test lookup and distinctive-keyword
+Run `knowledge_verify` with receipt preconditions and independently planned
+links, associations, owners/dates and relationship endpoints. Read every changed
+page/claim/relationship for substantive correctness using compact defaults;
+request `includeEvidence: true` for cited passages and attribution review, and
+`metadataView: "full"` when domain fields matter. Verify exact quotes/locators,
+contextual entity back-links and connected assertions. Use compact connections
+for discovery or failed expectations, not duplicate structural confirmation.
+Test lookup and distinctive-keyword
 retrieval. Follow pagination; a preview is not full readback. For complete-source
 verification, download all original chunks.
 Use the shared resolved-link and derived-backlink checks, including expected

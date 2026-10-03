@@ -143,9 +143,13 @@ Timeline, read [meeting and entity example](references/meeting-entity-example.md
 
 ## Verify and report
 
-Read every changed page and assertion back. Verify sources, State, dated entries,
-back-links and connections, following the shared `links` resolution and
-`links`/`backlinks` connection checks.
+Run aggregate verification with independently planned authored links in both
+directions, associations and relationship endpoints. Read every changed page and
+assertion for substantive correctness using compact defaults; request
+`includeEvidence: true` for sources/attribution and `metadataView: "full"` for
+domain fields. Verify State and dated contextual entries, not merely structural
+membership. Follow shared pagination and exception-investigation rules; use
+compact connections for discovery rather than repeating passed structural checks.
 Verify contextual source links in the body separately from derived navigation.
 Return resolved IDs, created/updated/reused records, sources used and unresolved
 candidates to the calling ingestion. Inspect uncertain

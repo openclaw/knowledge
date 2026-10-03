@@ -107,10 +107,10 @@ test('document port: original retention, locators, entity reuse, readback and un
   assert.equal((await f.call('mutation', { requestId: saved.input.requestId })).receipt.id, saved.receipt.id);
   assert.deepEqual(await f.call('save_page', saved.input), saved.receipt);
   assert.equal((await f.call('records')).total, 2);
-  const read = await f.call('record', { id: saved.receipt.id, evidenceLimit: 1 });
+  const read = await f.call('record', { includeEvidence: true, id: saved.receipt.id, evidenceLimit: 1 });
   assert.equal(read.record.body, body);
   assert.equal(read.nextEvidenceOffset, 1);
-  const cited = await f.call('record', { id: saved.receipt.id, evidenceOffset: read.nextEvidenceOffset });
+  const cited = await f.call('record', { includeEvidence: true, id: saved.receipt.id, evidenceOffset: read.nextEvidenceOffset });
   assert.equal(cited.evidence[0].verified, true);
   assert.ok(cited.evidence[0].excerpt.includes(locator.quote));
   const downloaded = await f.call('attachment', { id: saved.receipt.id, path: original.path, sha256: original.sha256 });
@@ -123,7 +123,7 @@ test('document port: original retention, locators, entity reuse, readback and un
   assert.equal(result.hits[0].citation.hash, read.record.hash);
   // An independent rerun uses source inspection to reuse the page, not another create.
   const existing = await f.call('lookup', { query: 'Orchid pilot brief' });
-  const prior = await f.call('record', { id: existing.hits[0].record.id });
+  const prior = await f.call('record', { includeEvidence: true, id: existing.hits[0].record.id });
   assert.equal(prior.evidence[0].sha256, original.sha256);
   assert.equal((await f.call('records')).total, 2);
 });
@@ -162,7 +162,7 @@ test('meeting port: ambiguous identity, contradictory accounts, attributed corre
     { ...transcript, start_line: 7, end_line: 7 },
   ];
   const saved = await f.save('Orchid reliability review 2026-09-23', 'meeting', body, [transcript, ...locators]);
-  const read = await f.call('record', { id: saved.receipt.id });
+  const read = await f.call('record', { includeEvidence: true, id: saved.receipt.id });
   assert.ok(read.evidence.every(e => e.verified));
   assert.ok(read.evidence.find(e => e.quote)?.excerpt.includes('We have not committed to launch yet.'));
   assert.equal((await f.call('records', { type: 'person' })).total, 2, 'No guessed third person');
@@ -174,7 +174,7 @@ test('meeting port: ambiguous identity, contradictory accounts, attributed corre
     source: { text: 'Speaker 2 was Alex Kim, the Northstar engineer.', attribution: 'User correction in synthetic trial' } };
   const edited = await f.call('save_page', correction);
   assert.equal(edited.revision, 2);
-  const current = await f.call('record', { id: edited.id });
+  const current = await f.call('record', { includeEvidence: true, id: edited.id });
   assert.equal(current.evidenceTotal, 6);
   assert.ok(current.evidence.every(e => e.verified));
   assert.deepEqual(Buffer.from((await f.call('attachment', { id: edited.id,
@@ -273,7 +273,7 @@ for (const mode of ['document', 'meeting']) test(`${mode} structured workflow: s
   assert.ok(out.connections.some(c => c.record.id === edge.id));
   assert.ok(incoming.connections.some(c => c.record.id === edge.id));
   for (const id of expectedIds) {
-    const read = await f.call('record', { id, includeMetadata: true });
+    const read = await f.call('record', { includeEvidence: true, id, includeMetadata: true });
     assert.ok(read.evidence.every(e => e.verified));
     assert.deepEqual(read.record.metadata.dependencies, [saved.id]);
     assert.equal((await f.call('lookup', { query: id })).outcome, 'found');

@@ -69,6 +69,12 @@ Use one generated UUID `requestId`, observed `expectedVaultId` and
 its own request/vault/ontology fields. Upload originals first; inline `source`
 text is not accepted inside a batch. Page edits retain exact revision/hash fences.
 
+Batch item keys must match `^[a-z][a-z0-9_-]{0,39}$`: 1–40 characters,
+starting with a lowercase ASCII letter, followed only by lowercase ASCII letters,
+digits, underscores or hyphens. For example, `josh_lehman` is valid; `JoshLehman`
+is not. This applies to temporary batch keys, not titles or people's names.
+References must match the key exactly: `@josh_lehman` or `[[@josh_lehman|Josh Lehman]]`.
+
 Typed ID positions accept `@key`, including forward references, dependencies,
 entities, owner, endpoints, source_page, identity candidates and continuity IDs.
 Page edit `id` must identify an existing record, never `@key`. Authored body

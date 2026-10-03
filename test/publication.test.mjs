@@ -34,7 +34,7 @@ test('UI creates sourced page; agent reads and edits; durable retry/history/read
   const f = await fixture(t), input = { ...draft(), source: { text: 'Exact original\nSecond line', attribution: 'User supplied note' } };
   const receipt = await f.service.save_page(input, f.operator);
   assert.equal(receipt.state, 'published'); assert.ok(Check(contract.operations.save_page.output, receipt));
-  const read = await f.service.record({ id: receipt.id }, f.owner);
+  const read = await f.service.record({ id: receipt.id, includeEvidence: true }, f.owner);
   assert.equal(read.record.body, input.body); assert.equal(read.evidence[0].verified, true);
   const changed = await f.service.save_page(edit(read.record, { body: 'Agent revision\n' }), f.owner);
   assert.equal(changed.revision, 2); assert.equal((await f.service.record({ id: receipt.id }, f.operator)).record.body, 'Agent revision\n');

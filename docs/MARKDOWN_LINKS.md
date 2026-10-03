@@ -31,6 +31,25 @@ Use the host's `pageHref({id: "overview", params})` API when generating links
 from browser code so the configured Control UI base path is preserved. Do not
 hardcode the Gateway origin or put credentials in a page address.
 
+## Links in chat replies
+
+Agent instructions now use ordinary inline Markdown links to the dedicated page:
+`[Title](/plugin?plugin=knowledge&id=overview&p.agent=AGENT&p.vault=VAULT&p.record=RECORD)`
+for a root-hosted Control UI. Values are URL-encoded observed identities: `agent`
+and `vault` from current scoped `knowledge_status`, and the stable record ID from
+a read or verified save. The writer's `writtenByAgentId` is not the viewing scope.
+Preserve a known deployment base path; do not manufacture hostnames/ports or use
+relative links outside Control UI. Unknown deployment/scope falls back to readable
+title and observed ID/path, not a guessed destination.
+
+The memory prompt and bundled workflow conventions carry this instruction. Tool
+schemas and host routing are unchanged; tools do not yet return canonical URLs.
+Links open the full plugin page, not a sidebar or a source-line jump. Original
+provenance and verified passage locators remain beside citations. Saved page
+bodies continue using portable wikilinks and relative document links below.
+
+## Links inside saved pages
+
 - Records keep immutable IDs in frontmatter; creation uses a title-based slug in
   the ontology's directory (`people/josh-lehman.md`). Collisions receive a short
   ID suffix. Saves retain the current path; external renames preserve identity.

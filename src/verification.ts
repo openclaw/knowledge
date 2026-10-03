@@ -2,12 +2,13 @@ import type { SampleVault } from "./vault.js";
 import { digest } from "./vault.js";
 import { eligible } from "./retrieval.js";
 import { recordSummary } from "./record-summary.js";
+import { resolveLinks } from "./markdown-links.js";
 import type { VerifyInput, VerifyOutput } from "./ingestion-contract.js";
 
 /** One authorized scan; compact exception codes never echo hidden references or source text. */
 export function verifyRecords(data: Awaited<ReturnType<SampleVault["scan"]>>, input: VerifyInput, indexed: Set<string> | null): VerifyOutput {
-  const records = new Map(eligible(data, undefined, false).map(r => [r.id, r]));
-  const snapshot = digest(JSON.stringify([data.records.map(r => [r.id, r.hash, r.revision, r.valid]), [...records.keys()], data.ontology?.fingerprint, data.issues, indexed === null ? null : [...indexed].sort(), input.records]));
+  const current = eligible(data, undefined, false), records = new Map(current.map(r => [r.id, r]));
+  const snapshot = digest(JSON.stringify([data.records.map(r => [r.id, r.path, r.hash, r.revision, r.valid]), [...records.keys()], data.ontology?.fingerprint, data.issues, indexed === null ? null : [...indexed].sort(), input.records]));
   if (input.snapshot && input.snapshot !== snapshot) throw Error("Verification snapshot changed; restart at offset 0.");
   const problems: VerifyOutput["problems"] = [];
   const add = (id: string, code: string, message: string) => { if (!problems.some(p => p.id === id && p.code === code)) problems.push({ id, code, message }); };
@@ -20,9 +21,24 @@ export function verifyRecords(data: Awaited<ReturnType<SampleVault["scan"]>>, in
     for (const issue of data.issues.filter(i => i.path === record.path)) add(id, issue.code, "Record validation found " + issue.code + "; inspect this exact record for details.");
     if (expectation.expectedHash !== undefined && record.hash !== expectation.expectedHash) add(id, "hash-mismatch", "Record changed since the supplied receipt.");
     if (expectation.expectedRevision !== undefined && record.revision !== expectation.expectedRevision) add(id, "revision-mismatch", "Revision differs from the supplied expectation.");
-    for (const field of ["owner", "due_at", "occurred_at"] as const) {
+    for (const field of ["owner", "due_at", "occurred_at", "source_page", "from", "to", "label"] as const) {
       const actual = field === "occurred_at" ? recordSummary(record).occurredAt : record.metadata[field];
       if (Object.hasOwn(expectation, field) && (actual ?? null) !== expectation[field]) add(id, field + "-mismatch", "Structured " + field + " differs from the supplied expectation.");
+    }
+    if (records.has(id)) {
+      for (const [field, ids] of [["entities", expectation.expectedEntities], ["dependencies", expectation.expectedDependencies]] as const) {
+        if (ids?.some(target => !records.has(target) || !record.metadata[field]?.includes(target)))
+          add(id, "missing-expected-" + field, "Required " + field + " association is absent or unavailable in this scope.");
+      }
+      if (expectation.expectedLinks?.length) {
+        const links = resolveLinks(record, current);
+        for (const link of expectation.expectedLinks) {
+          const candidates = link.href === undefined ? links : links.filter(actual => actual.href === link.href);
+          if (!candidates.some(actual => actual.status === "resolved" && actual.id === link.id))
+            add(id, candidates.some(actual => actual.status === "resolved") && link.href !== undefined ? "expected-link-mismatch" : "missing-expected-link",
+              "Required authored link is absent, unresolved, or resolves to a different record; inspect this record and its supplied expectations.");
+        }
+      }
     }
     if (records.has(id) && (indexed === null || !indexed.has(id))) add(id, "index-unavailable", "Current record could not be verified in the keyword index.");
   }

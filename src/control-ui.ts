@@ -16,6 +16,7 @@ import { accessText, settingsShell, storeBar, storeDialog, storeLabel, storeNoti
 import "./control-ui.css";
 
 type Summary = FeatureOutput<typeof contract, "records">["records"][number];
+const isFullSummary = (r: { id: string }): r is Summary => "path" in r && "revision" in r && "lifecycle" in r && "valid" in r;
 type Detail = FeatureOutput<typeof contract, "record">;
 type ClaimPresentation = {
   record: Omit<NonNullable<Detail["record"]>, "metadata"> & { metadata?: Partial<NonNullable<NonNullable<Detail["record"]>["metadata"]>> };
@@ -339,7 +340,7 @@ export default defineControlUiPlugin({
 
       async function showDetail(id: string, n: number, target: HTMLElement, pages = 1, waitForPanels = false) {
         const pending: Promise<unknown>[] = [];
-        const result = await feature.invoke("record", { id, maxChars: 65536, includeMetadata: true, includeReferences: true, referenceLimit: 20 });
+        const result = await feature.invoke("record", { id, maxChars: 65536, includeEvidence: true, includeMetadata: true, includeReferences: true, referenceLimit: 20 });
         if (!live(n)) return;
         if (!result.record) { target.replaceChildren(empty("Record unavailable", "This record cannot be opened in the current scope. No matching record was selected arbitrarily.")); return; }
         const r = result.record, meta = r.metadata;
@@ -419,7 +420,7 @@ export default defineControlUiPlugin({
           for (const candidate of meta.identity.candidates) {
             const match = result.references?.find(ref => ref.id === candidate.id);
             const card = el("section", undefined, "knowledge-candidate knowledge-surface"); card.append(button(`Possible match: ${match?.title ?? "Candidate identity"}`, () => open(candidate.id), "knowledge-quiet"), el("p", candidate.basis), el("p", `Both records stay separate unless ${agentName() ?? "your agent"} finds evidence they’re the same person.`, "knowledge-muted"), button(`${askLabel()} to check`, () => ask(r, false, { id: candidate.id, title: match?.title ?? candidate.id }), "knowledge-quiet"));
-            for (const evidence of candidate.evidence) { const verified = result.identityEvidence?.find(item => item.id === candidate.id)?.evidence.find(e => e.path === evidence.path && e.sha256 === evidence.sha256 && e.start_line === evidence.start_line && e.end_line === evidence.end_line); if (verified) card.append(evidenceView(feature, { ...result, evidence: [verified], evidenceTotal: 1, evidenceSourceTotal: 1, nextEvidenceOffset: null }, () => live(n), errorText)); else card.append(el("p", `Evidence: ${evidence.filename ?? evidence.path}${evidence.start_line ? ` · lines ${evidence.start_line}–${evidence.end_line ?? evidence.start_line}` : ""}. Open the record to inspect this citation.`, "knowledge-muted")); } candidates.append(card);
+            for (const evidence of candidate.evidence ?? []) { const verified = result.identityEvidence?.find(item => item.id === candidate.id)?.evidence.find(e => e.path === evidence.path && e.sha256 === evidence.sha256 && e.start_line === evidence.start_line && e.end_line === evidence.end_line); if (verified) card.append(evidenceView(feature, { ...result, evidence: [verified], evidenceTotal: 1, evidenceSourceTotal: 1, nextEvidenceOffset: null }, () => live(n), errorText)); else card.append(el("p", `Evidence: ${evidence.filename ?? evidence.path}${evidence.start_line ? ` · lines ${evidence.start_line}–${evidence.end_line ?? evidence.start_line}` : ""}. Open the record to inspect this citation.`, "knowledge-muted")); } candidates.append(card);
           }
           main.append(candidates);
         }
@@ -431,6 +432,7 @@ export default defineControlUiPlugin({
           statement.append(surface); main.append(statement);
           if (versionsNode) main.append(versionsNode);
         }
+        if (result.omitted?.length) main.append(el("p", "Some supporting previews are not shown here. Open File details for the complete record.", "knowledge-muted"));
         if (result.content.nextOffset !== null) main.append(el("p", "Preview is truncated. Open the original Markdown in File details for paged content."));
         const attended = el("section", undefined, "knowledge-attended"), attendanceRows = el("div", undefined, "knowledge-surface"); const attendanceIds = new Set<string>();
         if (r.type === "meeting") { attended.append(el("h3", "Attended"), attendanceRows); main.append(attended); }
@@ -446,7 +448,7 @@ export default defineControlUiPlugin({
         const technical = el("details", undefined, "knowledge-technical-details"); technical.append(el("summary", "Technical metadata"), el("p", `Lifecycle: ${r.lifecycle}`), el("code", `SHA-256: ${r.hash}`), rawBlock("Structured metadata", JSON.stringify(meta, null, 2)));
         const raw = button("View Markdown", () => {
           raw.disabled = true; let next = 0; const text = el("pre"); const more = button("Read more Markdown", () => { void read(); });
-          async function read() { more.disabled = true; try { const page = await feature.invoke("record", { id, view: "raw", offset: next, maxChars: 65536 }); if (disposed || !filePanel.isConnected || !context.host.connection.connected) return; if (page.record?.hash !== r.hash) throw Error("Record changed; reopen it to read the current Markdown."); text.textContent += page.record.raw ?? ""; if (page.content.nextOffset === null) more.remove(); else { next = page.content.nextOffset; more.disabled = false; } } catch (error) { filePanel.append(failure(error)); more.disabled = false; } }
+          async function read() { more.disabled = true; try { const page = await feature.invoke("record", { id, view: "raw", metadataView: "none", offset: next, maxChars: 65536 }); if (disposed || !filePanel.isConnected || !context.host.connection.connected) return; if (page.record?.hash !== r.hash) throw Error("Record changed; reopen it to read the current Markdown."); text.textContent += page.record.raw ?? ""; if (page.content.nextOffset === null) more.remove(); else { next = page.content.nextOffset; more.disabled = false; } } catch (error) { filePanel.append(failure(error)); more.disabled = false; } }
           filePanel.append(text, more); void read();
         }); raw.prepend(icon("fileText", 14));
         const historyList = el("div", undefined, "knowledge-history-list"); historyList.hidden = true;
@@ -523,7 +525,7 @@ export default defineControlUiPlugin({
         let claimOffset: number | null = 0, railIndex = 0, railOffset = 0, snapshot: string | undefined; const claimGroups = new Map<string, HTMLElement>();
         const railMore = () => railIndex < railDirections.length, railIds = new Set<string>();
         const connectionsPage = async (direction: "claims" | typeof railDirections[number], offset: number) => {
-          const page = await feature.invoke("connections", { id, direction, offset, limit: 20, includeCards: direction === "claims", includeEndpoints: direction === "incoming" || direction === "outgoing" });
+          const page = await feature.invoke("connections", { id, view: "full", direction, offset, limit: 20, includeCards: direction === "claims", includeEndpoints: direction === "incoming" || direction === "outgoing" });
           if (live(n) && snapshot && snapshot !== page.snapshot) throw Error("Connections changed; reopen this page to refresh.");
           snapshot = page.snapshot; return page;
         };
@@ -531,6 +533,7 @@ export default defineControlUiPlugin({
           const page = await connectionsPage("claims", claimOffset ?? 0); if (!live(n)) return;
           claimsLoading.remove();
           for (const link of page.connections) {
+            if (!isFullSummary(link.record)) throw Error("Full connection record required.");
             const card = claimCard(link.record, n, id);
             // A meeting's own event claim restates the meeting page and its
             // attendance, so it isn't listed here or on attendees' pages.
@@ -549,6 +552,7 @@ export default defineControlUiPlugin({
             const endpoints = page.connections.map(link => { const targetId = link.direction === "incoming" ? link.from : link.direction === "outgoing" ? link.to : undefined; return targetId ? page.endpoints?.find(record => record.id === targetId) ?? null : null; });
             for (const [i, link] of page.connections.entries()) {
               const row = el("div", undefined, "knowledge-connection"), target = endpoints[i] ?? link.record;
+              if (!isFullSummary(target)) throw Error("Full connection endpoint required.");
               // A wikilink to a record already shown as a typed connection adds nothing.
               if ((link.direction === "links" || link.direction === "backlinks") && (railIds.has(target.id) || attendanceIds.has(target.id))) continue;
               railIds.add(target.id);
@@ -605,7 +609,7 @@ export default defineControlUiPlugin({
         if (waitForPanels) await panels;
       }
       async function browse(n: number, target: HTMLElement) {
-        const result = await feature.invoke("records", { kind, offset, limit: 50, includeCards: kind === "claim", includeEndpoints: kind === "relationship", ...(type ? { type } : {}), ...(browseQuery ? { query: browseQuery } : {}), ...(includeHistory ? { lifecycle: "all" } : {}), ...(originFilter && kind === "claim" ? { assertionOrigin: originFilter } : {}) });
+        const result = await feature.invoke("records", { kind, offset, limit: kind === "claim" ? 20 : 50, includeCards: kind === "claim", includeEndpoints: kind === "relationship", ...(type ? { type } : {}), ...(browseQuery ? { query: browseQuery } : {}), ...(includeHistory ? { lifecycle: "all" } : {}), ...(originFilter && kind === "claim" ? { assertionOrigin: originFilter } : {}) });
         if (!live(n) || n !== generation) return;
         const layout = el("div", undefined, "knowledge-browse"), facets = el("nav", undefined, "knowledge-facets"); facets.setAttribute("aria-label", "Types");
         const facet = (name: string, label: string, count?: number) => { const control = button(label, () => { type = name; offset = 0; void load(); }, "knowledge-facet"); control.prepend(name ? tile(name, 20) : el("span", undefined, "knowledge-facet-spacer")); control.setAttribute("aria-pressed", String(type === name)); if (count !== undefined) control.append(el("span", count.toLocaleString(), "knowledge-facet-count")); facets.append(control); };
@@ -620,7 +624,7 @@ export default defineControlUiPlugin({
         const history = el("div", undefined, "knowledge-kind-switch"); for (const [all, name] of [[false, "Current"], [true, "Include history"]] as const) { const b = button(name, () => { includeHistory = all; offset = 0; void load(); }, "knowledge-quiet"); b.setAttribute("aria-pressed", String(includeHistory === all)); history.append(b); } controls.append(history);
         if (kind === "claim" && result.facets && Object.keys(result.facets.origins).length > 1) { const select = el("select"); select.setAttribute("aria-label", "Assertion origin"); for (const value of ["", ...Object.keys(result.facets.origins)]) { const option = el("option", value ? origin(value) : "All origins"); option.value = value; select.append(option); } select.value = originFilter; select.onchange = () => { originFilter = select.value; offset = 0; void load(); }; controls.append(select); }
         panel.append(controls);
-        if (kind === "claim") { for (const record of result.records) { if (record.lifecycle !== "active") { const row = el("div", undefined, "knowledge-historical knowledge-connection"); row.append(summaryLink(record), el("small", `${record.lifecycle === "withdrawn" ? "Withdrawn" : "Replaced"} · ${record.updatedAt ? date(record.updatedAt) : "Time not recorded"}`)); panel.append(row); } else { const card = claimCard(record, n); if (card) panel.append(card); } } }
+        if (kind === "claim") { for (const record of result.records) { if (record.lifecycle !== "active") { const row = el("div", undefined, "knowledge-historical knowledge-connection"); row.append(summaryLink(record), el("small", `${record.lifecycle === "withdrawn" ? "Withdrawn" : "Replaced"} · ${record.updatedAt ? date(record.updatedAt) : "Time not recorded"}`)); panel.append(row); } else { const card = claimCard(record, n); panel.append(card ?? summaryLink(record)); } } }
         else if (kind === "relationship") {
           const endpoints = new Map((result.endpoints ?? []).map(record => [record.id, record]));
           for (const record of result.records) {
@@ -711,7 +715,7 @@ export default defineControlUiPlugin({
                   const row = el("div", undefined, "knowledge-attendee"); if (person) { row.append(summaryLink(person)); namesSeen.push(person.title); } else row.append(el("span", "Person unavailable"));
                   row.append(el("p", record.attributionConfidence?.basis ?? "No attribution basis recorded"), confidenceView(record.attributionConfidence, true)); attendanceRows.append(row);
                   attendanceTitle.textContent = `${namesSeen.slice(0, 3).join(", ")}${(entry.group!.counts.attendees ?? 0) > namesSeen.slice(0, 3).length ? ` and ${entry.group!.counts.attendees - namesSeen.slice(0, 3).length} more` : ""} attended`;
-                } else if (record.kind === "claim") { const card = claimCard(record, n); if (card) claims.append(card); }
+                } else if (record.kind === "claim") { const card = claimCard(record, n); claims.append(card ?? saveRow(record)); }
                 else { const row = saveRow(record, record.change === "created" ? "New" : record.change === "updated" ? "Updated" : "Observed in vault"); if (record.id === source.id) { sourceRow.replaceWith(row); sourceRow = row; sourceMarked = true; } else pages.append(row); }
               }
             };
