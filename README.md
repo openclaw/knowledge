@@ -32,8 +32,10 @@ See [setup and authority](docs/REAL_VAULT.md), [model-facing API](docs/MODEL_API
 ## Bundled skills
 
 `knowledge-recall`, `knowledge-capture`, `knowledge-ingest`,
-`knowledge-meeting-ingest`, `knowledge-entities`, `knowledge-correct`, and `knowledge-source-ingest` ship with the plugin. They
+`knowledge-meeting-ingest`, `knowledge-entities`, `knowledge-correct`,
+`knowledge-source-ingest`, and `knowledge-automation` ship with the plugin. They
 retain sources, resolve identities conservatively, and verify published pages, claims, relationships and entity propagation.
+`knowledge-automation` creates and verifies ingestion jobs through OpenClaw's host scheduler.
 They are agent workflows, not an autonomous ingestion engine; host extraction
 and structured claim/relationship mutation have explicit limits. Source ingestion adds optional canonical source/snapshot provenance plus local diff scripts; it is not a connector daemon or scheduler. See the
 [upstream operation map and verification boundaries](docs/WORKFLOWS.md).

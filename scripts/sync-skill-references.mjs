@@ -7,6 +7,8 @@ import path from 'node:path';
 const root = fileURLToPath(new URL('../skills/', import.meta.url));
 const check = process.argv.includes('--check');
 for (const name of (await readdir(root)).filter(name => name.startsWith('knowledge-'))) {
+  // Automation setup routes to ingestion skills; it does not publish content.
+  if (name === 'knowledge-automation') continue;
   const files = name === 'knowledge-recall' ? ['conventions.md'] : ['conventions.md', 'publication.md'];
   if (['knowledge-meeting-ingest', 'knowledge-entities'].includes(name)) files.push('meeting-entity-example.md');
   for (const file of files) {
