@@ -1,3 +1,6 @@
+import { queryFreshness } from "./query-freshness.js";
+import { readEvidence } from "./evidence-read.js";
+import { EvidenceReadInput } from "./evidence-read-contract.js";
 import { temporalPredicate, type TimeFilter } from "./temporal-query.js";
 import { withinBudget, compactSummary } from "./response-budget.js";
 import { resolveLinks } from "./markdown-links.js";
@@ -232,7 +235,7 @@ export class SampleVault {
       const endpointIds = new Set(records.filter(r => r.kind === "relationship").flatMap(r => [r.from, r.to]));
       return { facets, records,
         ...(input.includeEndpoints ? { endpoints: current.filter(r => endpointIds.has(r.id)).map(r => compactEndpoints ? compactSummary(summary(r)) : summary(r)) } : {}),
-        total: matched.length, offset, nextOffset: offset + records.length < matched.length ? offset + records.length : null, checkedAt: data.checkedAt };
+        total: matched.length, offset, nextOffset: offset + records.length < matched.length ? offset + records.length : null, freshness: queryFreshness(data.checkedAt) };
     };
     let result = envelope([]);
     for (const record of matched.slice(offset, offset + limit)) {
@@ -297,6 +300,16 @@ export class SampleVault {
       });
     }).slice(0, 100);
     return { sourceFiles, sourceFilesTotal: files.size, identityEvidence, relatedStatements, record: { ...summary(r), body: r.body, raw: r.raw, hash: r.hash, metadata: JSON.stringify(r.metadata, null, 2) }, issues: data.issues.filter(i => i.path === r.path), references, links: resolveLinks(r, eligible(data, undefined, false)), evidence, evidenceTotal: r.metadata.evidence?.length ?? 0, evidenceSourceTotal: sourceCount(r.metadata.evidence) };
+  }
+  /** Resolve the referenced source within this scope on every passage request. */
+  async evidenceRead(input: EvidenceReadInput, withdrawn = new Set<string>()) {
+    if (!Check(EvidenceReadInput, input)) throw Error("Invalid evidence passage input.");
+    const data = await this.scan(), records = data.records.filter(r => r.id === input.id);
+    const record = records.length === 1 && records[0].lifecycle !== "withdrawn" && !withdrawn.has(input.id) ? records[0] : undefined;
+    const evidence = record ? [...(record.metadata.evidence ?? []), ...annotationEvidence(record.metadata)]
+      .find(e => e.path === input.path && e.sha256 === input.sha256) : undefined;
+    if (!evidence) throw Error("Evidence unavailable in this record and scope.");
+    return readEvidence(this.root, records[0], evidence, input);
   }
   async attachment(input: { id: string; path: string; sha256: string; offset?: number }) {
     const data = await this.scan(), records = data.records.filter(r => r.id === input.id);

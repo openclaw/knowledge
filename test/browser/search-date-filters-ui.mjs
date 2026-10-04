@@ -32,8 +32,8 @@ try {
     if (op === "status") return { service: "knowledge", phase: "structured-writes", backendRevision: "fixture", instanceId: "fixture", startedAt: at, checkedAt: at, snapshot, vault: "vault-1", agent: "main", store: "ready", scope: "owner", writesEnabled: false, live: "stopped", records: 3, validRecords: 3, definitions: 0, ontologyAvailable: true, ontologyFingerprint: "fixture", issues: 0 };
     if (op === "ontology") return { view: "catalog", available: true, name: "fixture", version: "1", fingerprint: "fixture", total: 0, offset: 0, nextOffset: null, definitions: [], totalIssues: 0 };
     if (op === "record") throw Error("Fixture record inspection reached");
-    if (op === "lookup") return { hits: [], resultCount: 0, offset: 0, nextOffset: null, checkedAt: at, coverage: { complete: true, message: "" }, total: 0, outcome: "missing" };
-    if (op === "grep") return { hits: [], resultCount: 0, offset: 0, nextOffset: null, checkedAt: at, coverage: { complete: true, message: "" }, total: 0, mode: "keyword", queryMode: "all", index: { state: "ready", lag: false, snapshot, indexedAt: at, message: "" } };
+    if (op === "lookup") return { hits: [], resultCount: 0, offset: 0, nextOffset: null, freshness: { queriedAt: at, scannedAt: at }, coverage: { complete: true, message: "" }, total: 0, outcome: "missing" };
+    if (op === "grep") return { hits: [], resultCount: 0, offset: 0, nextOffset: null, freshness: { queriedAt: at, scannedAt: at }, coverage: { complete: true, message: "" }, total: 0, mode: "keyword", queryMode: "all", index: { state: "ready", lag: false, snapshot, message: "" } };
     throw Error(`Unexpected UI operation: ${op}`);
   });
   await page.route("https://knowledge.test/**", route => route.fulfill({ contentType: "text/html", body: html }));

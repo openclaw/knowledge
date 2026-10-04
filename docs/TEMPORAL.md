@@ -13,10 +13,10 @@ Unknown dates stay absent; recording time never substitutes for occurrence. Sear
 
 ## Operations
 
-- knowledge_timeline: dated records, optionally filtered by entity ID, kind (claim kind or page type), timeField, since/until, order and historical.
+- knowledge_timeline: dated records, optionally filtered by entity ID, kind (claim kind or page type), timeField, since/until, order, eligibility and includeSources.
 - knowledge_chronicle_day: day or its Monday–Sunday week. Timestamp calendar days use the requested IANA timezone (UTC default); date-only values stay on their authored day.
 - knowledge_chronicle_since: occurrence-time range, oldest first; not recently imported knowledge.
-- knowledge_chronicle_last_seen: latest dated context involving an entity at/before asOf (now default). A mention does not prove attendance or contact; no match does not prove absence.
+- knowledge_chronicle_last_seen: latest dated context involving an entity at/before occurredOnOrBefore (now default). A mention does not prove attendance or contact; no match does not prove absence.
 - knowledge_grep and knowledge_records: timeField/since/until filters before ranking, counts and pagination.
 
 For newly recorded/updated records without keywords, query timeline with the respective timeField. This is a current-record query, not a durable change cursor. History/recent remain the operational audit. Ordering uses date values and stable IDs; date-only versus instant ordering is not an inferred causal sequence.
@@ -31,7 +31,7 @@ Results contain record ID/path/revision/hash, original date and precision, bound
 
 ## Eligibility and consistency
 
-Default results include current eligible records. historical=true includes eligible superseded/expired assertions and dependencies, never withdrawn records. This is not a historical snapshot of what the system knew. Fixture, invalid, ambiguous and unavailable-dependency records are excluded before indexing/counts. Host authority and store binding apply throughout; model selectors cannot grant access.
+Default results include current eligible records. eligibility="include_inactive" includes eligible superseded/expired assertions and dependencies, never withdrawn records. This is not a historical snapshot of what the system knew. Fixture, invalid, ambiguous and unavailable-dependency records are excluded before indexing/counts. Host authority and store binding apply throughout; model selectors cannot grant access.
 
 Follow nextOffset with unchanged filters and the returned snapshot, which binds authorized records and query parameters. Changed content/query requires restarting. Row/byte limits bound responses. Coverage reports validation issues and omission of undated/Markdown-only events. Invalid bounds/timezones and unavailable indexes fail explicitly.
 
@@ -42,3 +42,23 @@ SQLite temporal_records_v1 tracks record hashes; temporal_dates_v1 stores author
 Reference: gbrain 739e5cc89 core/effective-date.ts, engine-sql/timeline.ts, ops/chronicle.ts and persistence/canonical-projections.ts. Borrow chronological operations and separation of world/storage time while retaining Knowledge record/evidence/access contracts. This pass does not add free-prose extraction, anniversary queries, recency ranking, trajectory analytics, validity-at snapshots, durable delta cursors or dreaming.
 
 Tests: test/chronicle.test.mjs covers late imports, range precision, timezone/day/week, shared-event grouping, scope/lifecycle, edits, pagination, rebuilds and normal publication. Live Granola ingestion is a separate semantic acceptance test.
+
+## Compact source context and freshness
+
+Set includeSources=true to include deduplicated source summaries for the returned
+page. Summary bytes share the 24 KiB budget with items; follow actual nextOffset
+and snapshot. Summaries carry identity, title, type, revision/hash and lifecycle,
+not source bodies. A page item without source_page represents its own source.
+Temporal references expose lifecycle, an accessible supersededBy when present,
+and expiresAt when set. Association is not attendance evidence.
+
+Last-seen returns selection.timeField=occurred_at, selection.onOrBefore and
+selection.eligibility. The input occurredOnOrBefore bounds occurrence, not when
+Knowledge learned the fact. eligibility defaults to current. Removed inputs asOf
+and historical are rejected; no aliases are provided on temporal tools.
+
+Query outputs report freshness.queriedAt (query execution), scannedAt (validated
+source scan, reused while unchanged), and indexedAt for keyword reconciliation.
+An older scannedAt is not evidence of stale results. Temporal snapshot tokens
+bind filters, source projection and eligible corpus; compare only while continuing
+the same query. A new query or eligibility selection can have a different token.

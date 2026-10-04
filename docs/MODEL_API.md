@@ -333,3 +333,30 @@ source replay/reconciliation, and bounded mutation recovery.
 ## Temporal retrieval
 
 Chronicle tools and time filters are documented in [Temporal retrieval](TEMPORAL.md). Use knowledge_timeline, knowledge_chronicle_day, knowledge_chronicle_since and knowledge_chronicle_last_seen for structured dated records. knowledge_grep/knowledge_records accept timeField/since/until. No new watcher or dreaming is required.
+
+## Source passage reads
+
+knowledge_evidence_read accepts id, path and sha256 from a record's retained
+source locator, with optional inclusive startLine/endLine. It returns UTF-8 text,
+normalizing CRLF to LF, a verified source hash/range, and nextCursor. Pass that
+cursor with the same id/path/sha256; omit line bounds or repeat them exactly.
+maxChars defaults to 3000 (256–3000). Pages never split Unicode scalar values;
+long single lines continue by character position. nextCursor=null means the
+requested passage is complete. nextEvidenceOffset on knowledge_record instead
+pages the citation list; excerptTruncated means an excerpt is incomplete even
+when that list has ended. Hash/range verification does not evaluate interpretation.
+
+Each passage read reauthorizes the record and file and validates the complete
+source bytes. Source or range mismatch rejects; restart with an observed locator.
+Binary sources use knowledge_attachment. The reader cannot access arbitrary
+files, unreferenced sources or withdrawn records. A sourceFiles entry aggregated
+from a related claim must be read using that citing claim ID, unless the page
+also directly cites it. Primary and annotation citations on the record are
+accepted; related-record membership alone does not grant source access.
+Source reading remains part of
+semantic review; aggregate verification does not replace it.
+
+Search, lookup, inventory and temporal query responses use freshness.queriedAt
+and freshness.scannedAt instead of checkedAt. Successful keyword queries also
+expose freshness.indexedAt, moved from index.indexedAt. Status and diagnostic
+checkedAt fields continue to describe their scan/status observation.

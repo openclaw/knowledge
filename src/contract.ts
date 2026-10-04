@@ -1,3 +1,5 @@
+import { QueryFreshness } from "./query-freshness.js";
+import { EvidenceReadInput, EvidenceReadOutput } from "./evidence-read-contract.js";
 import { TimelineInput, DayInput, SinceInput, LastSeenInput, ChronicleOutput, LastSeenOutput, TemporalFilters } from "./chronicle-contract.js";
 import { SessionActivityInput, SessionActivityOutput } from "./session-activity.js";
 import { BatchInput, SourceCheckInput, SourceCheckOutput, VerifyInput, VerifyOutput } from "./ingestion-contract.js";
@@ -33,7 +35,7 @@ export const contract = defineFeatureContract({
       input: SinceInput, output: ChronicleOutput, tool: { name: "knowledge_chronicle_since", label: "What happened since" },
     },
     chronicle_last_seen: {
-      kind: "query", description: "Latest dated structured record involving an entity page ID, at or before asOf (default now). A dated mention is not proof of a meeting or physical interaction. Null means no eligible dated record, not proof of no contact. Undated prose is not inferred.",
+      kind: "query", description: "Find the latest dated context for an entity before an occurrence cutoff, at or before occurredOnOrBefore (default now). A dated mention is not proof of a meeting or physical interaction. Null means no eligible dated record, not proof of no contact. Undated prose is not inferred.",
       input: LastSeenInput, output: LastSeenOutput, tool: { name: "knowledge_chronicle_last_seen", label: "Latest dated entity context" },
     },
 
@@ -62,6 +64,10 @@ export const contract = defineFeatureContract({
     attach: {
       kind: "action", description: "UPLOAD source bytes: use knowledge_attach (verb), not knowledge_attachment (read). Retain an original source file in the authorized vault scope. Generate a distinct lowercase UUID requestId per file, never a filename/source ID and never shared by different files. Send base64 chunks of up to 48 KiB decoded, sequential byte offsets, the same requestId/filename/attribution for all chunks, and final=true on the last chunk. Retry identical chunks after interruption. No total file-size or evidence-count cap. A complete receipt returns evidence to append via save_page.attachments. Uploading alone does not create a page. No local filesystem path is accepted.",
       input: AttachInput, output: AttachOutput, tool: { name: "knowledge_attach", label: "Attach knowledge source file" },
+    },
+    evidence_read: {
+      kind: "query", description: "Read a retained source passage as UTF-8 text using a locator from search or record inspection. Supply record id/path/sha256; optional inclusive line bounds. Continue with nextCursor and the same id/path/hash until null: that completes the passage, not just the citation list. Reauthorizes and verifies source bytes each call. CRLF is normalized to LF. Binary sources use knowledge_attachment. Verification checks bytes/ranges, not interpretation.",
+      input: EvidenceReadInput, output: EvidenceReadOutput, tool: { name: "knowledge_evidence_read", label: "Read source passage" },
     },
     attachment: {
       kind: "query", description: "DOWNLOAD retained bytes: use knowledge_attachment, not knowledge_attach (upload). Read the original bytes of a file referenced by an authorized record. Supply the evidence path and sha256 from knowledge_record. Returns a base64 chunk; follow nextOffset until null. Binary files are preserved without text conversion. No arbitrary filesystem paths or unreferenced files are exposed.",
@@ -133,11 +139,11 @@ export const contract = defineFeatureContract({
       tool: { name: "knowledge_status", label: "Knowledge status" },
     },
     grep: {
-      kind: "query", description: "Search for records, including people, projects and pages whose exact stored identity is not already known. Rank authorized valid knowledge by title/alias/body keywords with SQLite FTS5. Default: all word tokens, active records. Saved pages need no approval. mode=any ORs literal words; mode=phrase matches their order. No raw FTS/regex operators. lifecycle=superseded/all includes history, never withdrawn records. Filters apply before ranking. Snippets have revision/hash citations and body line locators. index.state=unavailable and total=null mean failed retrieval, not no matches. Compare index.snapshot across pages; restart on changes. Not exhaustive inventory: use knowledge_records. No embeddings.",
+      kind: "query", description: "Find records by words in titles, aliases and bodies. Use for discovery when the exact identity is unknown. Rank authorized valid knowledge by title/alias/body keywords with SQLite FTS5. Default: all word tokens, active records. Saved pages need no approval. mode=any ORs literal words; mode=phrase matches their order. No raw FTS/regex operators. lifecycle=superseded/all includes history, never withdrawn records. Filters apply before ranking. Snippets have revision/hash citations and body line locators. index.state=unavailable and total=null mean failed retrieval, not no matches. Compare index.snapshot across pages; restart on changes. Not exhaustive inventory: use knowledge_records. No embeddings.",
       input: SearchInput, output: SearchOutput, tool: { name: "knowledge_grep", label: "Search knowledge" },
     },
     lookup: {
-      kind: "query", description: "Use only when an exact stable ID, full title or declared alias is already known; use knowledge_grep for discovery and after a missing result. No keyword-search fallback. Resolve that exact identity in the trusted scope; returns found, ambiguous or missing without choosing an ambiguous identity. Names/aliases normalize Unicode, case and whitespace; IDs are case-sensitive. Active records by default, with no approval step; historical filters are explicit. Invalid, withdrawn and unavailable dependencies are excluded. Independent of keyword indexing. Use knowledge_record for full inspection and knowledge_records for exhaustive listing.",
+      kind: "query", description: "Resolve a known exact ID, full title or alias. This is not keyword search; use knowledge_grep for discovery and after a missing result. No keyword-search fallback. Resolve that exact identity in the trusted scope; returns found, ambiguous or missing without choosing an ambiguous identity. Names/aliases normalize Unicode, case and whitespace; IDs are case-sensitive. Active records by default, with no approval step; historical filters are explicit. Invalid, withdrawn and unavailable dependencies are excluded. Independent of keyword indexing. Use knowledge_record for full inspection and knowledge_records for exhaustive listing.",
       input: LookupInput, output: LookupOutput, tool: { name: "knowledge_lookup", label: "Resolve knowledge identity" },
     },
     records: {
@@ -150,11 +156,11 @@ export const contract = defineFeatureContract({
         assertionOrigin: Type.Optional(text(30)),
         type: Type.Optional(text(64)), query: Type.Optional(text(200)), lifecycle: Type.Optional(Type.Union([Type.Literal("active"), Type.Literal("all")])),
       }, { additionalProperties: false }),
-      output: Type.Object({ records: Type.Array(record, { maxItems: 100 }), endpoints: Type.Optional(Type.Array(Summary, { maxItems: 200 })), total: Type.Integer(), offset: Type.Integer(), nextOffset: Type.Union([Type.Integer(), Type.Null()]), checkedAt: text(40), facets: Type.Optional(Type.Object({ kinds: Type.Record(Type.String(), Type.Integer()), origins: Type.Record(Type.String(), Type.Integer()) })) }),
+      output: Type.Object({ records: Type.Array(record, { maxItems: 100 }), endpoints: Type.Optional(Type.Array(Summary, { maxItems: 200 })), total: Type.Integer(), offset: Type.Integer(), nextOffset: Type.Union([Type.Integer(), Type.Null()]), freshness: QueryFreshness, facets: Type.Optional(Type.Object({ kinds: Type.Record(Type.String(), Type.Integer()), origins: Type.Record(Type.String(), Type.Integer()) })) }),
       tool: { name: "knowledge_records", label: "Browse knowledge" },
     },
     record: {
-      kind: "query", description: "Inspect ONE record by stable ID. Default content returns body once (up to 12,000 chars), revision/hash, attribution, uncertainty and compact structured metadata (owner/dates/associations/endpoints); no evidence arrays. Use knowledge_verify for aggregate structural checks. metadataView=full for arbitrary ontology fields and complete frontmatter before replacing fields; none for text only. Legacy includeMetadata true/false means full/none; cannot combine selectors. includeEvidence=true for verified citation locators and excerpts (4,000 chars total); paginate evidenceOffset/evidenceLimit with nextEvidenceOffset. includeReferences=true for paged connected summaries. view=summary omits body; raw returns original Markdown instead. Complete JSON is byte-bounded: follow content.nextOffset, nextReferenceOffset and nextEvidenceOffset; compare record hashes across pages. omitted lists supplemental previews excluded to fit; use connections, attachments or paged raw for complete detail. Oversized metadata/evidence errors explicitly; raw+metadataView=none without evidence/references is the text fallback. Missing/duplicate IDs return null. Never edit from truncated body.",
+      kind: "query", description: "Read one saved record by stable ID. Read source passages with knowledge_evidence_read. Default content returns body once (up to 12,000 chars), revision/hash, attribution, uncertainty and compact structured metadata (owner/dates/associations/endpoints); no evidence arrays. Use knowledge_verify for aggregate structural checks. metadataView=full for arbitrary ontology fields and complete frontmatter before replacing fields; none for text only. Legacy includeMetadata true/false means full/none; cannot combine selectors. includeEvidence=true for verified citation locators and excerpts (4,000 chars total); paginate evidenceOffset/evidenceLimit with nextEvidenceOffset. includeReferences=true for paged connected summaries. view=summary omits body; raw returns original Markdown instead. Complete JSON is byte-bounded: follow content.nextOffset, nextReferenceOffset and nextEvidenceOffset; compare record hashes across pages. omitted lists supplemental previews excluded to fit; use connections, attachments or paged raw for complete detail. Oversized metadata/evidence errors explicitly; raw+metadataView=none without evidence/references is the text fallback. Missing/duplicate IDs return null. Never edit from truncated body.",
       input: RecordInput, output: RecordOutput,
       tool: { name: "knowledge_record", label: "Inspect knowledge" },
     },

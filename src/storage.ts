@@ -1,3 +1,4 @@
+import { EvidenceReadInput } from "./evidence-read-contract.js";
 import { chronicle } from "./chronicle.js";
 import { TimelineInput, DayInput, LastSeenInput, LastSeenOutput, SinceInput } from "./chronicle-contract.js";
 import { appendActivity, sessionActivity, returnedRecords, type ActivityOrigin, type ActivityInput } from "./session-activity.js";
@@ -60,7 +61,7 @@ export class KnowledgeStorage {
   }
   async trackRead<T>(access: VaultAccess, operation: string, read: () => T | Promise<T>): Promise<T> {
     const result = await read();
-    if (access.activity && ["search", "lookup", "records", "record", "connections", "timeline", "chronicleDay", "chronicleSince", "chronicleLastSeen"].includes(operation)) {
+    if (access.activity && ["search", "lookup", "records", "record", "evidenceRead", "connections", "timeline", "chronicleDay", "chronicleSince", "chronicleLastSeen"].includes(operation)) {
       const records = returnedRecords(result);
       // Best effort: observation must not turn a successful read into a failed read.
       // Authority failures still prevent delivery, even when telemetry fails.
@@ -80,6 +81,15 @@ export class KnowledgeStorage {
     });
   }
   private retrievalBinding(access: VaultAccess) { return `${this.config.vaultId}:${scopeKey(access.scope)}`; }
+  /** Keep durable withdrawal tombstones authoritative even after external file restoration. */
+  async evidenceRead(input: EvidenceReadInput, access: VaultAccess) {
+    if (!Check(EvidenceReadInput, input)) throw Error("Invalid evidence passage input.");
+    return this.run(access, async vault => {
+      await vault.scan();
+      const withdrawn = this.store.withDatabase(db => withdrawnIds(db, this.retrievalBinding(access)));
+      return vault.evidenceRead(input, withdrawn);
+    });
+  }
   async search(input: SearchInput, access: VaultAccess) {
     return this.run(access, async vault => {
       const data = await vault.scan();
@@ -153,9 +163,9 @@ export class KnowledgeStorage {
   /** Last dated context at a reference instant; never infer contact from absence. */
   async chronicleLastSeen(input: Static<typeof LastSeenInput>, access: VaultAccess): Promise<Static<typeof LastSeenOutput>> {
     if (!Check(LastSeenInput, input)) throw Error("Invalid last-seen input.");
-    const asOf = input.asOf ?? new Date().toISOString();
-    const result = await this.timeline({ entity: input.entity, until: asOf, historical: input.historical, order: "desc", limit: 1 }, access);
-    return { entity: input.entity, asOf, last: result.items[0] ?? null, snapshot: result.snapshot,
+    const cutoff = input.occurredOnOrBefore ?? new Date().toISOString();
+    const result = await this.timeline({ entity: input.entity, until: cutoff, eligibility: input.eligibility, includeSources: input.includeSources, order: "desc", limit: 1 }, access);
+    return { entity: input.entity, selection: { timeField: "occurred_at", onOrBefore: cutoff, eligibility: input.eligibility ?? "current" }, last: result.items[0] ?? null, snapshot: result.snapshot, freshness: result.freshness, ...(result.sources ? { sources: result.sources } : {}),
       message: "Latest eligible dated context; a mention is not proof of contact. No match does not establish absence of an interaction." };
   }
   async recent(input: Static<typeof RecentInput>, access: VaultAccess) {

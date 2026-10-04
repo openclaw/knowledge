@@ -43,6 +43,7 @@ export const operations = {
   history: async (s: Storage, a: Access, input: Parameters<Storage["history"]>[1]) => { await s.initialize(a); return s.history(a, input); },
   search: (s: Storage, a: Access, input: In<Storage["search"]>) => s.search(input, a),
   lookup: (s: Storage, a: Access, input: In<Storage["lookup"]>) => s.lookup(input, a),
+  evidenceRead: (s: Storage, a: Access, input: import("./evidence-read-contract.js").EvidenceReadInput) => s.evidenceRead(input, a),
   attachment: (s: Storage, a: Access, input: { id: string; path: string; sha256: string; offset?: number }) => s.run(a, vault => vault.attachment(input)),
   records: (s: Storage, a: Access, input: Parameters<import("./vault.js").SampleVault["list"]>[0]) => s.run(a, vault => vault.list(input)),
   record: (s: Storage, a: Access, input: Parameters<typeof inspectRecord>[1]) => s.run(a, vault => inspectRecord(vault, input)),

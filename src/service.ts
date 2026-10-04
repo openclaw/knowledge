@@ -1,3 +1,4 @@
+import { queryFreshness } from "./query-freshness.js";
 import { createHash, randomUUID } from "node:crypto";
 import { Check } from "typebox/value";
 import type { FeatureHandlers, FeatureEventEmitter, FeatureInvocationContext } from "openclaw/plugin-sdk/feature-plugin";
@@ -105,13 +106,14 @@ export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureE
       })(input, context),
       chronicle_last_seen: (input, context) => call("chronicleLastSeen", false, () => {
         if (!Check(LastSeenInput, input)) throw Error("Invalid last-seen input.");
-        const asOf = input.asOf ?? now(), result = emptyChronicle({ entity: input.entity, until: asOf });
-        return { entity: input.entity, asOf, last: null, snapshot: result.snapshot,
+        const cutoff = input.occurredOnOrBefore ?? now(), result = emptyChronicle({ entity: input.entity, until: cutoff, eligibility: input.eligibility, includeSources: input.includeSources });
+        return { entity: input.entity, selection: { timeField: "occurred_at" as const, onOrBefore: cutoff, eligibility: input.eligibility ?? "current" as const }, last: null, snapshot: result.snapshot, freshness: result.freshness, ...(result.sources ? { sources: result.sources } : {}),
           message: "This store has not been provisioned; no dated context is available. Absence is not proof of no interaction." };
       })(input, context),
       recent: call("recent", false, () => ({ items: [], upperSequence: 0, nextBefore: null })),
       attach: call("attach", true),
       attachment: call("attachment"),
+      evidence_read: call("evidenceRead"),
       // Inside a host pre-compaction flush, a missing requestId is derived from
       // the flush and title so the flush's retries replay instead of duplicating.
       save_page: (input, context) => {
@@ -135,7 +137,7 @@ export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureE
       history: call("history", false, () => ({ entries: [], mutations: [], nextOffset: null, git: { state: "idle" as const, pending: 0, message: "Nothing saved here yet." } })),
       status: async (_, context) => {
         const opened = await stores.open(featurePrincipal(context, policy.operatorRead, false, agent ?? stores.defaultAgent()), { provision: false }, stores.incarnation);
-        const base = { service: "knowledge" as const, phase: policy.writesEnabled ? "structured-writes" as const : "read-only-explorer" as const, backendRevision: "memory-provider-v2-2+stores-v1+chronicle-v1", instanceId, startedAt };
+        const base = { service: "knowledge" as const, phase: policy.writesEnabled ? "structured-writes" as const : "read-only-explorer" as const, backendRevision: "memory-provider-v2-2+stores-v1+ergonomics-v1", instanceId, startedAt };
         const notReady = (agentId: string, store: Exclude<StoreState, "ready">, message: string) => ({ ...base, checkedAt: now(), vault: "", agent: agentId, store, scope: "private", writesEnabled: false, live: "stopped" as const,
           records: 0, validRecords: 0, definitions: 0, ontologyAvailable: false, ontologyFingerprint: "", issues: 0, message: message.slice(0, 300) });
         if (opened.kind !== "ready") return notReady(opened.agentId, opened.kind, opened.message);
@@ -159,7 +161,7 @@ export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureE
       },
       grep: call("search"),
       lookup: call("lookup"),
-      records: call("records", false, () => ({ facets: { kinds: {}, origins: {} }, records: [], total: 0, offset: 0, nextOffset: null, checkedAt: now() })),
+      records: call("records", false, () => ({ facets: { kinds: {}, origins: {} }, records: [], total: 0, offset: 0, nextOffset: null, freshness: queryFreshness(now()) })),
       record: call("record"),
       ontology: call("ontology"),
       diagnostics: call("diagnostics", false, () => ({ issues: [], total: 0, truncated: false, checkedAt: now() })),

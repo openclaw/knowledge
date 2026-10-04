@@ -34,7 +34,7 @@ async function fixture(t) {
     group: () => { owner.tool.memoryAudience = { kind: 'conversation', agentId: 'main', sessionKey: 'agent:main:group', sessionId }; } };
 }
 const ids = result => result.hits.map(h => h.record.id);
-const stable = value => JSON.parse(JSON.stringify(value), (k, v) => ['checkedAt', 'indexedAt'].includes(k) ? undefined : v);
+const stable = value => JSON.parse(JSON.stringify(value), (k, v) => ['checkedAt', 'indexedAt', 'queriedAt', 'scannedAt'].includes(k) ? undefined : v);
 
 test('UI and tool share FTS title/alias/body retrieval, literal modes and stable citation contracts', async t => {
   const f = await fixture(t);
@@ -202,7 +202,7 @@ test('ranking emphasizes titles, deterministic pagination and scoped index reuse
   const first = await f.service.grep({ query: 'needle', limit: 1 }, f.owner);
   assert.deepEqual(ids(first), ['title_record']); assert.equal(first.total, 2); assert.equal(first.nextOffset, 1);
   const next = await f.service.grep({ query: 'needle', limit: 1, offset: 1 }, f.owner);
-  assert.deepEqual(ids(next), ['body_record']); assert.equal(next.nextOffset, null); assert.equal(next.index.snapshot, first.index.snapshot); assert.equal(next.index.indexedAt, first.index.indexedAt);
+  assert.deepEqual(ids(next), ['body_record']); assert.equal(next.nextOffset, null); assert.equal(next.index.snapshot, first.index.snapshot); assert.equal(next.freshness.indexedAt, first.freshness.indexedAt);
 });
 
 test('native search client passes explicit typed mode and filters to the shared operations', async () => {

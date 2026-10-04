@@ -57,6 +57,23 @@ and updated_at answer when records were created/changed. Never substitute one
 for the other. Resolve relative query dates with the user's timezone, preserving
 explicit offsets; day queries accept an IANA timezone. Source date-only values
 stay date-only. Follow nextOffset with unchanged filters and returned snapshot.
-Historical includes superseded/expired material, not withdrawn records or a
-reconstruction of past system state. Markdown-only timelines and undated records
+Temporal eligibility="include_inactive" includes superseded/expired material,
+never withdrawn records or a reconstruction of past system state. Last-seen uses
+occurredOnOrBefore for the occurrence cutoff; do not pass asOf or historical.
+Use includeSources=true for deduplicated source identities on temporal pages. Markdown-only timelines and undated records
 are not inferred, and no matches do not prove absence.
+
+## Focused source reading
+
+Use knowledge_evidence_read with the record id and observed path/sha256 to read
+an exact retained UTF-8 passage. Supply inclusive startLine/endLine when known.
+Follow nextCursor with unchanged id/path/hash and omit or repeat line bounds.
+A null nextCursor completes the passage. In contrast, record.nextEvidenceOffset
+only completes the citation list; excerptTruncated still requires source reading.
+The tool verifies bytes and line bounds, not the truth of an interpretation.
+Use knowledge_attachment for binary originals. Never infer complete review from
+an excerpt or a successful structural verifier.
+
+Query freshness distinguishes queriedAt from scannedAt; keyword results also
+have indexedAt. A reused scan retains its observation time. Compare snapshot
+values only across pages with unchanged query filters and eligibility.

@@ -60,7 +60,7 @@ test('conversation audience sees only its records, counts, evidence, ontology an
   await writeFile(path.join(f.root, 'private', 'secret.md'), 'PRIVATE INVALID SENTINEL');
   await f.partition(`conversations/${randomUUID()}`, { visibility: 'conversation', sessionId: randomUUID() }, 'OTHER CONVERSATION SENTINEL');
   const after = await invokeAll(f.service, f.owner);
-  const stripTime = x => JSON.parse(JSON.stringify(x), (k, v) => ['checkedAt'].includes(k) ? undefined : v);
+  const stripTime = x => JSON.parse(JSON.stringify(x), (k, v) => ['checkedAt', 'queriedAt', 'scannedAt', 'indexedAt'].includes(k) ? undefined : v);
   assert.deepEqual(stripTime(after), stripTime(before));
   assert.equal((await f.service.record({ id: 'missing-private-id' }, f.owner)).record, null);
 });

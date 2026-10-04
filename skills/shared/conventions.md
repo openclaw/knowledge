@@ -203,3 +203,11 @@ host exposes them), retries, elapsed time, and structural verification failures.
 Separate acquisition/upload from publication/verification, report unavailable
 metrics as unavailable, and compare similar source/output sizes. Backend fixture
 timing is not a real model-driven ingestion benchmark.
+
+### Targeted retained passages
+
+Read source support through knowledge_evidence_read using an observed record
+id/path/sha256, optionally inclusive startLine/endLine. Continue nextCursor until
+null to complete the passage, including long single lines. Record evidence-list
+pagination is separate from excerpt completeness. Byte/hash verification is not
+semantic review; retain independent source interpretation and attribution checks.

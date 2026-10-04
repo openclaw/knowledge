@@ -93,7 +93,7 @@ test('one shared source-event claim folds its meeting while preserving separate 
   assert.deepEqual(ids(all), ['event_shared', 'event_followup']);
   assert.deepEqual(ids(await f.service.timeline({ entity: 'person_bobby' }, f.owner)), ['event_shared']);
   assert.deepEqual(ids(await f.service.timeline({ kind: 'meeting' }, f.owner)), ['meeting_shared']);
-  const last = await f.service.chronicle_last_seen({ entity: 'person_alice', asOf: '2020-05-10' }, f.owner);
+  const last = await f.service.chronicle_last_seen({ entity: 'person_alice', occurredOnOrBefore: '2020-05-10' }, f.owner);
   assert.ok(Check(contract.operations.chronicle_last_seen.output, last)); assert.equal(last.last.record.id, 'event_shared');
   assert.equal((await f.service.chronicle_last_seen({ entity: 'missing_entity' }, f.owner)).last, null);
 });
@@ -112,8 +112,8 @@ test('scope, withdrawn dependencies, fixture exclusion and historical eligibilit
   const result = await f.service.timeline({}, group);
   assert.deepEqual(ids(result), ['event_shared']);
   assert.doesNotMatch(JSON.stringify(result), /event_private|event_hidden|event_fixture/);
-  assert.equal((await f.service.timeline({ historical: true }, group)).total, 3);
-  assert.equal((await f.service.timeline({ entity: 'withdrawn_page', historical: true }, group)).total, 0);
+  assert.equal((await f.service.timeline({ eligibility: "include_inactive" }, group)).total, 3);
+  assert.equal((await f.service.timeline({ entity: 'withdrawn_page', eligibility: "include_inactive" }, group)).total, 0);
 });
 
 test('pagination detects edits, external changes reconcile, partial index loss rebuilds', async t => {
@@ -198,4 +198,65 @@ test('unprovisioned operator temporal reads stay empty without creating storage'
   await assert.rejects(service.chronicle_day({ date: '2026-10-04', timezone: 'Not/AZone' }, operator));
   await assert.rejects(service.timeline({ since: '2026-02-30' }, operator));
   await assert.rejects(service.chronicle_since({}, operator));
+});
+
+test('source summaries are page-local, deduplicated, snapshot fenced and lifecycle aware', async t => {
+  const f = await fixture(t);
+  await f.put('person_alice', { type: 'person' });
+  await f.put('meeting_shared', { type: 'meeting', title: 'Shared source', fields: { occurred_at: '2020-05-10' } });
+  await f.put('event_current', event('2020-05-10', { entities: ['person_alice'], source_page: 'meeting_shared' }));
+  await f.put('event_previous', event('2020-05-09', { lifecycle: 'superseded', superseded_by: 'event_current', entities: ['person_alice'], source_page: 'meeting_shared' }));
+  const input = { entity: 'person_alice', includeSources: true, eligibility: 'include_inactive', limit: 1 };
+  const first = await f.service.timeline(input, f.owner);
+  assert.equal(first.sources.length, 1); assert.equal(first.sources[0].title, 'Shared source');
+  assert.equal(first.items[0].record.lifecycle, 'active');
+  assert.ok(Check(contract.operations.timeline.output, first));
+  const second = await f.service.timeline({ ...input, offset: first.nextOffset, snapshot: first.snapshot }, f.owner);
+  assert.equal(second.items[0].record.lifecycle, 'superseded');
+  assert.equal(second.items[0].record.supersededBy, 'event_current');
+  assert.equal(second.sources.length, 1); assert.equal(second.nextOffset, null);
+  await assert.rejects(f.service.timeline({ ...input, includeSources: false, snapshot: first.snapshot }, f.owner), /restart/);
+  const both = await f.service.timeline({ ...input, limit: 100 }, f.owner);
+  assert.equal(both.sources.length, 1);
+  assert.equal((await f.service.timeline({ entity: 'person_alice' }, f.owner)).sources, undefined);
+  const last = await f.service.chronicle_last_seen({ entity: 'person_alice', occurredOnOrBefore: '2020-05-09', eligibility: 'include_inactive', includeSources: true }, f.owner);
+  assert.equal(last.last.record.id, 'event_previous'); assert.equal(last.sources[0].id, 'meeting_shared');
+  assert.deepEqual(last.selection, { timeField: 'occurred_at', onOrBefore: '2020-05-09', eligibility: 'include_inactive' });
+  assert.ok(Check(contract.operations.chronicle_last_seen.output, last));
+  for (const bad of [{ historical: true }, { asOf: '2020-01-01' }]) {
+    await assert.rejects(f.service.chronicle_last_seen({ entity: 'person_alice', ...bad }, f.owner), /Invalid/);
+  }
+  await assert.rejects(f.service.timeline({ historical: true }, f.owner), /Invalid/);
+});
+
+test('temporal source summaries fit the full response budget and never skip rows', async t => {
+  const f = await fixture(t);
+  for (let i = 0; i < 35; i++) {
+    const n = String(i).padStart(3, '0');
+    await f.put('meeting_' + n, { type: 'meeting', title: '🌱'.repeat(90), fields: { occurred_at: '2020-05-10' } });
+    await f.put('event_' + n, event('2020-05-10', { source_page: 'meeting_' + n, source_event: true }), 'private', '🌱'.repeat(1000));
+  }
+  const input = { includeSources: true, limit: 100 };
+  let page = await f.service.timeline(input, f.owner), all = [];
+  assert.ok(page.nextOffset !== null);
+  for (;;) {
+    assert.ok(Buffer.byteLength(JSON.stringify(page)) <= 24 * 1024);
+    assert.equal(page.sources.length, page.items.length);
+    assert.ok(page.sources.every(s => page.items.some(i => i.sourcePage === s.id)));
+    all.push(...ids(page));
+    if (page.nextOffset === null) break;
+    page = await f.service.timeline({ ...input, offset: page.nextOffset, snapshot: page.snapshot }, f.owner);
+  }
+  assert.equal(all.length, 35); assert.equal(new Set(all).size, 35);
+});
+
+test('query freshness distinguishes reused scans and query execution without legacy query fields', async t => {
+  const f = await fixture(t); await f.put('event_current', event('2020-05-10'));
+  for (const [method, input] of [['timeline', {}], ['records', {}], ['lookup', { query: 'event_current' }], ['grep', { query: 'launch' }]]) {
+    const result = await f.service[method](input, f.owner);
+    assert.equal(result.checkedAt, undefined);
+    assert.ok(Date.parse(result.freshness.queriedAt) >= Date.parse(result.freshness.scannedAt));
+    assert.ok(Check(contract.operations[method].output, result));
+    if (method === 'grep') { assert.ok(result.freshness.indexedAt); assert.equal(result.index.indexedAt, undefined); }
+  }
 });

@@ -1,3 +1,4 @@
+import { queryFreshness } from "./query-freshness.js";
 import type { DatabaseSync } from "node:sqlite";
 import { digest, type SampleVault } from "./vault.js";
 import type { LoadedRecord } from "./model.js";
@@ -13,12 +14,20 @@ type Snapshot = Awaited<ReturnType<SampleVault["scan"]>>;
 /** Render a compact source-addressable temporal result without exposing raw frontmatter. */
 function item(record: LoadedRecord, field: TimeField, visible: Set<string>): ChronicleOutput["items"][number] {
   const date = recordDate(record, field)!;
-  const { id, title, path, kind, type, revision, hash } = record;
-  return { record: { id, title, path, kind, type, revision, hash }, date, dateField: field,
+  return { record: reference(record, visible), date, dateField: field,
     precision: date.length === 10 ? "day" : "instant", summary: record.body.trim().slice(0, 1000),
     entities: (record.metadata.entities ?? []).filter(id => visible.has(id)),
     ...(record.metadata.source_page && visible.has(record.metadata.source_page) ? { sourcePage: record.metadata.source_page } : {}),
     evidenceCount: record.metadata.evidence?.length ?? 0 };
+}
+
+/** Lifecycle and replacement identities are filtered through the same authorized result set. */
+function reference(record: LoadedRecord, visible: Set<string>) {
+  const { id, title, path, kind, type, revision, hash, lifecycle } = record;
+  const replacement = record.metadata.superseded_by;
+  return { id, title, path, kind, type, revision, hash, lifecycle,
+    ...(replacement && visible.has(replacement) ? { supersededBy: replacement } : {}),
+    ...(record.metadata.expires_at ? { expiresAt: record.metadata.expires_at } : {}) };
 }
 
 /** Validate a day/week query and compare timestamp calendar days in the requested zone. */
@@ -35,7 +44,7 @@ export function dayPredicate(input: DayInput): (value: string) => boolean {
 
 /** Query one authoritative scoped snapshot through its rebuildable SQLite date index. */
 export function chronicle(db: DatabaseSync, data: Snapshot, binding: string, input: TimelineInput, withdrawn = new Set<string>(), onDay?: DayInput): ChronicleOutput {
-  const records = eligible(data, withdrawn, input.historical ?? false);
+  const records = eligible(data, withdrawn, input.eligibility === "include_inactive");
   const byId = new Map(records.map(r => [r.id, r])), visible = new Set(byId.keys());
   const predicate = onDay ? dayPredicate(onDay) : undefined;
   const field = input.timeField ?? "occurred_at";
@@ -48,7 +57,7 @@ export function chronicle(db: DatabaseSync, data: Snapshot, binding: string, inp
   } catch (error) { if (db.isTransaction) db.exec("ROLLBACK"); throw error; }
   // A cursor belongs to both a source snapshot and a particular query.
   snapshot = digest(JSON.stringify([snapshot, field, input.entity ?? null, input.kind ?? null,
-    input.since ?? null, input.until ?? null, input.order ?? "desc", input.historical ?? false,
+    input.since ?? null, input.until ?? null, input.order ?? "desc", input.eligibility ?? "current", input.includeSources ?? false,
     onDay ? [onDay.date, onDay.week ?? false, onDay.timezone ?? "UTC"] : null]));
   if (input.snapshot && input.snapshot !== snapshot) throw Error("Knowledge changed; restart temporal pagination without offset or snapshot.");
   if (input.entity && (!byId.has(input.entity) || byId.get(input.entity)!.kind !== "page")) ids = [];
@@ -62,18 +71,25 @@ export function chronicle(db: DatabaseSync, data: Snapshot, binding: string, inp
     (field !== "occurred_at" || !represented.has(r.id)) &&
     (!predicate || predicate(recordDate(r, field)!)));
   const offset = input.offset ?? 0, limit = input.limit ?? 20;
-  const result: ChronicleOutput = { items: [], total: matched.length, offset, nextOffset: null, snapshot, checkedAt: data.checkedAt,
+  const result: ChronicleOutput = { items: [], total: matched.length, offset, nextOffset: null, snapshot, freshness: queryFreshness(data.checkedAt), ...(input.includeSources ? { sources: [] } : {}),
     coverage: { complete: data.issues.length === 0, message: "Structured dated records only; undated records and Markdown-only timeline bullets are not inferred. Source dates retain their precision. " +
       (data.issues.length ? "Some authorized source material has validation issues; inspect diagnostics." : "") } };
+  // Admit each row together with its source summary and final continuation metadata.
   for (const record of matched.slice(offset, offset + limit)) {
     const row = item(record, field, visible);
-    if (Buffer.byteLength(JSON.stringify({ ...result, items: [...result.items, row] }), "utf8") > 24 * 1024) {
+    const sources = result.sources ? [...result.sources] : undefined;
+    const source = row.sourcePage ? byId.get(row.sourcePage) : record.kind === "page" ? record : undefined;
+    if (sources && source && !sources.some(r => r.id === source.id)) sources.push(reference(source, visible));
+    const count = result.items.length + 1;
+    const candidate = { ...result, items: [...result.items, row], ...(sources ? { sources } : {}),
+      nextOffset: offset + count < matched.length ? offset + count : null };
+    if (Buffer.byteLength(JSON.stringify(candidate), "utf8") > 24 * 1024) {
       if (!result.items.length) throw Error("Temporal record exceeds response budget; inspect the record directly.");
       break;
     }
-    result.items.push(row);
+    result.items = candidate.items; result.nextOffset = candidate.nextOffset;
+    if (sources) result.sources = sources;
   }
-  result.nextOffset = offset + result.items.length < matched.length ? offset + result.items.length : null;
   return result;
 }
 
@@ -84,6 +100,6 @@ export function emptyChronicle(input: TimelineInput, onDay?: DayInput): Chronicl
   if (onDay) dayPredicate(onDay);
   const snapshot = digest(JSON.stringify(["unprovisioned", { ...input, offset: undefined, limit: undefined, snapshot: undefined }, onDay]));
   if (input.snapshot && input.snapshot !== snapshot) throw Error("Knowledge changed; restart temporal pagination without offset or snapshot.");
-  return { items: [], total: 0, offset: input.offset ?? 0, nextOffset: null, snapshot, checkedAt: new Date().toISOString(),
+  return { items: [], total: 0, offset: input.offset ?? 0, nextOffset: null, snapshot, freshness: queryFreshness(new Date().toISOString()), ...(input.includeSources ? { sources: [] } : {}),
     coverage: { complete: true, message: "This store has not been provisioned; no dated records are available." } };
 }

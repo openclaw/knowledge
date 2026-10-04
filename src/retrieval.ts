@@ -1,3 +1,4 @@
+import { queryFreshness } from "./query-freshness.js";
 import { temporalPredicate } from "./temporal-query.js";
 import { observeLifecycleGuards } from "./lifecycle.js";
 import { activeNow } from "./temporal.js";
@@ -76,7 +77,7 @@ export function exactLookup(data: Snapshot, input: LookupInput, withdrawn = new 
   }).sort((a, b) => a.record.id.localeCompare(b.record.id));
   const offset = input.offset ?? 0, limit = input.limit ?? 20;
   const hits = matches.slice(offset, offset + limit);
-  return { hits, resultCount: hits.length, total: matches.length, outcome: matches.length === 0 ? "missing" : matches.length === 1 ? "found" : "ambiguous", offset, nextOffset: offset + limit < matches.length ? offset + limit : null, checkedAt: data.checkedAt, coverage: coverage(data) };
+  return { hits, resultCount: hits.length, total: matches.length, outcome: matches.length === 0 ? "missing" : matches.length === 1 ? "found" : "ambiguous", offset, nextOffset: offset + limit < matches.length ? offset + limit : null, freshness: queryFreshness(data.checkedAt), coverage: coverage(data) };
 }
 
 /** Deliberately literal modes, never raw FTS syntax/SQL/regex. Punctuation is token separation. */
@@ -134,7 +135,7 @@ export function verifyKeywordIndex(db: DatabaseSync, data: Snapshot, binding: st
 /** Called only inside the storage authority/identity fence, using the latest validated snapshot. */
 export function keywordSearch(db: DatabaseSync, data: Snapshot, input: SearchInput, binding: string, generation: string, withdrawn = new Set<string>()): SearchOutput {
   const expression = keywordExpression(input), offset = input.offset ?? 0, limit = input.limit ?? 20;
-  const base = { mode: "keyword" as const, queryMode: input.mode ?? "all", offset, checkedAt: data.checkedAt, coverage: coverage(data) };
+  const base = { mode: "keyword" as const, queryMode: input.mode ?? "all", offset, freshness: queryFreshness(data.checkedAt), coverage: coverage(data) };
   const records = eligible(data, withdrawn, input.lifecycle !== undefined && input.lifecycle !== "active"), selected = filtered(data, records, input);
   try {
     db.exec("BEGIN IMMEDIATE");
@@ -163,9 +164,9 @@ export function keywordSearch(db: DatabaseSync, data: Snapshot, input: SearchInp
       return hit(byId.get(String(row.id))!, field, Math.max(0, String(row[field]).indexOf(marker)), fields, -Number(row.score));
     });
     db.exec(corpus === table ? "COMMIT" : "DROP TABLE temp.keyword_query_v1; COMMIT");
-    return { ...base, hits, resultCount: hits.length, total, nextOffset: offset + limit < total ? offset + limit : null, index: { state: "ready", lag: false, snapshot, indexedAt, message: "Indexed from the current reconciled scope. Higher BM25 scores rank first; compare scores only within this query and snapshot." } };
+    return { ...base, freshness: queryFreshness(data.checkedAt, indexedAt), hits, resultCount: hits.length, total, nextOffset: offset + limit < total ? offset + limit : null, index: { state: "ready", lag: false, snapshot, message: "Indexed from the current reconciled scope. Higher BM25 scores rank first; compare scores only within this query and snapshot." } };
   } catch {
     if (db.isTransaction) db.exec("ROLLBACK");
-    return { ...base, hits: [], resultCount: 0, total: null, nextOffset: null, index: { state: "unavailable", lag: null, snapshot: null, indexedAt: null, message: "Keyword indexing/query failed; no stale results returned. Retry search to rebuild or inspect the plugin-owned SQLite state. Exact lookup and record listing remain available." } };
+    return { ...base, hits: [], resultCount: 0, total: null, nextOffset: null, index: { state: "unavailable", lag: null, snapshot: null, message: "Keyword indexing/query failed; no stale results returned. Retry search to rebuild or inspect the plugin-owned SQLite state. Exact lookup and record listing remain available." } };
   }
 }

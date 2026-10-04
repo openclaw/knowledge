@@ -68,7 +68,7 @@ export function returnedRecords(value: unknown): { id: string; revision: number 
     if (Array.isArray(v)) { for (const item of v) visit(item, depth + 1); return; }
     const o = v as Record<string, unknown>;
     if (typeof o.id === "string" && Number.isInteger(o.revision)) records.set(o.id, { id: o.id, revision: o.revision as number });
-    for (const key of ["record", "records", "hits", "matches", "items", "references", "endpoints", "relatedStatements", "last"]) visit(o[key], depth + 1);
+    for (const key of ["record", "records", "hits", "matches", "items", "references", "endpoints", "relatedStatements", "last", "sources"]) visit(o[key], depth + 1);
   };
   visit(value, 0); return [...records.values()];
 }

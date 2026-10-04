@@ -1,3 +1,4 @@
+import { QueryFreshness } from "./query-freshness.js";
 import { TemporalFilters } from "./chronicle-contract.js";
 import { Type, type Static } from "typebox";
 import { text, Envelope } from "./model.js";
@@ -30,13 +31,13 @@ const hit = Type.Object({
 const common = {
   // Page-local evidence count understood by Active Memory's custom-tool result gate.
   hits: Type.Array(hit, { maxItems: 50 }), resultCount: Type.Integer(), offset: Type.Integer(),
-  nextOffset: Type.Union([Type.Integer(), Type.Null()]), checkedAt: text(40),
+  nextOffset: Type.Union([Type.Integer(), Type.Null()]), freshness: QueryFreshness,
   coverage: Type.Object({ complete: Type.Boolean(), message: text(500) }),
 };
 export const SearchOutput = Type.Object({
   ...common, mode: Type.Literal("keyword"), queryMode: Type.Union([Type.Literal("all"), Type.Literal("any"), Type.Literal("phrase")]),
   total: Type.Union([Type.Integer(), Type.Null()]),
-  index: Type.Object({ state: Type.Union([Type.Literal("ready"), Type.Literal("unavailable")]), lag: Type.Union([Type.Boolean(), Type.Null()]), snapshot: Type.Union([text(64), Type.Null()]), indexedAt: Type.Union([text(40), Type.Null()]), message: text(500) }),
+  index: Type.Object({ state: Type.Union([Type.Literal("ready"), Type.Literal("unavailable")]), lag: Type.Union([Type.Boolean(), Type.Null()]), snapshot: Type.Union([text(64), Type.Null()]), message: text(500) }),
 }, { additionalProperties: false });
 export type SearchOutput = Static<typeof SearchOutput>;
 export const LookupOutput = Type.Object({ ...common, total: Type.Integer(), outcome: Type.Union([Type.Literal("found"), Type.Literal("ambiguous"), Type.Literal("missing")]) }, { additionalProperties: false });
