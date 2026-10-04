@@ -31,12 +31,6 @@
 .knowledge-temporal-filters :is(input,select) { width: 100%; min-width: 0; padding: 7px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm, 6px); background: var(--card); color: var(--text); font: inherit; }
 .knowledge-temporal-help { flex-basis: 100%; }
 .knowledge-temporal-help:empty { display: none; }
-.knowledge-timeline { display: grid; gap: 12px; }
-.knowledge-timeline h2 { font-size: 18px; }
-.knowledge-timeline-row { display: grid; gap: 6px; padding: 14px; border-bottom: 1px solid var(--knowledge-hairline); overflow-wrap: anywhere; }
-.knowledge-timeline-row time { color: var(--muted); font-size: 12px; }
-.knowledge-timeline-row .knowledge-record-link { justify-self: start; }
-.knowledge-timeline-provenance { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; color: var(--muted); }
 .knowledge-content { min-width: 0; }
 /* Loading feedback must not push the retained view or its controls around. */
 .knowledge-loading { position: absolute; top: -20px; right: 16px; z-index: 2; max-width: calc(100% - 32px); padding: 0 6px; border-radius: 4px; background: var(--bg); }

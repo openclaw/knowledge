@@ -28,12 +28,9 @@ test('Browse back trail survives remount and rejects invalid or looping cursors'
   assert.deepEqual(readLocation({offset:'0',back:'0,20'}).back,[]);
 });
 
-test('Timeline dates, entity, snapshot and byte-shortened page trail survive deep links', () => {
-  const input = {view:'timeline',record:'claim-1',entity:'person-1',since:'2026-01-01',until:'2026-10-04T12:30:00-07:00',timeField:'due_at',offset:'720',back:'0,18,37,700',snapshot:'snapshot-a'};
-  assert.deepEqual(locationParams(readLocation(input)), input);
-  assert.equal(readLocation({view:'timeline',offset:'9007199254740992'}).offset,0);
-  assert.equal(readLocation({view:'timeline',timeField:'invented'}).timeField,'occurred_at');
-  assert.equal(readLocation({view:'search',snapshot:'timeline-fence'}).timelineSnapshot,'');
+test('unsupported views and fields do not create a timeline route', () => {
+  assert.equal(readLocation({view:'timeline'}).tab,'recent');
+  assert.deepEqual(locationParams(readLocation({entity:'person-1',snapshot:'old',offset:'720'})),{});
 });
 
 test('Search date filters round trip while invalid bounded date text remains visible for validation', () => {
