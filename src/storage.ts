@@ -1,3 +1,5 @@
+import { chronicle } from "./chronicle.js";
+import { TimelineInput, DayInput, LastSeenInput, LastSeenOutput, SinceInput } from "./chronicle-contract.js";
 import { appendActivity, sessionActivity, returnedRecords, type ActivityOrigin, type ActivityInput } from "./session-activity.js";
 import { verifyRecords } from "./verification.js";
 import { BatchInput, SourceCheckInput, VerifyInput, type SourceIdentity, type VerifyOutput } from "./ingestion-contract.js";
@@ -58,7 +60,7 @@ export class KnowledgeStorage {
   }
   async trackRead<T>(access: VaultAccess, operation: string, read: () => T | Promise<T>): Promise<T> {
     const result = await read();
-    if (access.activity && ["search", "lookup", "records", "record", "connections"].includes(operation)) {
+    if (access.activity && ["search", "lookup", "records", "record", "connections", "timeline", "chronicleDay", "chronicleSince", "chronicleLastSeen"].includes(operation)) {
       const records = returnedRecords(result);
       // Best effort: observation must not turn a successful read into a failed read.
       // Authority failures still prevent delivery, even when telemetry fails.
@@ -127,6 +129,34 @@ export class KnowledgeStorage {
       access.assertCurrent();
       return records;
     });
+  }
+  /** Read temporal projections within the same authority and identity fence as search. */
+  async timeline(input: Static<typeof TimelineInput>, access: VaultAccess, day?: Static<typeof DayInput>) {
+    if (!Check(TimelineInput, input) || (day && !Check(DayInput, day))) throw Error("Invalid temporal query input.");
+    return this.run(access, async vault => {
+      const data = await vault.scan();
+      access.assertCurrent();
+      const result = this.store.withDatabase(db => chronicle(db, data, this.retrievalBinding(access), input, withdrawnIds(db, this.retrievalBinding(access)), day));
+      access.assertCurrent(); return result;
+    });
+  }
+  /** Day and week queries preserve authored date-only precision. */
+  async chronicleDay(input: Static<typeof DayInput>, access: VaultAccess) {
+    const { date: _date, timezone: _timezone, week: _week, ...filters } = input;
+    return this.timeline({ ...filters, order: "asc" }, access, input);
+  }
+  /** Occurrence-time range, not a storage-change feed. */
+  async chronicleSince(input: SinceInput, access: VaultAccess) {
+    if (!Check(SinceInput, input)) throw Error("Invalid since query input.");
+    return this.timeline({ ...input, order: "asc" }, access);
+  }
+  /** Last dated context at a reference instant; never infer contact from absence. */
+  async chronicleLastSeen(input: Static<typeof LastSeenInput>, access: VaultAccess): Promise<Static<typeof LastSeenOutput>> {
+    if (!Check(LastSeenInput, input)) throw Error("Invalid last-seen input.");
+    const asOf = input.asOf ?? new Date().toISOString();
+    const result = await this.timeline({ entity: input.entity, until: asOf, historical: input.historical, order: "desc", limit: 1 }, access);
+    return { entity: input.entity, asOf, last: result.items[0] ?? null, snapshot: result.snapshot,
+      message: "Latest eligible dated context; a mention is not proof of contact. No match does not establish absence of an interaction." };
   }
   async recent(input: Static<typeof RecentInput>, access: VaultAccess) {
     return this.run(access, async vault => {

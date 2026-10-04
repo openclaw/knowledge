@@ -1,3 +1,4 @@
+import { temporalPredicate } from "./temporal-query.js";
 import { observeLifecycleGuards } from "./lifecycle.js";
 import { activeNow } from "./temporal.js";
 import { randomUUID } from "node:crypto";
@@ -41,7 +42,8 @@ export function eligible(data: Snapshot, withdrawn = new Set<string>(), historic
 }
 function filtered(data: Snapshot, records: LoadedRecord[], input: LookupInput | SearchInput) {
   const types = input.type ? expandTypes(data.ontology, input.type) : null;
-  return records.filter(r => (!input.kind || r.kind === input.kind) && (!types || (r.kind === "page" ? types.has(r.type) : r.type === input.type)) &&
+  const timeMatches = temporalPredicate(input as SearchInput);
+  return records.filter(r => timeMatches(r) && (!input.kind || r.kind === input.kind) && (!types || (r.kind === "page" ? types.has(r.type) : r.type === input.type)) &&
     (!input.tag || r.metadata.tags?.includes(input.tag)) &&
     (input.lifecycle === "all" || r.lifecycle === (input.lifecycle ?? "active")));
 }

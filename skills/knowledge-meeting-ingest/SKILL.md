@@ -231,8 +231,12 @@ context and back-link to the meeting. Link back from the meeting to each entity.
 The same event belongs on ALL resolved relevant entities' timelines. Represent
 it as one event claim with `occurred_at`, all relevant `entities`, a meeting
 `dependencies` reference and evidence. That makes it discoverable from every
-entity's `knowledge_connections({id, direction: "claims"})`; Knowledge has no
-separate timeline store. Retain dated human-readable timeline links on profiles.
+entity's `knowledge_connections({id, direction: "claims"})`. Chronicle projects
+these structured dates into a queryable timeline. Set
+source_page and source_event=true on the single claim representing the meeting
+itself; its occurred_at must match the meeting field at source precision. Other
+events discussed retain their own dates and are not source_event.
+Retain dated human-readable timeline links on profiles.
 Different companies' feedback gets its own context, not a session-wide blob.
 
 Create additional relationships only when evidenced and supported by ontology
@@ -286,8 +290,10 @@ Run every check for every meeting, including quick logistics meetings.
   (before/during/after, place, people). Check claimed sequence against timestamps
   and source context independently of thematic heading order. A phase inversion
   or incompatible locations/times is a hard contradiction; never invent transit
-  to connect them. Inspect dated connected claims for corroboration where useful;
-  Knowledge has no day-timeline API. A missing event is a signal to investigate,
+  to connect them. Inspect dated connected claims for corroboration where useful.
+  Use knowledge_chronicle_day with the meeting date and known timezone, and
+  knowledge_timeline with relevant entity IDs. Verify source-event grouping and
+  world dates independently from recorded_at. A missing event is a signal to investigate,
   not proof someone was absent. Fix contradictions and rerun, or record an
   explicit user waiver as acknowledged, NOT resolved. Genuinely ambiguous order
   stays flagged.

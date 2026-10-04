@@ -147,7 +147,7 @@ connected claims/relationships before external escalation or asking the user.
 | One event claim with multiple entity IDs plus dated profile prose | Preserves upstream timeline merge without duplicate event records; related claims are read with `knowledge_connections` |
 | Explicit evidenced relationship creation; `attended` participant → meeting in the default ontology | No auto-link hook; respect the ontology's direction and endpoint constraints. Bidirectional traversal does not require two opposite edges |
 | Prose back-links for mentions, typed edges only for supported relations | Knowledge distinguishes authored links from assertions; co-mention is not evidence of employment, ownership or attendance |
-| Exact lookup/keyword search/direct connections + host synthesis | No gbrain think, mounted-source, semantic-search, day-timeline or enrichment APIs |
+| Exact lookup/keyword search/direct connections + host synthesis | No gbrain think, mounted-source, semantic-search or enrichment APIs; Chronicle queries use structured dates |
 | Conditional host research; no ambient inbound capture, paid enrichment or automatic profile merging | Requested ingestion and trusted host scope do not authorize unrelated acquisition, background capture or identity consolidation |
 | Preserve ambiguous identity and source conflicts; accept explicit user corrections as new evidence | Knowledge distinguishes source/user/inference attribution and corrections from conflicting accounts; similar names or old synthesis cannot override evidence automatically |
 | Verify narrated chronology, not thematic heading order | Knowledge permits topic-organized prose; missing transit narration is not itself evidence of impossible travel |
@@ -249,3 +249,7 @@ Only the owner-approved summary is injectable; source and agent-inference claims
 cannot be approved, and conversation/operator authority cannot create approval.
 The field names follow OpenClaw's trigger/project candidate contract because
 gbrain has no equivalent record-level metadata to reuse.
+
+## Temporal query mapping
+
+[Temporal retrieval](TEMPORAL.md) implements a scoped SQLite projection over structured dates and associations, with timeline/day/week/since/last-seen tools. Unlike gbrain, Markdown timeline bullets do not create another event store; ingestion authors evidenced event claims and human-readable timeline context. No new watcher or dreaming phase is used.

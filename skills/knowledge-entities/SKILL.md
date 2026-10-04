@@ -31,6 +31,9 @@ Run this chain in order, stopping at the first evidence-supported resolution:
    available authorized host sources only when needed within the task.
 3. **Timeline + connections.** Inspect `knowledge_connections` with directions
    `claims`, `incoming`, `outgoing` and `dependents`, following pagination.
+   Use knowledge_timeline({entity: id}) for dated context and
+   knowledge_chronicle_last_seen for the latest dated mention/event; inspect
+   original records and evidence before asserting attendance or sequence.
    Read connected records and event dates. These are direct connections, not
    semantic search or a multi-hop graph service. Synthesize from the evidence.
 4. **External escalation.** If needed, use available host web research with

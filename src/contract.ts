@@ -1,3 +1,4 @@
+import { TimelineInput, DayInput, SinceInput, LastSeenInput, ChronicleOutput, LastSeenOutput, TemporalFilters } from "./chronicle-contract.js";
 import { SessionActivityInput, SessionActivityOutput } from "./session-activity.js";
 import { BatchInput, SourceCheckInput, SourceCheckOutput, VerifyInput, VerifyOutput } from "./ingestion-contract.js";
 import { ConnectionsInput, ConnectionsOutput } from "./connections-contract.js";
@@ -19,6 +20,23 @@ const issues = Type.Array(issue, { maxItems: 1000 });
 export const contract = defineFeatureContract({
   pluginId: "knowledge",
   operations: {
+    timeline: {
+      kind: "query", description: "Chronological structured records, optionally scoped to an entity page ID and date range. Defaults to occurrence time; choose recorded_at/updated_at for when Knowledge changed or due_at for commitments. No dates inferred from prose or ingestion. Explicit source-event claims fold matching meeting pages. Unknown dates excluded. Follow nextOffset with the same filters and returned snapshot; restart on change.",
+      input: TimelineInput, output: ChronicleOutput, tool: { name: "knowledge_timeline", label: "Read knowledge timeline" },
+    },
+    chronicle_day: {
+      kind: "query", description: "Events and dated assertions on a YYYY-MM-DD day, or its Monday–Sunday week. Timestamp days use timezone (IANA, default UTC); date-only records stay on their authored calendar day. Optional entity ID/kind filters. Structured dates only. Page using nextOffset and snapshot.",
+      input: DayInput, output: ChronicleOutput, tool: { name: "knowledge_chronicle_day", label: "What happened on this day" },
+    },
+    chronicle_since: {
+      kind: "query", description: "Structured events and dated assertions occurring on/after since, optionally through until, oldest first. This is world time, not newly imported content; use timeline timeField=recorded_at/updated_at for storage time. Dates use UTC query boundaries. Page with nextOffset and snapshot.",
+      input: SinceInput, output: ChronicleOutput, tool: { name: "knowledge_chronicle_since", label: "What happened since" },
+    },
+    chronicle_last_seen: {
+      kind: "query", description: "Latest dated structured record involving an entity page ID, at or before asOf (default now). A dated mention is not proof of a meeting or physical interaction. Null means no eligible dated record, not proof of no contact. Undated prose is not inferred.",
+      input: LastSeenInput, output: LastSeenOutput, tool: { name: "knowledge_chronicle_last_seen", label: "Latest dated entity context" },
+    },
+
     session_activity: { kind: "query", description: "Operator-only session activity inspection. Current eligible records only; reads are best effort, writes retain original host session provenance.", input: SessionActivityInput, output: SessionActivityOutput },
     verify: {
       kind: "query", description: "Verify up to 100 published records in one bounded structural check: current eligibility, retained evidence, references, reconciled indexing and supplied expectations. Expected revision/hash and owner/dates/source_page/from/to/label compare exactly; null asserts absence, omitted skips. expectedEntities/expectedDependencies require membership, allowing extras. expectedLinks requires authored links resolving to supplied IDs, optionally at an exact resolver href; automatic backlinks do not count. Derive expectations from intended work, not saved output. Returns counts and exceptions only (20/page, max 50); follow nextOffset with unchanged records and snapshot. Does not evaluate meaning, speaker attribution, chronology, quote wording or source completeness.",
@@ -128,6 +146,7 @@ export const contract = defineFeatureContract({
         offset: Type.Optional(Type.Integer({ minimum: 0, maximum: 500 })), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
         kind: Type.Optional(Type.Union([Type.Literal("page"), Type.Literal("claim"), Type.Literal("relationship")])),
         includeCards: Type.Optional(Type.Boolean()), includeEndpoints: Type.Optional(Type.Boolean()),
+        ...TemporalFilters,
         assertionOrigin: Type.Optional(text(30)),
         type: Type.Optional(text(64)), query: Type.Optional(text(200)), lifecycle: Type.Optional(Type.Union([Type.Literal("active"), Type.Literal("all")])),
       }, { additionalProperties: false }),

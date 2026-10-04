@@ -11,6 +11,7 @@ import { formatSourceDate, sourceDateNote } from "./temporal.js";
 import { captureReadingState } from "./reading-state.js";
 import { markdownView } from "./markdown-view.js";
 import { readLocation, locationParams, locationKey } from "./page-location.js";
+import { chronicleView, temporalFilterForm, temporalQuery, temporalSelectionError, type TemporalSelection } from "./chronicle-view.js";
 import { viewingClient } from "./store-view-client.js";
 import { accessText, settingsShell, storeBar, storeDialog, storeLabel, storeNotice, storeOf, storesSection, vaultFacts, type SettingsSection } from "./stores-view.js";
 import "./control-ui.css";
@@ -79,6 +80,7 @@ export default defineControlUiPlugin({
       // These are text navigation tabs, not host .btn controls. Theme-specific
       // .btn rules otherwise reintroduce filled backgrounds in light mode.
       const recentTab = button("Recent", () => navigate("recent"), "knowledge-tab"), browseTab = button("Browse", () => navigate("browse"), "knowledge-tab"); nav.append(recentTab, browseTab);
+      const timelineTab = button("Timeline", () => navigate("timeline"), "knowledge-tab"); nav.append(timelineTab);
       const banner = el("p", "", "knowledge-notice"), toolbar = el("div", undefined, "knowledge-toolbar"), content = el("div", undefined, "knowledge-content");
       header.append(title, nav, actions);
       const body = el("div", undefined, "knowledge-page-body"); const loading = el("div", "", "knowledge-loading knowledge-muted"); loading.hidden = true; loading.setAttribute("role", "status"); loading.setAttribute("aria-live", "polite");
@@ -88,6 +90,8 @@ export default defineControlUiPlugin({
       type RecentCursor = { upperSequence: number; beforeSequence: number } | undefined;
       let recentCursor: RecentCursor = initialLocation.cursor;
       let { history: includeHistory, filter: browseQuery, origin: originFilter } = initialLocation;
+      let { since, until, timeField, entity, timelineSnapshot } = initialLocation;
+      const temporalSelection = (): TemporalSelection => ({ since, until, timeField, entity });
       let recentSequence = 0, lastChecked = "", pendingSnapshot: string | undefined;
       const updates = button("", () => { updates.hidden = true; void load(true).then(ok => { if (ok) { snapshot = pendingSnapshot; pendingSnapshot = undefined; } }); }, "knowledge-new-saves"); updates.hidden = true; toolbar.after(updates);
       const recentBack: RecentCursor[] = [];
@@ -102,7 +106,7 @@ export default defineControlUiPlugin({
       let displayGeneration = 0, viewReady = false, snapshot: string | undefined;
       let staging: HTMLElement | undefined;
       let loadingGeneration = 0, displayView = "", displayScreen = "";
-      const viewKey = () => JSON.stringify([viewing, expectedVault, scopeMismatch, storeState, tab, settingsSection, selectedId, kind, type, offset, includeHistory, browseQuery, originFilter, query, recentCursor]);
+      const viewKey = () => JSON.stringify([viewing, expectedVault, scopeMismatch, storeState, tab, settingsSection, selectedId, kind, type, offset, includeHistory, browseQuery, originFilter, query, recentCursor, since, until, timeField, entity]);
       let connectionPages = 1;
       const evidenceLoaders = new WeakMap<HTMLDetailsElement, () => Promise<void>>();
       let timer: ReturnType<typeof setTimeout> | undefined, suggestGeneration = 0;
@@ -111,7 +115,7 @@ export default defineControlUiPlugin({
       const errorText = (error: unknown) => context.host.redact(error instanceof Error ? error.message : String(error));
       const failure = (error: unknown) => el("p", errorText(error), "knowledge-error");
       const empty = (heading: string, text: string) => { const n = el("div", undefined, "knowledge-empty"); n.append(el("h2", heading), el("p", text)); return n; };
-      const currentLocation = () => ({ agent: viewing, vault: expectedVault, tab, record: selectedId, section: settingsSection, kind, type, query, filter: browseQuery, history: includeHistory, origin: originFilter, offset, back: browseBack.filter(n => n < offset), cursor: recentCursor });
+      const currentLocation = () => ({ agent: viewing, vault: expectedVault, tab, record: selectedId, section: settingsSection, kind, type, query, filter: browseQuery, history: includeHistory, origin: originFilter, offset, back: browseBack.filter(n => n < offset), cursor: recentCursor, since, until, timeField, entity, timelineSnapshot });
       function writeLocation(replace = false) {
         if (!scopeChecked) return;
         const state = currentLocation(), key = locationKey(state);
@@ -124,13 +128,20 @@ export default defineControlUiPlugin({
         if (key === routeKey) return;
         routeKey = key;
         ({ agent: viewing, vault: expectedVault, tab, record: selectedId, section: settingsSection, kind, type, query, filter: browseQuery, history: includeHistory, origin: originFilter, offset, back: browseBack, cursor: recentCursor } = next);
+        ({ since, until, timeField, entity, timelineSnapshot } = next);
         ++generation; ++statusGeneration; ++suggestGeneration; loadingGeneration = 0;
         scopeChecked = false; scopeMismatch = false; identity = ""; snapshot = undefined; searchSnapshot = undefined; vocabulary = undefined; viewReady = false;
         recentBack.length = 0; recentExpanded.clear(); updates.hidden = true; pendingSnapshot = undefined;
         root.querySelector(".knowledge-chat-handoff")?.remove(); content.replaceChildren();
         renderToolbar(); void refresh();
       }
-      function navigate(next: typeof tab) { updates.hidden = true; pendingSnapshot = undefined; tab = next; selectedId = ""; offset = 0; recentCursor = undefined; recentBack.length = 0; renderToolbar(); void load(); }
+      function navigate(next: typeof tab) { updates.hidden = true; pendingSnapshot = undefined; tab = next; selectedId = ""; offset = 0; browseBack = []; timelineSnapshot = ""; recentCursor = undefined; recentBack.length = 0; renderToolbar(); void load(); }
+      /** New filters or an explicit refresh begin a new snapshot; never mix pages. */
+      function restartTimeline() { offset = 0; browseBack = []; timelineSnapshot = ""; void load(); }
+      function applyTemporal(next: TemporalSelection) {
+        ({ since, until, timeField, entity } = next); offset = 0; browseBack = []; timelineSnapshot = ""; searchSnapshot = undefined;
+        renderToolbar(); void load();
+      }
       /** Host roster names first; agent IDs are never shown when a name exists. */
       const displayName = (id: string) => agentDisplayName(id, context.host.agents.rows) ?? storesSnapshot?.agents.find(a => a.id === id)?.name ?? id;
       const viewedAgent = () => viewing || storesSnapshot?.defaultAgent || agentId;
@@ -146,6 +157,7 @@ export default defineControlUiPlugin({
         if (agent === viewedAgent()) return;
         ++statusGeneration; loadingGeneration = 0;
         viewing = agent; expectedVault = ""; scopeChecked = false; scopeMismatch = false; identity = ""; snapshot = undefined; ++generation; ++suggestGeneration; viewReady = false; vocabulary = undefined;
+        entity = ""; timelineSnapshot = ""; browseBack = [];
         root.querySelector(".knowledge-chat-handoff")?.remove(); content.replaceChildren();
         const entry = storesSnapshot && storeOf(storesSnapshot, agent);
         announce(`Viewing ${displayName(agent)}’s knowledge${entry ? `: ${storeLabel(entry, displayName)}` : ""}.`);
@@ -228,10 +240,13 @@ export default defineControlUiPlugin({
       }
       function renderToolbar() {
         recentTab.setAttribute("aria-pressed", String(!selectedId && tab === "recent")); browseTab.setAttribute("aria-pressed", String(!selectedId && tab === "browse"));
+        timelineTab.setAttribute("aria-pressed", String(!selectedId && tab === "timeline"));
         toolbar.replaceChildren(); ++suggestGeneration; clearTimeout(timer);
         // Nothing to search until the viewed store is ready.
         if (selectedId || tab === "settings" || tab === "browse" || storeState !== "ready") return;
+        if (tab === "timeline") { toolbar.append(temporalFilterForm(temporalSelection(), true, applyTemporal)); return; }
         toolbar.append(searchForm());
+        if (tab === "search") toolbar.append(temporalFilterForm(temporalSelection(), false, applyTemporal));
       }
       function searchForm(compact = false) {
         const form = el("form", undefined, "knowledge-search"), input = el("input"), suggestions = el("div", undefined, "knowledge-suggestions");
@@ -241,7 +256,7 @@ export default defineControlUiPlugin({
         const submit = el("button", undefined, "knowledge-search-submit"); submit.type = "submit"; submit.setAttribute("aria-label", "Search all text"); submit.title = "Search all text"; submit.append(query ? icon("cornerDownLeft", 14) : el("kbd", "/"));
         const searchIcon = el("span", undefined, "knowledge-search-icon"); searchIcon.append(icon("search", compact ? 14 : 16));
         form.append(searchIcon, input, submit, suggestions);
-        form.onsubmit = event => { event.preventDefault(); query = input.value.trim(); offset = 0; searchSnapshot = undefined; tab = "search"; suggestions.replaceChildren(); renderToolbar(); void load(); };
+        form.onsubmit = event => { event.preventDefault(); query = input.value.trim(); offset = 0; browseBack = []; timelineSnapshot = ""; searchSnapshot = undefined; tab = "search"; suggestions.replaceChildren(); renderToolbar(); void load(); };
         input.oninput = () => {
           query = input.value; submit.replaceChildren(query ? icon("cornerDownLeft", 14) : el("kbd", "/")); const token = ++suggestGeneration; clearTimeout(timer); suggestions.replaceChildren();
           if (!query.trim()) return;
@@ -644,6 +659,27 @@ export default defineControlUiPlugin({
         if (capped) panel.append(el("p", "This server cannot page beyond 550 records. Narrow the type filter to see more.", "knowledge-notice"));
         const results = el("div", undefined, "knowledge-browse-results"); results.append(panel); layout.append(facets, results); target.replaceChildren(layout);
       }
+      /** Snapshot-fenced pages use returned offsets, including byte-shortened pages. */
+      async function timeline(n: number, target: HTMLElement) {
+        const invalid = temporalSelectionError(temporalSelection());
+        if (invalid) { target.replaceChildren(empty("Invalid date range", invalid)); return; }
+        if (offset && !timelineSnapshot) {
+          target.replaceChildren(empty("Timeline snapshot missing", "Restart the timeline to page through one consistent snapshot."), button("Restart timeline", restartTimeline)); return;
+        }
+        try {
+          const result = await feature.invoke("timeline", { ...temporalQuery(temporalSelection()), ...(entity ? { entity } : {}), offset, limit: 20, order: "desc", ...(timelineSnapshot ? { snapshot: timelineSnapshot } : {}) });
+          if (!live(n) || n !== generation) return;
+          timelineSnapshot = result.snapshot; writeLocation(true);
+          target.replaceChildren(chronicleView(result, { open, restart: restartTimeline, previous: browseBack.filter(value => value < offset).at(-1), page: next => {
+            browseBack = next > offset ? [...browseBack.filter(value => value < offset), offset] : browseBack.filter(value => value < next);
+            offset = next; void load();
+          } }));
+        } catch (error) {
+          if (!live(n) || n !== generation) return;
+          // Keep the old fence until an explicit restart; never silently splice snapshots.
+          target.replaceChildren(failure(error), button("Restart timeline", restartTimeline));
+        }
+      }
       async function recent(n: number, target: HTMLElement) {
         const activity = await feature.invoke("recent", { limit: 20, groupBySource: true, includeEndpoints: true, ...recentCursor }); if (!live(n)) return;
         if (!recentCursor) recentSequence = activity.upperSequence;
@@ -792,8 +828,11 @@ export default defineControlUiPlugin({
           if (selectedId) return await showDetail(selectedId, n, target, connectionPages, background);
           if (tab === "recent") return await recent(n, target);
           if (tab === "browse") return await browse(n, target);
+          if (tab === "timeline") return await timeline(n, target);
           if (!query.trim()) { target.replaceChildren(empty("Search knowledge", "Enter a name or a few words to search all saved text.")); return; }
-          const result = await feature.invoke("grep", { query: query.trim(), limit: 20, offset }); if (!live(n)) return;
+          const invalid = temporalSelectionError(temporalSelection());
+          if (invalid) { target.replaceChildren(empty("Invalid date range", invalid)); return; }
+          const result = await feature.invoke("grep", { query: query.trim(), limit: 20, offset, ...temporalQuery(temporalSelection()) }); if (!live(n)) return;
           if (result.index.state !== "ready") { target.replaceChildren(empty("Search unavailable", result.index.message)); return; }
           if (offset && searchSnapshot && searchSnapshot !== result.index.snapshot) { offset = 0; searchSnapshot = undefined; writeLocation(true); target.replaceChildren(empty("Knowledge changed", "Run the search again to restart from the current snapshot.")); return; }
           searchSnapshot = result.index.snapshot;
@@ -865,7 +904,7 @@ export default defineControlUiPlugin({
             // show one store's content under another's label: reset store-bound
             // navigation and say what happened.
             ++generation; ++suggestGeneration; root.querySelector(".knowledge-chat-handoff")?.remove();
-            if (!expectedVault) { selectedId = ""; if (tab !== "settings") tab = "recent"; offset = 0; recentCursor = undefined; recentBack.length = 0; }
+            if (!expectedVault) { selectedId = ""; if (tab !== "settings") tab = "recent"; offset = 0; recentCursor = undefined; recentBack.length = 0; entity = ""; timelineSnapshot = ""; browseBack = []; }
             snapshot = undefined; viewReady = false; vocabulary = undefined; content.replaceChildren(); renderToolbar();
             const entry = storesSnapshot && storeOf(storesSnapshot, report.agent);
             observedGeneration = generation;

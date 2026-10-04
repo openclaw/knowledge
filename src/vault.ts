@@ -1,3 +1,4 @@
+import { temporalPredicate, type TimeFilter } from "./temporal-query.js";
 import { withinBudget, compactSummary } from "./response-budget.js";
 import { resolveLinks } from "./markdown-links.js";
 import { claimCard } from "./claim-card.js";
@@ -214,14 +215,15 @@ export class SampleVault {
     if (this.cache?.evidence && !overlay) for (const key of this.cache.evidence.keys()) if (!evidence.used.has(key)) this.cache.evidence.delete(key);
     return { data: { records, ontology, sources, issues, checkedAt: new Date().toISOString() }, evidence };
   }
-  async list(input: { assertionOrigin?: string; includeCards?: boolean; includeEndpoints?: boolean; offset?: number; limit?: number; kind?: string; type?: string; query?: string; lifecycle?: "active" | "all" }) {
+  async list(input: TimeFilter & { assertionOrigin?: string; includeCards?: boolean; includeEndpoints?: boolean; offset?: number; limit?: number; kind?: string; type?: string; query?: string; lifecycle?: "active" | "all" }) {
     const data = await this.scan();
     const query = input.query?.toLowerCase().trim();
+    const timeMatches = temporalPredicate(input);
     const types = input.type ? expandTypes(data.ontology, input.type) : null;
     const current = eligible(data, undefined, false);
     const facets = { kinds: {} as Record<string, number>, origins: {} as Record<string, number> };
     for (const r of current.filter(r => r.kind === "claim")) { facets.kinds[r.type] = (facets.kinds[r.type] ?? 0) + 1; const origin = r.metadata.assertion_origin ?? "unknown"; facets.origins[origin] = (facets.origins[origin] ?? 0) + 1; }
-    const matched = (input.lifecycle === "all" ? data.records : current).filter(r => (!input.kind || r.kind === input.kind) && (!input.assertionOrigin || (r.metadata.assertion_origin ?? "unknown") === input.assertionOrigin) && (!types || (r.kind === "page" ? types.has(r.type) : r.type === input.type)) && (!query || [r.id, r.title, ...(r.kind === "claim" ? [r.body] : []), ...(r.metadata.aliases ?? [])].some(v => v.toLowerCase().includes(query))));
+    const matched = (input.lifecycle === "all" ? data.records : current).filter(r => timeMatches(r) && (!input.kind || r.kind === input.kind) && (!input.assertionOrigin || (r.metadata.assertion_origin ?? "unknown") === input.assertionOrigin) && (!types || (r.kind === "page" ? types.has(r.type) : r.type === input.type)) && (!query || [r.id, r.title, ...(r.kind === "claim" ? [r.body] : []), ...(r.metadata.aliases ?? [])].some(v => v.toLowerCase().includes(query))));
     matched.sort((a, b) => b.metadata.updated_at.localeCompare(a.metadata.updated_at) || a.id.localeCompare(b.id));
     const offset = input.offset ?? 0, limit = input.limit ?? 50;
     type Row = ReturnType<typeof summary> & { card?: ReturnType<typeof claimCard> };

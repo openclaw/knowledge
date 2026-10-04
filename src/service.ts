@@ -5,6 +5,8 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 import { createKnowledgeMemoryRuntime } from "./memory-provider.js";
 import { buildKnowledgeMemoryPrompt } from "./memory-prompt.js";
 import { buildKnowledgeMemoryFlushPlan } from "./memory-flush.js";
+import { emptyChronicle } from "./chronicle.js";
+import { SinceInput, LastSeenInput } from "./chronicle-contract.js";
 import { contract } from "./contract.js";
 import { featurePrincipal, type VaultAccess } from "./access.js";
 import { parsePolicy } from "./stores-config.js";
@@ -92,6 +94,21 @@ export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureE
       source_check: call("sourceCheck"),
       publish_batch: agentChange("batch"),
       annotate: agentChange("annotate"),
+      timeline: (input, context) => call("timeline", false, () => emptyChronicle(input))(input, context),
+      chronicle_day: (input, context) => call("chronicleDay", false, () => {
+        const { date: _date, timezone: _zone, week: _week, ...filters } = input;
+        return emptyChronicle(filters, input);
+      })(input, context),
+      chronicle_since: (input, context) => call("chronicleSince", false, () => {
+        if (!Check(SinceInput, input)) throw Error("Invalid since query input.");
+        return emptyChronicle(input);
+      })(input, context),
+      chronicle_last_seen: (input, context) => call("chronicleLastSeen", false, () => {
+        if (!Check(LastSeenInput, input)) throw Error("Invalid last-seen input.");
+        const asOf = input.asOf ?? now(), result = emptyChronicle({ entity: input.entity, until: asOf });
+        return { entity: input.entity, asOf, last: null, snapshot: result.snapshot,
+          message: "This store has not been provisioned; no dated context is available. Absence is not proof of no interaction." };
+      })(input, context),
       recent: call("recent", false, () => ({ items: [], upperSequence: 0, nextBefore: null })),
       attach: call("attach", true),
       attachment: call("attachment"),
@@ -118,7 +135,7 @@ export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureE
       history: call("history", false, () => ({ entries: [], mutations: [], nextOffset: null, git: { state: "idle" as const, pending: 0, message: "Nothing saved here yet." } })),
       status: async (_, context) => {
         const opened = await stores.open(featurePrincipal(context, policy.operatorRead, false, agent ?? stores.defaultAgent()), { provision: false }, stores.incarnation);
-        const base = { service: "knowledge" as const, phase: policy.writesEnabled ? "structured-writes" as const : "read-only-explorer" as const, backendRevision: "memory-provider-v2-2+stores-v1", instanceId, startedAt };
+        const base = { service: "knowledge" as const, phase: policy.writesEnabled ? "structured-writes" as const : "read-only-explorer" as const, backendRevision: "memory-provider-v2-2+stores-v1+chronicle-v1", instanceId, startedAt };
         const notReady = (agentId: string, store: Exclude<StoreState, "ready">, message: string) => ({ ...base, checkedAt: now(), vault: "", agent: agentId, store, scope: "private", writesEnabled: false, live: "stopped" as const,
           records: 0, validRecords: 0, definitions: 0, ontologyAvailable: false, ontologyFingerprint: "", issues: 0, message: message.slice(0, 300) });
         if (opened.kind !== "ready") return notReady(opened.agentId, opened.kind, opened.message);

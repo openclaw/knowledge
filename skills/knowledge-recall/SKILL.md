@@ -44,3 +44,19 @@ Recall itself is read-only. If the selected Knowledge memory policy calls for
 remembering genuinely new durable information, use `knowledge-capture` separately.
 Do not re-save retrieved summaries as new evidence or enrich entities merely
 because they appeared in an answer.
+
+## Temporal questions
+
+Use knowledge_chronicle_day for a day/week, knowledge_chronicle_since for an
+occurrence range, knowledge_timeline for an entity's dated records or a chosen
+timeField, and knowledge_chronicle_last_seen for latest dated context. Resolve
+an entity to a stable page ID first. Dated mentions do not prove attendance.
+For keyword/inventory queries add since/until and timeField to knowledge_grep
+or knowledge_records. occurred_at answers when something happened; recorded_at
+and updated_at answer when records were created/changed. Never substitute one
+for the other. Resolve relative query dates with the user's timezone, preserving
+explicit offsets; day queries accept an IANA timezone. Source date-only values
+stay date-only. Follow nextOffset with unchanged filters and returned snapshot.
+Historical includes superseded/expired material, not withdrawn records or a
+reconstruction of past system state. Markdown-only timelines and undated records
+are not inferred, and no matches do not prove absence.

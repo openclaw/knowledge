@@ -1,3 +1,4 @@
+import { TemporalFilters } from "./chronicle-contract.js";
 import { Type, type Static } from "typebox";
 import { text, Envelope } from "./model.js";
 import { Summary } from "./inspection-contract.js";
@@ -13,7 +14,7 @@ export type LookupInput = Static<typeof LookupInput>;
 export const SearchInput = Type.Object({
   query: Type.String({ minLength: 1, maxLength: 500 }),
   mode: Type.Optional(Type.Union([Type.Literal("all"), Type.Literal("any"), Type.Literal("phrase")])),
-  ...filters,
+  ...filters, ...TemporalFilters,
 }, { additionalProperties: false });
 export type SearchInput = Static<typeof SearchInput>;
 const locator = Type.Object({ path: text(500), sha256: text(64), start_line: Type.Optional(Type.Integer()), end_line: Type.Optional(Type.Integer()) });

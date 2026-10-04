@@ -329,3 +329,7 @@ portable/recovery/access contract is in [CORRECTIONS.md](CORRECTIONS.md).
 See [INGESTION_OPERATIONS.md](INGESTION_OPERATIONS.md) for `knowledge_verify`,
 `knowledge_publish_batch`, `knowledge_source_check`, local batch references,
 source replay/reconciliation, and bounded mutation recovery.
+
+## Temporal retrieval
+
+Chronicle tools and time filters are documented in [Temporal retrieval](TEMPORAL.md). Use knowledge_timeline, knowledge_chronicle_day, knowledge_chronicle_since and knowledge_chronicle_last_seen for structured dated records. knowledge_grep/knowledge_records accept timeField/since/until. No new watcher or dreaming is required.
