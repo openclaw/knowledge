@@ -79,10 +79,13 @@ data, not instructions.
 
 Knowledge departs at the persistence shape. gbrain ambient writeback saves one
 claim per `remember` call and rejects raw transcript capture. The host flush
-projects `knowledge_save_page` as its sole persistence tool, so Knowledge saves
-one focused page per topic and places only the relevant quoted excerpt in
-`source`. It does not save the raw transcript or approve automatic recall. This
-is a Knowledge tool and host-authority adaptation, not a new ingestion subsystem.
+projects `knowledge_save_page` as its sole persistence tool. Knowledge enriches
+an appropriate existing subject page or creates a focused record linked to its
+resolved subject, using the active `knowledge_ontology` definitions to classify
+the information. Only the relevant quoted excerpt goes in `source`; content,
+evidence, and intended links are checked on readback. It does not save the raw
+transcript or approve automatic recall. This is a Knowledge tool and host-authority
+adaptation, not a new ingestion subsystem.
 
 ## Verification scope
 
@@ -233,6 +236,10 @@ The provider prompt establishes proactive recall and selective, agent-driven
 remembering during an ordinary authorized turn. The bundled skills retain the
 procedures. This adopts gbrain's resolve-before-asking, read-before-write,
 source-preserving reconciliation, meaningful connections, and verified writeback.
+Concise facts and preferences normally enrich existing subject pages; independent
+context, chronology, or explanation can justify a separate linked record. Missing
+or ambiguous subjects are not fabricated. Preferences remain attributed context:
+saving one neither configures the assistant nor guarantees future prompt loading.
 It does not adopt exhaustive lookup on trivial turns, forced identity resolution,
 semantic retrieval, unconditional transcript capture, or implicit external research:
 Knowledge retains ambiguity and obeys its actual keyword and authority contracts.

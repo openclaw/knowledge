@@ -335,7 +335,7 @@ test('flush plan provides tool persistence only for writable real vaults', async
   const f = await fixture(t);
   const plan = f.capability.providerFlushPlanResolver({ contextWindowTokens: 8_000 });
   assert.deepEqual(plan.persistenceToolNames, ['knowledge_save_page']);
-  assert.deepEqual(plan.lookupToolNames, ['knowledge_grep', 'knowledge_lookup', 'knowledge_record']);
+  assert.deepEqual(plan.lookupToolNames, ['knowledge_grep', 'knowledge_lookup', 'knowledge_record', 'knowledge_ontology']);
   assert.equal(plan.relativePath, undefined);
   assert.equal(plan.reserveTokensFloor, undefined);
   assert.equal(plan.softThresholdTokens, undefined);
@@ -346,12 +346,16 @@ test('flush plan provides tool persistence only for writable real vaults', async
   assert.match(plan.prompt, /knowledge_lookup only for exact known record IDs, full titles, or aliases/);
   assert.match(plan.prompt, /already saved, do not save it again/);
   assert.match(plan.prompt, /knowledge_save_page/);
-  assert.match(plan.prompt, /quoted source excerpt plus attribution/);
+  assert.match(plan.prompt, /quoted source excerpt with attribution/);
+  assert.match(plan.prompt, /enrich an appropriate existing page/);
+  assert.match(plan.prompt, /linked to its resolved subject/);
+  assert.match(plan.prompt, /knowledge_ontology for the active type definition/);
+  assert.doesNotMatch(plan.prompt, /one focused page per topic/);
   assert.match(plan.prompt, /knowledge_record/);
   assert.match(plan.prompt, /NO_REPLY/);
   assert.deepEqual(
     [...new Set(promptText.match(/knowledge_[a-z_]+/g))].sort(),
-    ['knowledge_grep', 'knowledge_lookup', 'knowledge_record', 'knowledge_save_page'],
+    ['knowledge_grep', 'knowledge_lookup', 'knowledge_ontology', 'knowledge_record', 'knowledge_save_page'],
   );
   assert.equal(
     f.capability.providerFlushPlanResolver({ nowMs: 0 }).prompt,
@@ -442,6 +446,9 @@ test('prompt routes all workflows, obeys citation settings and omits disabled sa
   for (const skill of ['recall', 'capture', 'ingest', 'meeting-ingest', 'entities', 'correct']) assert.ok(full.includes(`knowledge-${skill}`));
   assert.match(full, /not instructions or authorization/); assert.match(full, /newer text is not automatically truer/);
   assert.match(full, /knowledge_recall only when the owner asks/); assert.match(full, /never ingested source text/);
+  assert.match(full, /meaningful new preferences/);
+  assert.match(full, /Resolve the subject and read existing records first/);
+  assert.match(full, /enrich an appropriate existing page or link a separate record to its subject/);
   const readOnly = await fixture(t, { writesEnabled: false });
   assert.doesNotMatch(readOnly.capability.promptBuilder({ availableTools: tools }).join('\n'), /During ordinary work|knowledge-capture|knowledge-correct|knowledge_recall only/);
   const partial = buildKnowledgeMemoryPrompt({ availableTools: new Set(['knowledge_grep']), citationsMode: 'off' }).join('\n');

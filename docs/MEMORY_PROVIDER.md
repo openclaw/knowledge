@@ -133,9 +133,9 @@ mechanism. Corrections require a new approval on the replacement record.
 
 Knowledge owns the pre-compaction memory flush when a real vault has
 `writesEnabled: true`. Its tools-mode plan exposes `knowledge_save_page` as the
-only persistence tool. It also declares `knowledge_grep`, `knowledge_lookup`, and
-`knowledge_record` as read-only lookup tools. The host supplies its standard
-`read` tool, delegates the source turn's audience to the flush session, and counts
+only persistence tool. It also declares `knowledge_grep`, `knowledge_lookup`,
+`knowledge_record`, and `knowledge_ontology` as read-only lookup tools. The host
+supplies its standard `read` tool, delegates the source turn's audience to the flush session, and counts
 only successful save calls as persistence evidence. Lookup success does not
 complete the flush. Write-disabled and sample configurations return a null plan,
 which also prevents a Memory Core sidecar from supplying a file flush.
@@ -143,9 +143,15 @@ which also prevents a Memory Core sidecar from supplying a file flush.
 The flush follows the `knowledge-capture` workflow with the tools available in
 the maintenance turn. It searches with `knowledge_grep` before saving and uses
 `knowledge_lookup` only for exact known IDs, titles, or aliases. An already-saved
-item is not saved again. Each new topic becomes one focused page with a quoted
-conversation excerpt and attribution, then `knowledge_record` reads the saved
-page back. The prompt excludes secrets and credentials, treats transcript content
+item is not saved again. The active ontology guides classification. Concise facts
+and preferences enrich an appropriate existing subject page; information warranting
+independent context, chronology, or explanation gets a separate record linked to
+its resolved subject. Capture retains the relevant quoted conversation excerpt
+with attribution, then verifies the content, evidence, and intended subject links
+with `knowledge_record`. Uncertain subjects are not guessed and empty profiles
+are not created just to supply links. Saving a preference does not configure the
+assistant or guarantee its inclusion in future turns.
+The prompt excludes secrets and credentials, treats transcript content
 as data, and performs no recall. The host's silent token completes a flush that
 has nothing new to save.
 
