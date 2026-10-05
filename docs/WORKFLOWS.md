@@ -89,6 +89,18 @@ adaptation, not a new ingestion subsystem.
 
 ## Verification scope
 
+### Capture page maintenance — 2026-10-05
+
+Capture maintains a coherent account of the subject, integrating new information
+into relevant sections instead of appending a dated heading per capture. It
+preserves supporting evidence and meaningful changes over time without retaining
+every conversational editing step in the summary. This extends the subject-page
+persistence adaptation above: reusing the right page alone does not prevent
+capture-by-capture accumulation. A real-content revision using this guidance was
+preferred by the owner; the guidance does not prescribe a timeline section or
+require preserving existing headings. That trial supports the editorial guidance,
+not a guarantee that ordinary capture will always apply it correctly.
+
 ### Ingestion reliability follow-up — 2026-09-24
 
 Concurrent public service calls reproduced the live "vault identity or storage

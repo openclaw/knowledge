@@ -34,6 +34,10 @@ use `knowledge_attach` or `knowledge_recall`.
    information warrants independent context, chronology, or explanation; link
    that record to the resolved subject page using a body wikilink. Preserve source
    attribution, existing evidence, decision rationale, event dates, and uncertainty.
+   Maintain the page as a coherent account of its subject. Integrate new information
+   into the relevant section; do not append a dated heading for each capture.
+   Preserve supporting evidence and meaningful changes over time without retaining
+   every conversational editing step in the summary.
    Do not invent a subject match or create an empty profile merely to supply a link.
    An ordinary new fact does not authorize automatic identity merging.
 3. For a short inline thought, save the exact text via `source: {text,
