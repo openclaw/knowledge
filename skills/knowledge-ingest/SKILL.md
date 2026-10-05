@@ -29,6 +29,8 @@ and enrichment and `knowledge-meeting-ingest` for meeting transcripts.
 
 ## Route and acquire
 
+- Scheduled/recurring ingestion: use `knowledge-automation` to establish and
+  verify the host job, then use this workflow inside each run.
 - Short thoughts/snippets: `knowledge-capture`. Preserve the user's exact wording;
   their language is the insight.
 - Meetings: `knowledge-meeting-ingest`; source-specific handling ends at

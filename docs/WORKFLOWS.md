@@ -1,11 +1,12 @@
 # Bundled workflows
 
-Knowledge ships seven automatically discoverable, repository-owned skills through
+Knowledge ships eight automatically discoverable, repository-owned skills through
 `openclaw.plugin.json` (`skills: ["./skills"]`) and the package file allow-list.
 They are semantic ports, not a gbrain runtime dependency or a Workshop install.
 
 | Skill | Route |
 |---|---|
+| `knowledge-automation` | Create and verify host-scheduled ingestion using a retained authorized worker |
 | `knowledge-recall` | Answer from saved Knowledge with inspectable citations; read-only |
 | `knowledge-capture` | Save a short thought/snippet with exact source text |
 | `knowledge-ingest` | Documents/articles/conversations, assertions, entity propagation and back-links |
@@ -20,6 +21,13 @@ This is intentional: OpenClaw's per-skill bundle reader/materializer does not
 include siblings or allow `../` reference traversal. Build and prepack synchronize
 copies; tests reject drift. Cross-workflow routing uses discoverable skill names,
 not filesystem links to sibling bundles. No global skill installation is needed.
+
+`knowledge-automation` is a host-authority adaptation, not a gbrain ingestion
+port or a plugin scheduler. It documents the OpenClaw 2026.9.8 route verified
+with scheduled private-vault ingestion: operator scheduling into a retained
+owner-delegated session. Scheduling does not confer owner identity. Content
+processing stays in the existing ingestion skills, so automation setup needs no
+copies of their publication references. Recheck host support when versions change.
 
 ## Upstream review and operation map
 

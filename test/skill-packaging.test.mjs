@@ -8,7 +8,7 @@ import { parse } from 'yaml';
 import { contract } from '../dist/contract.js';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-const names = ['knowledge-capture', 'knowledge-correct', 'knowledge-entities', 'knowledge-ingest', 'knowledge-meeting-ingest', 'knowledge-recall', 'knowledge-source-ingest'];
+const names = ['knowledge-automation', 'knowledge-capture', 'knowledge-correct', 'knowledge-entities', 'knowledge-ingest', 'knowledge-meeting-ingest', 'knowledge-recall', 'knowledge-source-ingest'];
 
 test('packaged skills have discoverable metadata and self-contained readable references', async () => {
   execFileSync(process.execPath, ['scripts/sync-skill-references.mjs', '--check'], { cwd: root });
@@ -51,6 +51,7 @@ test('npm payload includes all skill entrypoints, references and upstream attrib
   const files = new Set(result[0].files.map(f => f.path));
   for (const name of names) {
     assert.ok(files.has(`skills/${name}/SKILL.md`));
+    if (name === 'knowledge-automation') continue;
     assert.ok(files.has(`skills/${name}/references/conventions.md`));
     if (name !== 'knowledge-recall') assert.ok(files.has(`skills/${name}/references/publication.md`));
     if (name === 'knowledge-source-ingest') {

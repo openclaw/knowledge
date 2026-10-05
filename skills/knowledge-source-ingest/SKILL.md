@@ -14,6 +14,7 @@ documents and conversations through `knowledge-ingest`, which uses
 `knowledge-entities` for entity enrichment. Route meetings through
 `knowledge-meeting-ingest`. This skill owns source identity and coverage; the
 ingestion workflows turn the retained content into useful connected knowledge.
+For creating recurring ingestion jobs, use `knowledge-automation` first.
 
 ## Contract
 
