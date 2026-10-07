@@ -3,6 +3,9 @@ import type { MemoryCallerContext } from "./memory-provider-types.js";
 import type { Scope } from "./model.js";
 
 const denied = () => new Error("Knowledge access unavailable: trusted agent/session authority is required.");
+// The host mints no audience when a session's lineage no longer verifies; the
+// common case is a subagent whose parent was reset, which only a respawn repairs.
+const noAudience = () => new Error("Knowledge access unavailable: this session has no host memory authority. A subagent loses it when its parent session is reset or deleted after the spawn; respawn it from the current parent session. The Gateway log names the exact reason.");
 /** A store partition: the store's private knowledge or one trusted conversation. */
 export type Partition = Exclude<Scope, { visibility: "sample" }>;
 /** Who is asking, and for which partition of their effective store. */
@@ -43,7 +46,7 @@ export function featurePrincipal(context: FeatureInvocationContext, operatorRead
 }
 
 function audiencePrincipal(audience: MemoryAudience | undefined): Principal {
-  if (!audience) throw denied();
+  if (!audience) throw noAudience();
   if (audience.kind === "owner-private") return { agentId: audience.agentId, scope: { visibility: "private" } };
   return { agentId: audience.agentId, scope: { visibility: "conversation", sessionId: audience.sessionId } };
 }

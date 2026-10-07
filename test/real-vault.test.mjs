@@ -70,7 +70,7 @@ test('host-resolved conversation calls are scoped; missing audience fails closed
   const nonowner = { ...f.owner, tool: { ...f.owner.tool, memoryAudience: { kind: 'conversation', agentId: 'main', sessionKey: 'agent:main:direct', sessionId: f.sessionId } } };
   assert.equal((await f.service.status({}, nonowner)).scope, `conversation:${f.sessionId}`);
   const missing = { ...f.owner, tool: { ...f.owner.tool, memoryAudience: undefined } };
-  await assert.rejects(f.service.records({}, missing), /authority/);
+  await assert.rejects(f.service.records({}, missing), /no host memory authority.*respawn it from the current parent session/);
 });
 
 test('missing, foreign, and revoked tool authority fails for every operation', async t => {
