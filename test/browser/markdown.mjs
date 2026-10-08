@@ -6,7 +6,7 @@ import { build } from 'esbuild';
 const require = createRequire(import.meta.url);
 const { chromium } = require(await fs.realpath('node_modules/openclaw') + '/node_modules/playwright');
 const base = await fs.mkdtemp('/tmp/knowledge-markdown-browser-');
-const bundle = await build({ stdin: { contents: `import {markdownView} from './src/markdown-view.ts'; window.render = source => document.querySelector('main').replaceChildren(markdownView(source, id => {window.openedRecord = id}));`, resolveDir: process.cwd() }, bundle: true, write: false, format: 'iife' });
+const bundle = await build({ stdin: { contents: `import {markdownView} from './src/markdown-view.ts'; window.render = (source, links = []) => document.querySelector('main').replaceChildren(markdownView(source, id => {window.openedRecord = id}, links));`, resolveDir: process.cwd() }, bundle: true, write: false, format: 'iife' });
 const browser = await chromium.launch({ headless: true, executablePath: process.env.KNOWLEDGE_BROWSER_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' });
 try {
   const page = await browser.newPage({ viewport: { width: 1000, height: 900 } });
@@ -18,7 +18,11 @@ try {
   await page.addScriptTag({ content: bundle.outputFiles[0].text });
   const id = '0422d1aa-3d45-4d44-91ae-f2eac3490c3f';
   const source = '# Vincent Koc\n\nParticipated in **communications planning**.\n\n## State and source context\n\n- **2026-09-23:** Roundtable planning\n  - _Optional_ attendance\n- ~~Superseded~~ item\n\n## Timeline\n\n1. Planning\n2. [COMMAND weekly](../meetings/' + id + '.md)\n\n> Source quotation\n\n| Date | Meeting |\n| --- | --- |\n| Sep 23 | Weekly |\n\n- [x] Recorded\n- [ ] Follow up\n\n```html\n<script>window.pwned = true</script>\n' + 'x'.repeat(250) + '\n```\n\n[Documentation](https://example.com/docs)\n\n[Unsafe](javascript:alert%281%29) [Encoded](jav&#x61;script:alert%281%29) [File](file:///etc/passwd) [Data](data:text/html,hi) [Host](/settings) [Protocol-relative](//example.com)\n\n<img src="https://example.com/track" onerror="window.pwned=true">\n<script>window.pwned=true</script>\n<form><input autofocus onfocus="window.pwned=true"></form>\n<svg onload="window.pwned=true"></svg>\n\n![Remote image](https://example.com/image.png)';
+  // Unknown local paths stay inert until the service supplies an authorized resolution.
   await page.evaluate(source => window.render(source), source);
+  assert.equal(await page.getByRole('link', {name:'COMMAND weekly'}).count(), 0);
+  const links = [{href: '../meetings/' + id + '.md', status: 'resolved', id}];
+  await page.evaluate(({source, links}) => window.render(source, links), {source, links});
   assert.equal(await page.locator('h1').innerText(), 'Vincent Koc');
   assert.equal(await page.locator('h2').count(), 2);
   assert.equal(await page.locator('strong').count(), 2);
