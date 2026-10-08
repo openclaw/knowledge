@@ -1,10 +1,11 @@
+import { AUXILIARY_MAX_BYTES } from "./limits.js";
 import { root } from "openclaw/plugin-sdk/file-access-runtime";
 import { parseDocument } from "yaml";
-export const safeRoot = (rootPath: string) => root(rootPath, {
-  maxBytes: 64 * 1024, symlinks: "reject", hardlinks: "reject", nonBlockingRead: true,
+export const safeRoot = (rootPath: string, maxBytes = AUXILIARY_MAX_BYTES) => root(rootPath, {
+  maxBytes, symlinks: "reject", hardlinks: "reject", nonBlockingRead: true,
 });
-export async function readText(rootPath: string, relative: string): Promise<string> {
-  const result = await (await safeRoot(rootPath)).read(relative);
+export async function readText(rootPath: string, relative: string, maxBytes = AUXILIARY_MAX_BYTES): Promise<string> {
+  const result = await (await safeRoot(rootPath, maxBytes)).read(relative);
   return new TextDecoder("utf-8", { fatal: true }).decode(result.buffer);
 }
 export const parseYaml = (raw: string): unknown => {

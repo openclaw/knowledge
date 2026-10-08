@@ -22,6 +22,23 @@
    type cannot be changed by this editor. Record unsupported information in
    clearly attributed prose where appropriate, not fictitious structured state.
 
+## Large pages and local edits
+
+Complete records may occupy 5,000,000 UTF-8 bytes including frontmatter, but each
+body/replacement input is bounded to 48,000 characters. Use `knowledge_edit_body`
+for a small active-page body range: inspect relevant body windows and surrounding
+context, supply observed vault/revision/hash/ontology fences, exact UTF-16 body
+start/end offsets, replacement, reason and fresh mutation UUID. Equal offsets
+insert; empty replacement deletes. Preserve semantic review; never infer offsets
+from raw/frontmatter or overwrite unread prose. Each edit is a complete normal
+revision, not a staged upload. Retain exact payloads for replay; reread/reconcile
+on stale fences. Attach sources rather than copying large originals into profiles.
+
+Record, revision and recovery reads remain paginated. Follow returned offsets;
+for recovery use file offset plus contentField/charOffset and compare field hashes.
+A search hit with snippet.matchLocated=false is an opening excerpt, not a located
+match; full-record matching/ranking still apply. Read the record for context.
+
 ## Retain the source
 
 Use `knowledge_attach` with a fresh UUID request ID per original. Send exact bytes

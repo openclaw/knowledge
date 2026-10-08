@@ -1,3 +1,4 @@
+import { RECORD_MAX_BYTES } from "./limits.js";
 import type { DatabaseSync } from "node:sqlite";
 import { parseDocument } from "yaml";
 import { Check } from "typebox/value";
@@ -24,7 +25,7 @@ export function lifecycleRecord(previous: LoadedRecord, lifecycle: "superseded" 
   const doc = parseDocument(match[1]);
   for (const key of ["revision", "updated_at", "lifecycle", "lifecycle_change", ...(metadata.superseded_by ? ["superseded_by"] : [])]) doc.set(key, (metadata as Record<string, unknown>)[key]);
   const raw = `---\n${doc.toString()}---\n${previous.body}`;
-  if (!Check(Envelope, metadata) || Buffer.byteLength(raw) > 65536) throw Error("Lifecycle record exceeds limits or has invalid metadata.");
+  if (!Check(Envelope, metadata) || Buffer.byteLength(raw) > RECORD_MAX_BYTES) throw Error("Lifecycle record exceeds limits or has invalid metadata.");
   return { ...previous, revision: metadata.revision, lifecycle, metadata, raw, hash: digest(raw) };
 }
 

@@ -10,7 +10,7 @@ export const Recall = Type.Object({
   summary: Type.String({ minLength: 1, maxLength: 500, pattern: "^(?=.*\\S)[\\s\\S]+$" }),
   triggers: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 100, pattern: "^(?=.*\\S)[^\\r\\n;|]+$" }), { maxItems: 20 })),
   importance: Type.Optional(Type.Integer({ minimum: 1, maximum: 10 })),
-  projects: Type.Optional(Type.Array(Type.String({ minLength: 1, pattern: "^(?=.*\\S)[^\\r\\n<>]+$" }), { maxItems: 20 })),
+  projects: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 500, pattern: "^(?=.*\\S)[^\\r\\n<>]+$" }), { maxItems: 20 })),
   approved_by: Type.Literal("owner-private"),
   approved_at: timestamp,
 }, { additionalProperties: false });

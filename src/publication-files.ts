@@ -1,6 +1,17 @@
+import { SOURCE_DESCRIPTOR_MAX_BYTES } from "./source-descriptors.js";
+import { RECORD_MAX_BYTES, AUXILIARY_MAX_BYTES } from "./limits.js";
 import * as fs from "node:fs";
 import path from "node:path";
 import { digest, MAX_ENTRIES } from "./vault.js";
+
+export type PublicationRole = "record" | "auxiliary" | "source-descriptor";
+/** Classify only canonical destinations; retained names inherit their destination role. */
+export function publicationRole(relative: string): PublicationRole {
+  if (/\/artifacts\/sources\/[^/]+\.json$/.test(relative)) return "source-descriptor";
+  if (relative.endsWith(".md") && !relative.includes("/artifacts/") && !relative.includes("/.knowledge-history/")) return "record";
+  return "auxiliary";
+}
+const byteLimit = (role: PublicationRole) => role === "record" ? RECORD_MAX_BYTES : role === "source-descriptor" ? SOURCE_DESCRIPTOR_MAX_BYTES : AUXILIARY_MAX_BYTES;
 
 /** Synchronous file operations keep the SQLite publisher fence held throughout
  * each filesystem boundary. No user path is accepted by the mutation API. */
@@ -26,27 +37,28 @@ export class PublicationFiles {
     }
     return path.join(this.root, relative);
   }
-  read(relative: string, allowRetainedLink = false): string | null {
+  read(relative: string, allowRetainedLink = false, role = publicationRole(relative)): string | null {
+    const maxBytes = byteLimit(role);
     let filename: string;
     try { filename = this.guard(relative); } catch (e) { if ((e as NodeJS.ErrnoException).code === "ENOENT") return null; throw e; }
     let before: fs.Stats;
     try { before = fs.lstatSync(filename); } catch (e) { if ((e as NodeJS.ErrnoException).code === "ENOENT") return null; throw e; }
-    if (!before.isFile() || before.isSymbolicLink() || (!allowRetainedLink && before.nlink !== 1) || before.size > 65536) throw Error("Unsafe publication file");
+    if (!before.isFile() || before.isSymbolicLink() || (!allowRetainedLink && before.nlink !== 1) || before.size > maxBytes) throw Error("Unsafe publication file");
     const fd = fs.openSync(filename, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
     try {
       const opened = fs.fstatSync(fd);
-      if (opened.dev !== before.dev || opened.ino !== before.ino || opened.size > 65536 || !opened.isFile() || (!allowRetainedLink && opened.nlink !== 1)) throw Error("Publication file changed");
-      // Fixed-size read: concurrent growth must not allocate arbitrary memory.
-      const bytes = Buffer.alloc(65537); let used = 0;
+      if (opened.dev !== before.dev || opened.ino !== before.ino || opened.size > maxBytes || !opened.isFile() || (!allowRetainedLink && opened.nlink !== 1)) throw Error("Publication file changed");
+      // Read the observed size plus one growth sentinel, not the maximum for every file.
+      const bytes = Buffer.alloc(opened.size + 1); let used = 0;
       while (used < bytes.length) { const n = fs.readSync(fd, bytes, used, bytes.length - used, used); if (!n) break; used += n; }
       const after = fs.lstatSync(filename);
-      if (used > 65536 || after.ino !== opened.ino || after.dev !== opened.dev || after.mtimeMs !== opened.mtimeMs || after.size !== used) throw Error("Publication file changed");
+      if (used > maxBytes || after.ino !== opened.ino || after.dev !== opened.dev || after.mtimeMs !== opened.mtimeMs || after.size !== used) throw Error("Publication file changed");
       return new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, used));
     } finally { fs.closeSync(fd); }
   }
   sync(directory: string) { const fd = fs.openSync(directory, fs.constants.O_RDONLY); try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); } }
-  exclusive(relative: string, raw: string) {
-    if (Buffer.byteLength(raw) > 65536) throw Error("Publication file exceeds 64 KiB");
+  exclusive(relative: string, raw: string, role = publicationRole(relative)) {
+    if (Buffer.byteLength(raw) > byteLimit(role)) throw Error("Publication file exceeds record byte limit");
     const filename = this.guard(relative, true);
     const fd = fs.openSync(filename, fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY | fs.constants.O_NOFOLLOW, 0o600);
     try { fs.writeFileSync(fd, raw); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
@@ -60,14 +72,14 @@ export class PublicationFiles {
     try { staged = fs.lstatSync(this.guard(change.stage)); current = fs.lstatSync(this.guard(change.path)); }
     catch (e) { if ((e as NodeJS.ErrnoException).code === "ENOENT") return; throw e; }
     if (staged.dev === current.dev && staged.ino === current.ino) {
-      if (staged.nlink !== 2 || this.read(change.stage, true) !== change.after) throw Error("conflict");
+      if (staged.nlink !== 2 || this.read(change.stage, true, publicationRole(change.path)) !== change.after) throw Error("conflict");
       fs.unlinkSync(this.guard(change.stage)); this.sync(path.dirname(this.guard(change.stage)));
       this.sync(path.dirname(this.guard(change.path)));
     }
   }
   publish(change: FileChange, checkpoint: (stage: string) => void) {
     this.repairStageLink(change);
-    let current = this.read(change.path), retained = this.read(change.backup, true);
+    let current = this.read(change.path), retained = this.read(change.backup, true, publicationRole(change.path));
     if (current === change.after && (change.before === null || retained === change.before)) return;
     if (retained !== null && retained !== change.before) throw Error("conflict");
     if (retained === null && change.before !== null) {
@@ -76,7 +88,7 @@ export class PublicationFiles {
       fs.renameSync(this.guard(change.path), this.guard(change.backup, true));
       this.sync(path.dirname(this.guard(change.path))); this.sync(path.dirname(this.guard(change.backup)));
       checkpoint("after-displace");
-      retained = this.read(change.backup);
+      retained = this.read(change.backup, false, publicationRole(change.path));
       if (retained !== change.before) {
         // Restore the displaced editor version only if the slot is still empty.
         try { fs.linkSync(this.guard(change.backup), this.guard(change.path)); this.sync(path.dirname(this.guard(change.path))); } catch (e) { if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e; }
@@ -85,8 +97,8 @@ export class PublicationFiles {
       current = this.read(change.path);
     }
     if (current !== null) throw Error("conflict");
-    let staged = this.read(change.stage, true);
-    if (staged === null) { this.exclusive(change.stage, change.after); staged = change.after; }
+    let staged = this.read(change.stage, true, publicationRole(change.path));
+    if (staged === null) { this.exclusive(change.stage, change.after, publicationRole(change.path)); staged = change.after; }
     if (staged !== change.after) throw Error("conflict");
     checkpoint("before-install");
     try { fs.linkSync(this.guard(change.stage), this.guard(change.path, true)); }
@@ -96,7 +108,7 @@ export class PublicationFiles {
     fs.unlinkSync(this.guard(change.stage)); this.sync(path.dirname(this.guard(change.stage)));
     this.sync(path.dirname(this.guard(change.path)));
     checkpoint("after-install");
-    if (this.read(change.path) !== change.after || (change.before !== null && this.read(change.backup) !== change.before)) throw Error("conflict");
+    if (this.read(change.path) !== change.after || (change.before !== null && this.read(change.backup, false, publicationRole(change.path)) !== change.before)) throw Error("conflict");
   }
   /** Change stamps of every authored file in a scope (not contents). Equal
    * snapshots mean no file was added, removed or rewritten: any rewrite

@@ -476,3 +476,46 @@ test('index failure is not empty success and late backend results are fenced', a
   reply = () => { active = false; return { index: { state: 'ready', snapshot: 's', message: '' }, hits: [], total: 0, nextOffset: null, coverage: { complete: true, message: '' } }; };
   await assert.rejects(provider.search({ query: 'Orchid' }), /revoked/);
 });
+
+test('large provider reads follow advertised line continuations beyond 100000 and disclose opening excerpts', async t => {
+  const f = await fixture(t), saved = await f.save('Many lines');
+  const filename = path.join(f.root, 'private', saved.path), raw = await readFile(filename, 'utf8');
+  await writeFile(filename, raw.slice(0, -'Evidence-backed durable note'.length) + 'short\n'.repeat(100300) + 'needle');
+  const { provider } = await f.open();
+  const result = await provider.search({ query: 'needle' });
+  assert.match(result.hits[0].excerpt, /Opening excerpt \(not the match location\)/);
+  const first = await provider.get({ reference: result.hits[0].reference, from: 99950, lines: 200 });
+  assert.ok(first.nextFrom > 100000);
+  const next = await provider.get({ reference: first.reference, from: first.nextFrom, lines: 200 });
+  assert.equal(next.status, 'ok'); assert.match(next.text, /needle/); assert.equal(next.truncated, false);
+});
+
+test('recall keys and whole candidate responses stay bounded with honest partial coverage', async t => {
+  const { stringify } = await import('yaml');
+  const { withinBudget } = await import('../dist/response-budget.js');
+  const f = await fixture(t), saved = await f.save('Candidate seed');
+  await assert.rejects(f.recall(saved, { summary: 'approved', projects: ['x'.repeat(501)] }), /Invalid automatic recall input/);
+  await f.recall(saved, { summary: 'approved', projects: ['x'.repeat(500)] });
+  const original = (await f.service.record({ id: saved.id, metadataView: 'full' }, f.tool)).record;
+  const metadata = original.metadata;
+  // Many individually bounded records still exceed one response; use authored
+  // synthetic fixtures to exercise the production scan/worker/provider chain.
+  for (let n=0;n<35;n++) {
+    const id = randomUUID();
+    const m = { ...metadata, id, title: 'Candidate '+n, recall: { ...metadata.recall,
+      projects: Array.from({length:20}, (_,i)=>String(i)+'é'.repeat(498)), summary:'Approved '+n } };
+    await writeFile(path.join(f.root, 'private', path.dirname(saved.path), id+'.md'), '---\n'+stringify(m)+'---\nbody');
+  }
+  const { provider } = await f.open();
+  const result = await provider.candidates({ kind:'project', limit:200 });
+  assert.ok(result.hits.length > 0 && result.hits.length < 36);
+  assert.equal(result.coverage,'partial'); assert.ok(withinBudget(result)); assert.match(result.warning,/budget/);
+  const limited = await provider.candidates({ kind:'project', limit:1 });
+  assert.equal(limited.hits.length,1); assert.equal(limited.coverage,'partial');
+  // A huge manually-authored key must fail closed, never reach automatic recall.
+  const id = randomUUID(), m = { ...metadata, id, recall:{...metadata.recall,projects:['x'.repeat(1000000)]} };
+  await writeFile(path.join(f.root,'private',path.dirname(saved.path),id+'.md'), '---\n'+stringify(m)+'---\nbody');
+  const invalid = await provider.candidates({kind:'project',limit:200});
+  assert.equal(invalid.coverage,'partial'); assert.ok(withinBudget(invalid));
+  assert.ok(!invalid.hits.some(h=>h.reference.id===id));
+});

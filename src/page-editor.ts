@@ -1,3 +1,4 @@
+import { BODY_INPUT_MAX_CHARS } from "./limits.js";
 import type { FeatureClient, FeatureOutput } from "openclaw/plugin-sdk/feature-contract";
 import { loadVocabulary } from "./inspection-client.js";
 import { contract } from "./contract.js";
@@ -20,7 +21,7 @@ export async function pageEditor(parent: HTMLElement, feature: FeatureClient<typ
   const form = element("form"), feedback = element("p"); feedback.setAttribute("role", "status");
   const title = element("input"); title.value = restored?.title ?? record?.title ?? ""; title.required = true; title.maxLength = 200;
   const type = element("select"); type.required = kind !== "claim";
-  const body = element("textarea"); body.value = restored?.body ?? record?.body ?? ""; body.rows = 16; body.maxLength = 48000;
+  const body = element("textarea"); body.value = restored?.body ?? record?.body ?? ""; body.rows = 16; body.maxLength = BODY_INPUT_MAX_CHARS;
   const fields = element("textarea"); fields.rows = 4; fields.value = restored?.fields ?? (record ? JSON.stringify(record.metadata?.fields ?? {}, null, 2) : "{}");
   const source = element("textarea"); source.rows = 4; source.value = restored?.source ?? "";
   const files = element("input"); files.type = "file"; files.multiple = true;

@@ -1,3 +1,5 @@
+import { RECORD_RESPONSE_MAX_BYTES } from "./limits.js";
+import { splitsPair } from "./text-window.js";
 import { eligible } from "./retrieval.js";
 import type { SampleVault } from "./vault.js";
 import type { CompactMetadata, RecordInput, RecordOutput, OntologyInput, OntologyOutput } from "./inspection-contract.js";
@@ -8,7 +10,7 @@ const withoutConfidenceEvidence = <T extends { attributionConfidence?: { level: 
   ...(r.attributionConfidence ? { attributionConfidence: { level: r.attributionConfidence.level, basis: r.attributionConfidence.basis } } : {}) });
 const next = (offset: number, count: number, total: number) => offset + count < total ? offset + count : null;
 
-export const RECORD_RESPONSE_BYTES = 24 * 1024;
+export const RECORD_RESPONSE_BYTES = RECORD_RESPONSE_MAX_BYTES;
 const compactMetadata = (m: Envelope): CompactMetadata => {
   const keys = ["owner", "due_at", "occurred_at", "source_page", "source_event", "entities", "dependencies", "from", "to", "label", "attribution", "assertion_origin", "claim_kind"] as const;
   return { ...Object.fromEntries(keys.filter(k => m[k] !== undefined).map(k => [k, m[k]])),
@@ -49,6 +51,7 @@ function boundRecord(result: RecordOutput, input: RecordInput): RecordOutput {
       result.content.nextOffset = next(result.content.offset, mid, result.content.totalChars);
       if (size() <= RECORD_RESPONSE_BYTES) low = mid; else high = mid - 1;
     }
+    if (splitsPair(original, low)) low--;
     r[key] = original.slice(0, low); result.content.nextOffset = next(result.content.offset, low, result.content.totalChars);
     if (!low && original.length) throw Error("Record details exceed response budget. Use view=raw, metadataView=none and no evidence/references for paged original text.");
   }
@@ -67,7 +70,10 @@ export async function inspectRecord(vault: SampleVault, input: RecordInput): Pro
   if (input.includeEvidence) result.relatedStatements = detail.relatedStatements ?? [];
   const { body, raw, metadata: serialized, ...base } = r, metadata: Envelope = JSON.parse(serialized);
   const value = view === "content" ? body : view === "raw" ? raw : "";
-  const chunk = value.slice(offset, offset + maxChars);
+  if (splitsPair(value, offset)) throw Error("Text offset splits a Unicode character.");
+  let end = Math.min(value.length, offset + maxChars);
+  if (splitsPair(value, end)) end--;
+  const chunk = value.slice(offset, end);
   const refs = detail.references.map(withoutConfidenceEvidence);
   result.record = { ...withoutConfidenceEvidence(base), about: refs.filter(r => metadata.entities?.includes(r.id)).slice(0, 2),
     ...(view === "content" ? { body: chunk } : view === "raw" ? { raw: chunk } : {}),

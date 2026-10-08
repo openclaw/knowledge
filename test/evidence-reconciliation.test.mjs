@@ -111,7 +111,11 @@ test('stale revision/hash, ontology/vault and scope fences reject before mutatio
 test('expanded dry run refuses an oversized rollback without discarding compact support', async t => {
   const f = await fixture(t), evidence = await retained(f, 'large', 'line\n'.repeat(120), 'A'.repeat(1000));
   const citations = Array.from({ length: 100 }, (_, n) => ({ ...evidence, start_line: n + 1, end_line: n + 1 }));
-  const saved = await save(f, citations), before = await f.record(saved.id);
+  const saved = await save(f, citations), initial = await f.record(saved.id);
+  // Compact associations fit; expanding them crosses the durable byte ceiling.
+  const prefix = initial.raw.slice(0, initial.raw.length - initial.body.length);
+  await writeFile(path.join(f.scoped, initial.path), prefix + 'x'.repeat(4_960_000 - Buffer.byteLength(prefix)));
+  const before = await f.record(saved.id);
   await assert.rejects(f.storage.reconcileEvidence(await f.input(saved.id, { representation: 'expanded' }), f.access), /exceeds record limits/);
   assert.equal((await f.record(saved.id)).hash, before.hash); assert.equal(before.metadata.evidence.length, 100);
 });

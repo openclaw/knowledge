@@ -1,3 +1,4 @@
+import { RECORD_MAX_BYTES } from "./limits.js";
 import { parseDocument } from "yaml";
 import type { LoadedRecord } from "./model.js";
 import type { ReconcileEvidenceInput } from "./evidence-reconciliation-contract.js";
@@ -19,6 +20,6 @@ export function prepareEvidenceRevision(previous: LoadedRecord, input: Reconcile
   doc.set("evidence_change", { reason: input.reason, request_id: input.requestId, at: metadata.updated_at, representation: input.representation });
   const raw = "---\n" + doc.toString() + "---\n" + previous.body;
   const encoded = encodeRecordEvidence({ ...previous, metadata, revision: metadata.revision, raw }, read, input.representation);
-  if (Buffer.byteLength(encoded.record.raw) > 65536) throw Error("Evidence representation exceeds record limits; no change accepted.");
+  if (Buffer.byteLength(encoded.record.raw) > RECORD_MAX_BYTES) throw Error("Evidence representation exceeds record limits; no change accepted.");
   return encoded;
 }

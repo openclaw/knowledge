@@ -1,3 +1,4 @@
+import { BODY_INPUT_MAX_CHARS } from "./limits.js";
 import { Type, type Static } from "typebox";
 import { text, name, Evidence, Envelope, id, strings, RecordAnnotations, Recall } from "./model.js";
 export const requestId = Type.String({ pattern: "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$" });
@@ -5,7 +6,7 @@ const mutationRequestIdDescription = "Generate a lowercase UUID per distinct mut
 const requiredMutationRequestId = Type.String({ ...requestId, description: mutationRequestIdDescription });
 export const SavePage = Type.Object({
   ...RecordAnnotations.properties,
-  requestId: Type.Optional(Type.String({ ...requiredMutationRequestId, description: `${mutationRequestIdDescription} Omit only during a host pre-compaction memory flush; Knowledge derives a stable request ID from the flush and normalized title.` })), title: Type.String({ minLength: 1, maxLength: 200 }), body: text(48000),
+  requestId: Type.Optional(Type.String({ ...requiredMutationRequestId, description: `${mutationRequestIdDescription} Omit only during a host pre-compaction memory flush; Knowledge derives a stable request ID from the flush and normalized title.` })), title: Type.String({ minLength: 1, maxLength: 200 }), body: Type.String({ maxLength: BODY_INPUT_MAX_CHARS, description: "One bounded write, not durable capacity. Use knowledge_edit_body for small changes or incremental growth of large pages." }),
   type: Type.Optional(name), fields: Type.Optional(Type.Record(Type.String(), Type.Unknown(), { description: "Only domain fields declared by knowledge_ontology view=definitions for this type. Replaces the entire fields object; omit to preserve." })),
   id: Type.Optional(Type.String({ pattern: "^[a-zA-Z0-9][a-zA-Z0-9_-]{7,95}$" })),
   expectedVaultId: Type.Optional(requestId),
@@ -22,7 +23,7 @@ const common = {
   ...RecordAnnotations.properties,
   requestId: requiredMutationRequestId, expectedVaultId: Type.Optional(requestId),
   expectedOntologyFingerprint: Type.String({ pattern: "^[a-f0-9]{64}$" }),
-  title: Type.String({ minLength: 1, maxLength: 200 }), body: text(48000),
+  title: Type.String({ minLength: 1, maxLength: 200 }), body: Type.String({ maxLength: BODY_INPUT_MAX_CHARS, description: "One bounded write, not durable capacity. Use knowledge_edit_body for small changes or incremental growth of large pages." }),
   attribution: Type.String({ minLength: 1, maxLength: 1000 }),
   evidence: Type.Array(Evidence, { minItems: 1 }),
   dependencies: Envelope.properties.dependencies,

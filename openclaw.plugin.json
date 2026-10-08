@@ -48,9 +48,9 @@
     "onStartup": true
   },
   "controlUi": {
-    "entry": "dist/control-ui/92ae66c8c1930d18a7917a436a890187c3838d565faf79fba505f75738133e01/index.js",
+    "entry": "dist/control-ui/346ae7784d8529c0a3d9c27fb15a109f5f48f9119196c0486b641c2f2be46323/index.js",
     "styles": [
-      "dist/control-ui/92ae66c8c1930d18a7917a436a890187c3838d565faf79fba505f75738133e01/index.css"
+      "dist/control-ui/346ae7784d8529c0a3d9c27fb15a109f5f48f9119196c0486b641c2f2be46323/index.css"
     ]
   },
   "skills": [
@@ -69,6 +69,7 @@
       "knowledge_create_claim",
       "knowledge_create_relationship",
       "knowledge_diagnostics",
+      "knowledge_edit_body",
       "knowledge_evidence_read",
       "knowledge_grep",
       "knowledge_history",

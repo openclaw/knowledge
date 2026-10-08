@@ -1,3 +1,5 @@
+import { EditBodyInput } from "./body-edit-contract.js";
+import { TextWindowInput, TextWindowContent, RecoveryContent } from "./text-window-contract.js";
 import { ReconcileEvidenceInput, ReconcileEvidenceOutput } from "./evidence-reconciliation-contract.js";
 import { QueryFreshness } from "./query-freshness.js";
 import { EvidenceReadInput, EvidenceReadOutput } from "./evidence-read-contract.js";
@@ -79,6 +81,10 @@ export const contract = defineFeatureContract({
       kind: "query", description: "DOWNLOAD retained bytes: use knowledge_attachment, not knowledge_attach (upload). Read the original bytes of a file referenced by an authorized record. Supply the evidence path and sha256 from knowledge_record. Returns a base64 chunk; follow nextOffset until null. Binary files are preserved without text conversion. No arbitrary filesystem paths or unreferenced files are exposed.",
       input: AttachmentInput, output: AttachmentOutput, tool: { name: "knowledge_attachment", label: "Read knowledge source file" },
     },
+    edit_body: {
+      kind: "action", description: "Edit one exact active-page body range without resending the record. Read knowledge_record view=content first; start inclusive/end exclusive are UTF-16 offsets in the full body (not raw Markdown/frontmatter). start=end inserts, empty replacement deletes. Maximum replacement 48,000 characters; complete request remains bounded. Mandatory observed vault/revision/hash/ontology fences reject stale edits. Preserves unrelated metadata/evidence; publishes a normal revision/history/receipt. The complete UTF-8 record including frontmatter must fit 5,000,000 bytes. Reuse identical requestId/payload after uncertainty; no implicit rebasing or fuzzy matching.",
+      input: EditBodyInput, output: Receipt, tool: { name: "knowledge_edit_body", label: "Edit knowledge body" },
+    },
     save_page: {
       kind: "action", description: "Create or edit a page in the authorized scope. requestId must be a generated lowercase UUID, never a source ID or slug; it may be omitted only during a host pre-compaction memory flush, when Knowledge derives it from the flush ID and normalized title. Creates omit id/expectedRevision/expectedHash; edits require all three from knowledge_record. Reuse requestId and identical payload for retries; inspect knowledge_mutation after an uncertain result. Calls share a serialized service lane, not a multi-record transaction. Aliases, tags, dependencies and fields replace their collections when supplied (empty clears); omission preserves on edit. Optional expectedOntologyFingerprint fences the observed schema. Append file evidence returned by knowledge_attach using attachments (no count cap). Legacy source text remains supported; saved pages are immediately available with no approval step. A published receipt is a completed save; accepted publication conflicts retain recovery material and block publication. Requests rejected before acceptance are not saved.",
       input: SavePage, output: Receipt, tool: { name: "knowledge_save_page", label: "Save knowledge page" },
@@ -114,15 +120,15 @@ export const contract = defineFeatureContract({
       tool: { name: "knowledge_resume", label: "Resume knowledge publication" },
     },
     revision: {
-      kind: "query", description: "Read a retained revision snapshot from authorized history by sequence. The snapshot is historical, not current knowledge.",
-      input: Type.Object({ sequence: Type.Integer({ minimum: 1 }) }, { additionalProperties: false }),
-      output: Type.Object({ raw: Type.Union([text(65536), Type.Null()]) }),
+      kind: "query", description: "Read a retained revision snapshot from authorized history by sequence. The snapshot is historical, not current knowledge. Follow content.nextOffset with offset and the same sequence; maxChars is a window, not file capacity.",
+      input: Type.Object({ sequence: Type.Integer({ minimum: 1 }), ...TextWindowInput }, { additionalProperties: false }),
+      output: Type.Object({ raw: Type.Union([text(65536), Type.Null()]), content: Type.Union([TextWindowContent, Type.Null()]) }),
       tool: { name: "knowledge_revision", label: "Inspect knowledge revision" },
     },
     mutation: {
-      kind: "query", description: "Inspect publication recovery, not source uploads or record content. Use includeFiles=false for receipt-only checks; retained before/proposed/displaced files default to 3/page with nextOffset for batches. A null receipt means no accepted page/assertion mutation was found in this scope; it is not an upload receipt. After an uncertain result, replay the original payload/ID, not a replacement request. Does not resolve or overwrite a conflict.",
-      input: Type.Object({ requestId, includeFiles: Type.Optional(Type.Boolean()), offset: Type.Optional(Type.Integer({ minimum: 0 })), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 3 })) }, { additionalProperties: false }),
-      output: Type.Object({ totalFiles: Type.Optional(Type.Integer()), nextOffset: Type.Optional(Type.Union([Type.Integer(), Type.Null()])), receipt: Type.Union([Receipt, Type.Null()]), files: Type.Array(Type.Object({ path: text(500), before: Type.Union([text(65536), Type.Null()]), proposed: text(65536), displaced: Type.Union([text(65536), Type.Null()]) }), { maxItems: 3 }) }),
+      kind: "query", description: "Inspect publication recovery, not source uploads or record content. Use includeFiles=false for receipt-only checks; retained before/proposed/displaced files default to 3/page with nextOffset for batches. Each file has bounded before/proposed/displaced windows with content nextOffset/totalChars. Keep the file offset fixed and use contentField (default proposed) plus charOffset to continue one text field. Compare its content hash across pages; restart on change. A null receipt means no accepted page/assertion mutation was found in this scope; it is not an upload receipt. After an uncertain result, replay the original payload/ID, not a replacement request. Does not resolve or overwrite a conflict.",
+      input: Type.Object({ requestId, contentField: Type.Optional(Type.Union([Type.Literal("before"), Type.Literal("proposed"), Type.Literal("displaced")])), charOffset: TextWindowInput.offset, maxChars: TextWindowInput.maxChars, includeFiles: Type.Optional(Type.Boolean()), offset: Type.Optional(Type.Integer({ minimum: 0 })), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 3 })) }, { additionalProperties: false }),
+      output: Type.Object({ totalFiles: Type.Optional(Type.Integer()), nextOffset: Type.Optional(Type.Union([Type.Integer(), Type.Null()])), receipt: Type.Union([Receipt, Type.Null()]), files: Type.Array(Type.Object({ path: text(500), before: Type.Union([text(65536), Type.Null()]), proposed: text(65536), displaced: Type.Union([text(65536), Type.Null()]), content: RecoveryContent }), { maxItems: 3 }) }),
       tool: { name: "knowledge_mutation", label: "Inspect knowledge publication" },
     },
     history: {
@@ -136,6 +142,7 @@ export const contract = defineFeatureContract({
       input: empty,
       output: Type.Object({
         service: Type.Literal("knowledge"), phase: Type.Union([Type.Literal("read-only-explorer"), Type.Literal("page-editor"), Type.Literal("structured-writes")]),
+        limits: Type.Object({ recordBytes: Type.Integer(), bodyInputChars: Type.Integer(), textPageChars: Type.Integer(), recordResponseBytes: Type.Integer() }),
         backendRevision: text(80), instanceId: text(80), startedAt: text(40), checkedAt: text(40),
         snapshot: Type.Optional(text(64)),
         vault: text(80), agent: text(80), store: StoreState, message: Type.Optional(text(300)), scope: text(80), writesEnabled: Type.Boolean(),

@@ -1,3 +1,8 @@
+import { EditBodyInput } from "./body-edit-contract.js";
+import { editBody } from "./body-edit.js";
+import { withinBudget } from "./response-budget.js";
+import { textWindow } from "./text-window.js";
+import { RECORD_MAX_BYTES } from "./limits.js";
 import { ReconcileEvidenceInput, type EvidencePreview } from "./evidence-reconciliation-contract.js";
 import { prepareEvidenceRevision } from "./evidence-reconciliation.js";
 import { encodeRecordEvidence, readSourceDescriptor, recordSourceDependencies } from "./source-records.js";
@@ -30,7 +35,7 @@ import { parseYaml } from "./files.js";
 import { RealVault, type StoreConfig } from "./real-vault.js";
 import { Manifest, checkpointKey } from "./store-manifest.js";
 import { SqliteIdentityStore } from "./identity-store.js";
-import { PublicationFiles, type FileChange } from "./publication-files.js";
+import { publicationRole, PublicationFiles, type FileChange } from "./publication-files.js";
 import { AnnotateInput, SavePage, ClaimInput, RelationshipInput, CorrectInput, WithdrawInput, RecallInput, type WriteInput, type WriteKind, type Receipt } from "./mutation-contract.js";
 import { digest } from "./vault.js";
 import { approvedRecall, Envelope, RecordAnnotations, type LoadedRecord, type Recall, type Scope } from "./model.js";
@@ -137,10 +142,12 @@ export class KnowledgeStorage {
           if (!recall || (input.kind === "trigger" ? !recall.triggers?.length : !recall.projects?.length)) return [];
           return [{ id: record.id, title: record.title, path: record.path, revision: record.revision, hash: record.hash, recall }];
         })
-        .sort((a, b) => (b.recall.importance ?? 0) - (a.recall.importance ?? 0) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-        .slice(0, input.limit);
+        .sort((a, b) => (b.recall.importance ?? 0) - (a.recall.importance ?? 0) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+      const result = { records: records.slice(0, input.limit), complete: data.issues.length === 0 && records.length <= input.limit };
+      // Bound the worker boundary as well as the final provider projection.
+      while (!withinBudget(result) && result.records.length) { result.records.pop(); result.complete = false; }
       access.assertCurrent();
-      return records;
+      return result;
     });
   }
   /** Read temporal projections within the same authority and identity fence as search. */
@@ -296,6 +303,31 @@ export class KnowledgeStorage {
     });
     return this.accept(input.requestId, intent, prepared, access, actor);
   }
+  /** Publish one bounded page-body change through the normal fenced journal. */
+  async editBody(input: EditBodyInput, access: VaultAccess): Promise<Receipt> {
+    if (!Check(EditBodyInput, input) || !input.reason.trim() || !withinBudget(input)) throw Error("Invalid or oversized body edit input.");
+    access.assertCurrent();
+    if (!this.config.writesEnabled) throw Error("Knowledge writes are disabled.");
+    if (input.expectedVaultId !== this.config.vaultId) throw Error("Connected vault changed; no publication accepted.");
+    await this.initialize(access);
+    const scope = scopeKey(access.scope), intent = digest(canonical({ operation: "editBody", input }));
+    const prior = this.store.withDatabase(db => this.row(db, scope, input.requestId));
+    if (prior) { this.checkReplay(prior, intent); return this.resume(access, input.requestId); }
+    this.assertReadable();
+    // Assemble inside the authorized store; full body never crosses the tool input.
+    const prepared = await this.real.run(access, async vault => {
+      const data = await vault.scan(), matches = data.records.filter(r => r.id === input.id);
+      const previous = matches.length === 1 ? matches[0] : undefined;
+      if (!previous || !previous.valid || previous.kind !== "page" || previous.lifecycle !== "active" ||
+        previous.hash !== input.expectedHash || previous.revision !== input.expectedRevision) throw Error("Body edit conflict: target unavailable or changed.");
+      const body = editBody(previous.body, input);
+      // prepare rechecks the revision and ontology, validates references and final bytes.
+      return this.prepare(vault, { requestId: input.requestId, id: input.id, expectedVaultId: input.expectedVaultId,
+        expectedRevision: input.expectedRevision, expectedHash: input.expectedHash, expectedOntologyFingerprint: input.expectedOntologyFingerprint,
+        title: previous.title, body } as SavePage & ClaimInput & RelationshipInput, "page", access, "agent", undefined, undefined, undefined, input.reason);
+    });
+    return this.accept(input.requestId, intent, prepared, access, "agent");
+  }
   /** Preview or publish one explicit support/representation revision without source deletion. */
   async reconcileEvidence(input: ReconcileEvidenceInput, access: VaultAccess): Promise<EvidencePreview | Receipt> {
     if (!Check(ReconcileEvidenceInput, input) || !input.reason.trim()) throw Error("Invalid evidence reconciliation input.");
@@ -357,7 +389,7 @@ export class KnowledgeStorage {
       const raw = `---\n${doc.toString()}---\n${previous.body}`;
       const encoded = encodeRecordEvidence({ ...previous, metadata, raw, hash: digest(raw), revision: metadata.revision }, p => readSourceDescriptor(path.join(this.config.root, scope), p));
       const record = encoded.record;
-      if (Buffer.byteLength(record.raw) > 65536) throw Error("Annotation exceeds record limits.");
+      if (Buffer.byteLength(record.raw) > RECORD_MAX_BYTES) throw Error("Annotation exceeds record limits.");
       if (new PublicationFiles(this.config.root).snapshot(scope) !== snapshot) throw Error("Edit conflict: vault changed during validation.");
       return { previous, record, data, snapshot, artifacts: encoded.descriptors, requiredDescriptors: encoded.requiredDescriptors, annotation: true, annotationEvidence: extra };
     });
@@ -418,7 +450,7 @@ export class KnowledgeStorage {
       else doc.delete("recall");
       parseYaml(doc.toString());
       const raw = `---\n${doc.toString()}---\n${previous.body}`;
-      if (Buffer.byteLength(raw) > 65536 || !Check(Envelope, metadata) || (metadata.recall !== undefined && !approvedRecall(metadata.recall))) throw Error("Automatic recall metadata exceeds record limits or is invalid.");
+      if (Buffer.byteLength(raw) > RECORD_MAX_BYTES || !Check(Envelope, metadata) || (metadata.recall !== undefined && !approvedRecall(metadata.recall))) throw Error("Automatic recall metadata exceeds record limits or is invalid.");
       const record: LoadedRecord = { ...previous, metadata, raw, hash: digest(raw), revision: metadata.revision };
       if (new PublicationFiles(this.config.root).snapshot(scope) !== snapshot) throw Error("Edit conflict: vault changed during automatic recall validation.");
       return { record, previous, data, snapshot, artifacts: {}, metadataOnly: true };
@@ -454,7 +486,7 @@ export class KnowledgeStorage {
     return this.accept(input.requestId, intent, prepared, access, actor);
   }
   private async prepare(vault: SampleVault, input: SavePage & ClaimInput & RelationshipInput, kind: WriteKind, access: VaultAccess, actor: string,
-    correction?: CorrectInput, sourceAttachment?: import("./model.js").Evidence, batch?: { id: string; data: Prepared["data"]; snapshot: string }): Promise<Prepared> {
+    correction?: CorrectInput, sourceAttachment?: import("./model.js").Evidence, batch?: { id: string; data: Prepared["data"]; snapshot: string }, bodyEditReason?: string): Promise<Prepared> {
     const scope = scopeKey(access.scope);
     const snapshot = batch?.snapshot ?? new PublicationFiles(this.config.root).snapshot(scope);
     const data = batch?.data ?? await vault.scan();
@@ -516,6 +548,7 @@ export class KnowledgeStorage {
       const doc = parseDocument(match[1]);
       doc.delete("acceptance");
       for (const key of ["title", "revision", "updated_at", ...portable.filter(key => (input as Record<string, unknown>)[key] !== undefined), ...(input.fields !== undefined ? ["fields"] : []), ...(input.source ? ["evidence", "attribution"] : input.attachments?.length || extra.length ? ["evidence"] : [])]) doc.set(key, doc.createNode((metadata as Record<string, unknown>)[key], { aliasDuplicateObjects: false }));
+      if (bodyEditReason !== undefined) doc.set("body_change", { reason: bodyEditReason, request_id: input.requestId, at: now });
       yaml = doc.toString();
     } else yaml = stringify(metadata, { aliasDuplicateObjects: false });
     const raw = `---\n${yaml}---\n${input.body}`;
@@ -526,7 +559,7 @@ export class KnowledgeStorage {
     let record: LoadedRecord = { id, title: input.title, kind, type: type!, path: relative, revision, lifecycle: metadata.lifecycle, metadata, raw, body: input.body, hash: digest(raw), valid: true };
     const encoded = encodeRecordEvidence(record, p => readSourceDescriptor(path.join(this.config.root, scope), p));
     record = encoded.record; Object.assign(artifacts, encoded.descriptors);
-    if (Buffer.byteLength(record.raw) > 65536) throw Error("Record exceeds limits.");
+    if (Buffer.byteLength(record.raw) > RECORD_MAX_BYTES) throw Error("Record exceeds limits.");
     if (!batch) {
       const preview = await vault.scan({ record, artifacts });
       if (!record.valid) throw Error("Record validation failed: " + preview.issues.filter(i => i.path === relative).map(i => i.code).join(", "));
@@ -620,7 +653,7 @@ export class KnowledgeStorage {
         for (const change of plan.changes) files.repairStageLink(change);
       }
       const manifestChange = plan.changes.at(-1)!;
-      const fallback = row.state !== "published" && files.read(manifestChange.backup, true) === manifestChange.before ? manifestChange.before : undefined;
+      const fallback = row.state !== "published" && files.read(manifestChange.backup, true, publicationRole(manifestChange.path)) === manifestChange.before ? manifestChange.before : undefined;
       this.identity(db, files, row.state !== "published" ? plan.after : undefined, fallback);
       if (row.state !== "accepted") { access.assertCurrent(); return receipt; }
       const checkpoint = JSON.parse(String(db.prepare("SELECT manifest FROM identities WHERE agent_key=?").get(checkpointKey(this.config.vaultId))!.manifest));
@@ -636,7 +669,7 @@ export class KnowledgeStorage {
         }
         this.hook("before-receipt");
         for (const [p, raw] of Object.entries(plan.descriptors ?? {})) if (files.read(`${plan.scope}/${p}`) !== raw) throw Error("conflict");
-        for (const change of plan.changes) if (files.read(change.path) !== change.after || (change.before !== null && files.read(change.backup) !== change.before)) throw Error("conflict");
+        for (const change of plan.changes) if (files.read(change.path) !== change.after || (change.before !== null && files.read(change.backup, false, publicationRole(change.path)) !== change.before)) throw Error("conflict");
         access.assertCurrent();
         db.prepare("UPDATE identities SET manifest=? WHERE agent_key=?").run(JSON.stringify(plan.after), checkpointKey(this.config.vaultId));
         receipt.state = "published"; receipt.message = "Published and available to exact reads; keyword indexing is pending until the next search reconciles this scope.";
@@ -668,7 +701,7 @@ export class KnowledgeStorage {
       const pending = db.prepare("SELECT plan FROM mutations WHERE state!='published' LIMIT 1").get();
       const files = new PublicationFiles(this.config.root), plan: Plan | undefined = pending ? JSON.parse(String(pending.plan)) : undefined;
       const last = plan?.changes.at(-1);
-      const fallback = plan && files.identity() === plan.rootIdentity && last && files.read(last.backup, true) === last.before ? last.before : undefined;
+      const fallback = plan && files.identity() === plan.rootIdentity && last && files.read(last.backup, true, publicationRole(last.path)) === last.before ? last.before : undefined;
       this.identity(db, files, plan?.after, fallback);
       const scope = scopeKey(access.scope), offset = input.offset ?? 0, limit = input.limit ?? 50;
       const rows = db.prepare("SELECT sequence,id,provenance,at,path,revision,hash FROM history WHERE scope=? AND (? IS NULL OR id=?) ORDER BY sequence DESC LIMIT ? OFFSET ?").all(scope, input.id ?? null, input.id ?? null, limit + 1, offset);
@@ -677,15 +710,17 @@ export class KnowledgeStorage {
       return { git: this.gitStatus(db, scope), entries: rows.slice(0, limit) as unknown as { sequence: number; id: string; provenance: string; at: string; path: string; revision: number; hash: string }[], mutations: mutations.slice(0, limit), nextOffset: rows.length > limit || mutations.length > limit ? offset + limit : null };
     });
   }
-  revision(access: VaultAccess, sequence: number) {
+  revision(access: VaultAccess, sequence: number, input: { offset?: number; maxChars?: number } = {}) {
     this.history(access, { limit: 1 });
     const result = this.store.withDatabase(db => {
       const row = db.prepare("SELECT raw FROM history WHERE scope=? AND sequence=?").get(scopeKey(access.scope), sequence);
-      return { raw: row ? String(row.raw) : null };
+      if (!row) return { raw: null, content: null };
+      const page = textWindow(String(row.raw), input.offset, input.maxChars);
+      return { raw: page.text, content: page.content };
     });
     access.assertCurrent(); return result;
   }
-  mutation(access: VaultAccess, requestId: string, input: { includeFiles?: boolean; offset?: number; limit?: number } = {}) {
+  mutation(access: VaultAccess, requestId: string, input: { includeFiles?: boolean; offset?: number; limit?: number; charOffset?: number; maxChars?: number; contentField?: "before" | "proposed" | "displaced" } = {}) {
     this.history(access, { limit: 1 });
     const result = this.store.withDatabase(db => {
       const row = this.row(db, scopeKey(access.scope), requestId);
@@ -695,10 +730,16 @@ export class KnowledgeStorage {
         totalFiles: plan.changes.length - 1,
         nextOffset: input.includeFiles === false ? null : (input.offset ?? 0) + (input.limit ?? 3) < plan.changes.length - 1 ? (input.offset ?? 0) + (input.limit ?? 3) : null,
       } : {}),
-      files: (input.includeFiles === false ? [] : plan.changes.filter(c => c.path !== "vault.json").slice(input.offset ?? 0, (input.offset ?? 0) + (input.limit ?? 3))).map(c => ({
-        path: c.path.slice(plan.scope.length + 1), before: c.before, proposed: c.after,
-        displaced: files.read(c.backup, true),
-      })) };
+      files: (input.includeFiles === false ? [] : plan.changes.filter(c => c.path !== "vault.json").slice(input.offset ?? 0, (input.offset ?? 0) + (input.limit ?? 3))).map(c => {
+        const window = (raw: string | null, field: "before" | "proposed" | "displaced") => {
+          if (raw === null) return null;
+          const page = textWindow(raw, field === (input.contentField ?? "proposed") ? input.charOffset : 0, input.maxChars);
+          return { ...page, content: { ...page.content, hash: digest(raw) } };
+        };
+        const before = window(c.before, "before"), proposed = window(c.after, "proposed")!, displaced = window(files.read(c.backup, true, publicationRole(c.path)), "displaced");
+        return { path: c.path.slice(plan.scope.length + 1), before: before?.text ?? null, proposed: proposed.text,
+          displaced: displaced?.text ?? null, content: { before: before?.content ?? null, proposed: proposed.content, displaced: displaced?.content ?? null } };
+      }) };
     });
     access.assertCurrent(); return result;
   }

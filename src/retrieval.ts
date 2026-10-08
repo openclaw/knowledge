@@ -1,3 +1,4 @@
+import { SEARCH_HIGHLIGHT_MAX_BYTES } from "./limits.js";
 import { queryFreshness } from "./query-freshness.js";
 import { temporalPredicate } from "./temporal-query.js";
 import { observeLifecycleGuards } from "./lifecycle.js";
@@ -155,10 +156,24 @@ export function keywordSearch(db: DatabaseSync, data: Snapshot, input: SearchInp
     do { marker = randomUUID(); } while (selected.some(r => [r.title, r.body, ...(r.metadata.aliases ?? [])].some(v => v.includes(marker))));
     const total = Number(db.prepare(`SELECT count(*) AS n FROM ${corpus} WHERE ${corpus} MATCH ?`).get(expression)!.n);
     const rows = db.prepare(`SELECT id,bm25(${corpus},0,8,6,1) AS score,
-      highlight(${corpus},1,?,'') AS title, highlight(${corpus},2,?,'') AS aliases, highlight(${corpus},3,?,'') AS body
+      CASE WHEN length(CAST(body AS BLOB))<=${SEARCH_HIGHLIGHT_MAX_BYTES} THEN highlight(${corpus},1,?,'') END AS title,
+      CASE WHEN length(CAST(body AS BLOB))<=${SEARCH_HIGHLIGHT_MAX_BYTES} THEN highlight(${corpus},2,?,'') END AS aliases,
+      CASE WHEN length(CAST(body AS BLOB))<=${SEARCH_HIGHLIGHT_MAX_BYTES} THEN highlight(${corpus},3,?,'') END AS body
       FROM ${corpus} WHERE ${corpus} MATCH ? ORDER BY score,id LIMIT ? OFFSET ?`).all(marker, marker, marker, expression, limit, offset);
     const byId = new Map(selected.map(r => [r.id, r]));
+    // FTS5 highlight/snippet enumeration becomes quadratic with many repeated
+    // instances. Full-record matching and BM25 stay authoritative; large bodies
+    // use an explicitly labelled opening excerpt, not an approximate token match.
+    const fieldExpression = keywordExpression({ ...input, mode: input.mode === "phrase" ? "phrase" : "any" });
+    const columnMatch = db.prepare(`SELECT 1 FROM ${corpus} WHERE id=? AND ${corpus} MATCH ? LIMIT 1`);
     const hits = rows.map(row => {
+      if (row.body === null) {
+        const fields = (["title", "aliases", "body"] as const).filter(field => columnMatch.get(row.id!, `${field} : (${fieldExpression})`));
+        const field = fields.includes("body") ? "body" : fields[0] ?? "title";
+        const result = hit(byId.get(String(row.id))!, field, 0, fields, -Number(row.score));
+        result.snippet.matchLocated = false;
+        return result;
+      }
       const fields = (["title", "aliases", "body"] as const).filter(field => String(row[field]).includes(marker));
       const field = fields.includes("body") ? "body" : fields[0] ?? "title";
       return hit(byId.get(String(row.id))!, field, Math.max(0, String(row[field]).indexOf(marker)), fields, -Number(row.score));

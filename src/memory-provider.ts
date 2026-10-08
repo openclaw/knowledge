@@ -1,3 +1,5 @@
+import { RECORD_MAX_BYTES } from "./limits.js";
+import { withinBudget } from "./response-budget.js";
 import { memoryPrincipal, pinPrincipal, type VaultAccess } from "./access.js";
 import type { MemoryCitation, MemoryProviderRuntime, MemoryReference, MemorySearchRequest } from "./memory-provider-types.js";
 import type { StoreRuntime } from "./store-runtime.js";
@@ -70,7 +72,7 @@ export function createKnowledgeMemoryRuntime(stores: Stores): MemoryProviderRunt
           return {
             hits: result.hits.filter(h => request.minScore === undefined || (h.score !== null && h.score >= request.minScore)).map(h => ({
               reference: reference({ id: h.record.id, revision: h.citation.revision, hash: h.citation.hash }, vaultId),
-              excerpt: `${h.record.title}\n${attribution(h.assertionOrigin, h.attribution)}\n${h.snippet.text}`,
+              excerpt: `${h.record.title}\n${attribution(h.assertionOrigin, h.attribution)}\n${h.snippet.matchLocated === false ? "Opening excerpt (not the match location):\n" : ""}${h.snippet.text}`,
               ...(h.score === null ? {} : { score: h.score }), source: "memory",
               citations: [{ label: `${h.record.title} (${h.citation.path})`, reference: reference(h.citation, vaultId) }],
               // Evidence-backed is not synonymous with trusted automatic instruction/selection.
@@ -85,7 +87,7 @@ export function createKnowledgeMemoryRuntime(stores: Stores): MemoryProviderRunt
           if (request.reference.providerId !== "knowledge" || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{7,95}$/.test(request.reference.id) || request.reference.fragment !== undefined) throw Error("Invalid Knowledge record reference.");
           const [recordRevision, referenceStore] = request.reference.revision?.split("@") ?? [];
           if (request.reference.revision !== undefined && referenceStore !== vaultId) throw Error("This Knowledge reference belongs to a different store; search again.");
-          const from = integer(request.from, 1, 100000), count = integer(request.lines, 100, 200);
+          const from = integer(request.from, 1, RECORD_MAX_BYTES + 3), count = integer(request.lines, 100, 200);
           const found = await storage.call("memoryGet", guarded, { id: request.reference.id, ...(recordRevision !== undefined ? { revision: recordRevision } : {}), from, count });
           if (found.status !== "ok") return { status: "not_found" as const };
           const r = found.record, ref = reference(r, vaultId), nextFrom = from + found.lines;
@@ -98,9 +100,9 @@ export function createKnowledgeMemoryRuntime(stores: Stores): MemoryProviderRunt
           if (request.kind !== "trigger" && request.kind !== "project") throw Error("Knowledge candidates kind must be trigger or project.");
           if (request.activeProjectKeys?.length) throw Error("Knowledge relies on the host to apply project-key filtering.");
           const limit = integer(request.limit, 48, 200);
-          const records = await storage.call("memoryCandidates", guarded, { kind: request.kind, limit });
-          return {
-            hits: records.map(record => ({
+          const candidates = await storage.call("memoryCandidates", guarded, { kind: request.kind, limit });
+          const result = {
+            hits: candidates.records.map(record => ({
               reference: reference(record, vaultId),
               excerpt: record.recall.summary,
               source: "memory",
@@ -113,9 +115,13 @@ export function createKnowledgeMemoryRuntime(stores: Stores): MemoryProviderRunt
                 ...(record.recall.projects?.length ? { projectKeys: record.recall.projects } : {}),
               },
             })),
-            coverage: "complete" as const,
+            coverage: (candidates.complete ? "complete" : "partial") as "complete" | "partial",
+            warning: "Approved private candidates only; partial coverage means validation issues, the requested limit or the response budget omitted candidates.",
           };
-        }, () => ({ hits: [], coverage: "complete" as const })),
+          // References/citations add framing absent from the worker result.
+          while (!withinBudget(result) && result.hits.length) { result.hits.pop(); result.coverage = "partial"; }
+          return result;
+        }, () => ({ hits: [], coverage: "complete" as const, warning: "No approved private candidates in this unprovisioned store." })),
         health: async () => {
           const healthOnly = pinned.principal.healthOnly;
           try {

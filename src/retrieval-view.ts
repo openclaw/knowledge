@@ -47,7 +47,7 @@ export function searchResults(result: SearchOutput | LookupOutput, state: Search
   for (const hit of result.hits) {
     const item = el("article", undefined, "knowledge-search-hit"), control = button(hit.record.title, () => open(hit.record.id, detail));
     item.append(control, el("p", `${hit.record.kind} · ${hit.record.type} · ${hit.record.lifecycle}`, "knowledge-muted"), el("pre", hit.snippet.text, "knowledge-body"));
-    item.append(el("p", `Matched ${hit.matches.join(", ")}${hit.snippet.truncated ? " · excerpt" : ""}`), el("code", `${hit.citation.path}${hit.snippet.startLine !== null ? `:${hit.snippet.startLine}–${hit.snippet.endLine}` : ""} · revision ${hit.citation.revision}`));
+    item.append(el("p", `Matched ${hit.matches.join(", ")}${hit.snippet.matchLocated === false ? " · opening excerpt, not match location" : hit.snippet.truncated ? " · excerpt" : ""}`), el("code", `${hit.citation.path}${hit.snippet.startLine !== null ? `:${hit.snippet.startLine}–${hit.snippet.endLine}` : ""} · revision ${hit.citation.revision}`));
     const citation = el("details"); citation.append(el("summary", "Citation and source locators"), el("pre", `${hit.citation.id}\nSHA-256: ${hit.citation.hash}${hit.attribution ? `\n${hit.attribution}` : ""}`));
     for (const source of hit.evidence) citation.append(el("p", `${source.path}:${source.start_line}–${source.end_line}`));
     if (hit.evidenceTruncated) citation.append(el("p", "More evidence is available in the full record."));

@@ -22,7 +22,7 @@ const locator = Type.Object({ path: text(500), sha256: text(64), start_line: Typ
 const hit = Type.Object({
   record: Summary,
   citation: Type.Object({ id: text(96), path: text(500), revision: Type.Integer(), hash: text(64) }),
-  snippet: Type.Object({ field: Type.Union([Type.Literal("title"), Type.Literal("aliases"), Type.Literal("body")]), text: text(480), start: Type.Integer(), end: Type.Integer(), startLine: Type.Union([Type.Integer(), Type.Null()]), endLine: Type.Union([Type.Integer(), Type.Null()]), truncated: Type.Boolean() }),
+  snippet: Type.Object({ matchLocated: Type.Optional(Type.Boolean({ description: "False means a bounded opening excerpt, not the match location. Full-record matching and ranking are unchanged." })), field: Type.Union([Type.Literal("title"), Type.Literal("aliases"), Type.Literal("body")]), text: text(480), start: Type.Integer(), end: Type.Integer(), startLine: Type.Union([Type.Integer(), Type.Null()]), endLine: Type.Union([Type.Integer(), Type.Null()]), truncated: Type.Boolean() }),
   matches: Type.Array(text(20), { maxItems: 4 }),
   score: Type.Union([Type.Number(), Type.Null()]),
   attribution: text(1000), assertionOrigin: text(30),

@@ -78,6 +78,92 @@ without evidence/references to read the original file in bounded chunks.
 The browser explicitly requests rich metadata and evidence for inspection. These
 are response projections, not storage changes or permission to skip source review.
 
+## Durable capacity and bounded transport
+
+A complete record, including frontmatter, may occupy **5,000,000 UTF-8 bytes**.
+This is a storage ceiling, not a recommended profile size or tool-response budget.
+Save, annotation, recall, lifecycle, evidence reconciliation, guarded record reads
+and journal publication enforce the same limit. Leave headroom for revision and
+lifecycle metadata. Oversized changes fail without replacing the current record.
+Ontology/manifests, source descriptors, attachment chunks, batch requests and
+responses retain separate limits.
+
+A single save/claim/relationship body or body-edit replacement remains limited to
+48,000 characters. This is deliberately a bounded input, not the maximum stored
+body. Record content offsets count UTF-16 code units, not UTF-8 bytes; returned
+continuations preserve surrogate pairs. The complete record response stays within
+24 KiB. Runtime status exposes these limits independently of tool discovery.
+Automatic-recall project keys have an independent 500-character limit; candidate
+responses are byte/node-budgeted before and after provider adaptation. They report
+partial coverage when validation, requested limits or response budgets omit rows.
+Line-based provider reads accept continuations throughout the durable capacity.
+
+### Edit a small range in a large page
+
+Use knowledge_edit_body for an authorized active-page body change:
+- Read relevant knowledge_record content windows, checking a consistent hash.
+  Inspect surrounding context and source support; a local edit is not permission
+  to skip the semantic review required for entity synthesis.
+- Supply observed expectedVaultId, expectedRevision, expectedHash, and
+  expectedOntologyFingerprint, the record ID, a fresh mutation UUID and reason.
+- start is inclusive and end exclusive in the full **body**, not raw
+  frontmatter or a response chunk. Equal offsets insert; empty replacement deletes.
+  No fuzzy matching or automatic rebasing. Invalid ranges and broken Unicode fail.
+- Unchanged prose, metadata, evidence, source descriptors and other records remain.
+  The change publishes a normal revision with body_change audit metadata.
+- Retain the exact request. After uncertainty replay the identical UUID/payload.
+  After a stale-fence rejection, reread and reconcile before using a new UUID.
+
+Small edits use the existing publication journal and recovery, not a second writer
+or a server-side draft protocol. Each call is a complete revision. Incremental
+appends can grow a record, but are **not** a cheap bulk-upload mechanism: retained
+history and publication work still scale with the whole record. Use attachments
+for long source originals; capacity does not justify copying transcripts into profiles.
+Claims and relationships continue to use their explicit correction workflow.
+
+### Historical and recovery text
+
+knowledge_revision returns a bounded raw window and content with offset,
+totalChars and nextOffset. Continue with the same sequence and returned offset.
+knowledge_mutation retains file-list pagination separately. Keep that file
+offset fixed and use contentField (before/proposed/displaced; default proposed)
+and charOffset to continue the selected file text. Each field has its own
+content total/nextOffset/hash; compare hashes across windows and restart if changed.
+The other fields return their opening windows. Receipt-only checks still use
+includeFiles:false. A missing receipt is not proof an upload is absent.
+
+The UI loads additional notes only on request, reparses accumulated Markdown so
+comments/code fences survive page boundaries, and rejects mixed revisions. Shared
+memory line reads never silently skip an oversized line: they direct callers to
+character-paginated knowledge_record when a line cannot fit their transport.
+
+### Search on large records
+
+Full-record FTS matching, column matches, filters and BM25 ranking are unchanged.
+For bodies above 65,536 UTF-8 bytes, previews are bounded **opening excerpts**,
+not located match excerpts; snippet.matchLocated:false and the UI disclose this.
+This avoids the measured repeated-match cost of full-document FTS5 highlighting.
+Open the cited record and verify its hash to inspect content; do not treat the
+opening excerpt as proof of where a query matched. Smaller-record highlighting
+is unchanged.
+
+### Cost and limits of the measurement
+
+Run node --expose-gc scripts/measure-record-capacity.mjs after compilation.
+It uses synthetic isolated vaults, real Git publication and keyword indexes, never
+production profiles. On October 8, 2026 (Node 26.8.1), a roughly 4.95 MB repeated-
+paragraph record measured: cold scan 430 ms, warm scan 2.6 ms, small body edit with
+Git 952 ms, content read 193 ms, initial indexed search 73 ms, warm search 17 ms.
+Before bounding highlighting, that same search workload took approximately 23 s.
+Record/revision responses stayed near 13 KB; recovery response near 38 KB.
+
+These are individual local observations, not latency guarantees or a vault-scale
+benchmark. The process high-water RSS was about 422 MiB across the sequential run;
+the near-limit fixture's SQLite file reached about 85.5 MB after retained revisions,
+journal and index work. Full snapshots amplify storage and transient allocation.
+The new limit does not promise constant-cost edits, unlimited records, or efficient
+bulk transfer of multi-megabyte bodies. No caches or dependency upgrades were added.
+
 ## Drafts and publication are different
 
 One unsaved browser draft per authorized agent/vault/scope is retained in tab-local

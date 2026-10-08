@@ -1,3 +1,4 @@
+import { RECORD_MAX_BYTES, AUXILIARY_MAX_BYTES } from "./limits.js";
 import { hydrateMetadata, readSourceDescriptor, sourceDescriptorStamp } from "./source-records.js";
 import { queryFreshness } from "./query-freshness.js";
 import { readEvidence } from "./evidence-read.js";
@@ -46,7 +47,7 @@ type Overlay = { record?: LoadedRecord; records?: LoadedRecord[]; artifacts: Rec
 // Scope is selected by the service from trusted authority, never from operation inputs.
 export class SampleVault {
   constructor(private readonly root = SAMPLE_ROOT, private readonly scope: Scope = { visibility: "sample" }, private readonly empty = false, private readonly observe?: (records: LoadedRecord[], scope: Scope, evidence: EvidenceInspector) => void, private readonly cache?: ScanCache) {}
-  private read(relative: string) { return readText(this.root, relative); }
+  private read(relative: string) { return readText(this.root, relative, relative.endsWith(".md") ? RECORD_MAX_BYTES : AUXILIARY_MAX_BYTES); }
   /** Current catalog. Reuses the cached scan when no record, ontology or cited
    * file changed; otherwise scans, observes and caches a frozen result. Overlay
    * scans validate unpublished writes and are never cached. */
@@ -90,7 +91,7 @@ export class SampleVault {
     const sources: OntologySource[] = [await bundledOntology(issues)];
     let visited = 0;
     const add = (file: string, code: string, message: string) => issues.push({ path: file, code, message: message.slice(0, 1000) });
-    // Per-file size stays bounded by the guarded reader (64 KiB).
+    // Record and auxiliary sizes are independently bounded by the guarded reader.
     const read = async (file: string) => overlay?.artifacts[file] ?? await this.read(file);
     const walk = async (dir = "", depth = 0): Promise<void> => {
       if (depth > 8) throw Error("Vault directory depth exceeds 8");

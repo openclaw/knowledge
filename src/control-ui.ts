@@ -412,12 +412,37 @@ export default defineControlUiPlugin({
           })().catch(error => { if (live(n)) versions.append(failure(error)); }));
         }
         const body = el("div", undefined, "knowledge-summary"), bodyText = withoutTitleHeading(r.body ?? "", r.title);
-        body.append(markdownView(bodyText, targetId => {
+        let notesText = r.body ?? "", notesLinks = result.links ?? [];
+        const navigateNotes = (targetId: string) => {
           if (targetId !== id) { open(targetId); return; }
           files.open = true;
           const originals = files.querySelector<HTMLDetailsElement>(".knowledge-retained-originals");
           if (originals) { originals.open = true; originals.scrollIntoView({ block: "nearest" }); }
-        }, result.links));
+        };
+        let renderedNotes = markdownView(bodyText, navigateNotes, notesLinks);
+        body.append(renderedNotes);
+        // Fetch only an explicitly requested next window; reject mixed revisions.
+        if (result.content.nextOffset !== null) {
+          let next = result.content.nextOffset;
+          const more = button("Read more notes", async () => {
+            more.disabled = true;
+            try {
+              const page = await feature.invoke("record", { id, offset: next, metadataView: "none", maxChars: 65536 });
+              if (!live(n) || !body.isConnected) return;
+              if (page.record?.hash !== r.hash) throw Error("Record changed; reopen it before reading more notes.");
+              // Reparse the accumulated source: comments, code fences and links
+              // may span transport windows and must not become separate documents.
+              notesText += page.record.body ?? "";
+              notesLinks = [...new Map([...notesLinks, ...(page.links ?? [])].map(link => [link.href, link])).values()];
+              const rendered = markdownView(withoutTitleHeading(notesText, r.title), navigateNotes, notesLinks);
+              renderedNotes.replaceWith(rendered); renderedNotes = rendered;
+              if (page.content.nextOffset === null) { more.remove(); progress.remove(); }
+              else { next = page.content.nextOffset; more.disabled = false; }
+            } catch (error) { if (live(n)) { body.append(failure(error)); more.disabled = false; } }
+          }, "knowledge-quiet");
+          const progress = el("p", "Showing part of this record. Load the next part to continue.", "knowledge-muted");
+          body.append(progress, more);
+        }
         // Long agent-written notes preview behind a disclosure so structured
         // sections (attendance, claims) stay near the top of the page.
         if (bodyText.length > longBodyChars) { const notes = el("details", undefined, "knowledge-notes-toggle"), summary = el("summary"); notes.dataset.readingKey = `notes:${id}`; summary.append(disclosureLabel("Show full notes", "Show less")); notes.append(summary); body.dataset.clamped = "true"; body.append(notes); }
@@ -812,7 +837,7 @@ export default defineControlUiPlugin({
           searchSnapshot = result.index.snapshot;
           const list = el("div", undefined, "knowledge-surface"); list.append(el("p", `${result.total} matches · Ranked text search, not a complete inventory`, "knowledge-list-note"));
           if (!result.coverage.complete) list.append(el("p", result.coverage.message, "knowledge-notice"));
-          for (const hit of result.hits) { const row = el("article", undefined, "knowledge-search-hit"); row.append(summaryLink(hit.record), el("p", hit.snippet.text), el("small", `Revision ${hit.citation.revision} · ${hit.citation.path}`)); list.append(row); }
+          for (const hit of result.hits) { const row = el("article", undefined, "knowledge-search-hit"); row.append(summaryLink(hit.record), el("p", hit.snippet.text), el("small", `${hit.snippet.matchLocated === false ? "Opening excerpt · " : ""}Revision ${hit.citation.revision} · ${hit.citation.path}`)); list.append(row); }
           if (!result.total) list.append(empty("No matches", "Try another name or phrase, or browse by type."));
           const pages = el("div", undefined, "knowledge-pagination"); if (offset) pages.append(button("Previous", () => { offset = Math.max(0, offset - 20); void load(); })); if (result.nextOffset !== null) { const next = button("Next", () => { offset = result.nextOffset!; void load(); }); next.disabled = result.nextOffset > 500; pages.append(next); if (next.disabled) list.append(el("p", "This server cannot page beyond 520 search results. Refine your query to see more.", "knowledge-notice")); } list.append(pages); target.replaceChildren(list);
           })();

@@ -1,3 +1,4 @@
+import { RECORD_MAX_BYTES, BODY_INPUT_MAX_CHARS, TEXT_PAGE_MAX_CHARS, RECORD_RESPONSE_MAX_BYTES } from "./limits.js";
 import { queryFreshness } from "./query-freshness.js";
 import { createHash, randomUUID } from "node:crypto";
 import { Check } from "typebox/value";
@@ -19,7 +20,7 @@ import type { StorageOperations } from "./storage-host.js";
 
 type Handlers = FeatureHandlers<typeof contract>;
 type StoreHandlers = Omit<Handlers, "stores_snapshot" | "stores_change" | "stores_change_status" | "agent_query" | "agent_action">;
-const WRITE_TOOLS = ["knowledge_reconcile_evidence", "knowledge_save_page", "knowledge_correct", "knowledge_withdraw", "knowledge_recall"];
+const WRITE_TOOLS = ["knowledge_edit_body", "knowledge_reconcile_evidence", "knowledge_save_page", "knowledge_correct", "knowledge_withdraw", "knowledge_recall"];
 const chatOnly = () => Error("Knowledge changes must be requested through chat and agent tools.");
 const operatorOnly = () => Error("Selecting an agent's store is an operator inspection; it is not available to agent tools.");
 
@@ -96,6 +97,7 @@ export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureE
       publish_batch: agentChange("batch"),
       annotate: agentChange("annotate"),
       reconcile_evidence: agentChange("reconcileEvidence"),
+      edit_body: agentChange("editBody"),
       timeline: (input, context) => call("timeline", false, () => emptyChronicle(input))(input, context),
       chronicle_day: (input, context) => call("chronicleDay", false, () => {
         const { date: _date, timezone: _zone, week: _week, ...filters } = input;
@@ -133,12 +135,12 @@ export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureE
       },
       connections: call("connections"),
       resume: (input, context) => use(context, true, (runtime, access) => runtime.client.call("resume", access, { requestId: input.requestId })),
-      revision: (input, context) => use(context, false, (runtime, access) => runtime.client.call("revision", access, { sequence: input.sequence })),
+      revision: (input, context) => use(context, false, (runtime, access) => runtime.client.call("revision", access, input)),
       mutation: call("mutation"),
       history: call("history", false, () => ({ entries: [], mutations: [], nextOffset: null, git: { state: "idle" as const, pending: 0, message: "Nothing saved here yet." } })),
       status: async (_, context) => {
         const opened = await stores.open(featurePrincipal(context, policy.operatorRead, false, agent ?? stores.defaultAgent()), { provision: false }, stores.incarnation);
-        const base = { service: "knowledge" as const, phase: policy.writesEnabled ? "structured-writes" as const : "read-only-explorer" as const, backendRevision: "memory-provider-v2-2+stores-v1+ergonomics-v1", instanceId, startedAt };
+        const base = { service: "knowledge" as const, phase: policy.writesEnabled ? "structured-writes" as const : "read-only-explorer" as const, backendRevision: "memory-provider-v2-2+stores-v1+capacity-v1", instanceId, startedAt, limits: { recordBytes: RECORD_MAX_BYTES, bodyInputChars: BODY_INPUT_MAX_CHARS, textPageChars: TEXT_PAGE_MAX_CHARS, recordResponseBytes: RECORD_RESPONSE_MAX_BYTES } };
         const notReady = (agentId: string, store: Exclude<StoreState, "ready">, message: string) => ({ ...base, checkedAt: now(), vault: "", agent: agentId, store, scope: "private", writesEnabled: false, live: "stopped" as const,
           records: 0, validRecords: 0, definitions: 0, ontologyAvailable: false, ontologyFingerprint: "", issues: 0, message: message.slice(0, 300) });
         if (opened.kind !== "ready") return notReady(opened.agentId, opened.kind, opened.message);

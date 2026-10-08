@@ -1,3 +1,4 @@
+import { withinBudget } from "./response-budget.js";
 import type { MessagePort } from "node:worker_threads";
 import { KnowledgeStorage } from "./storage.js";
 import { inspectRecord, inspectOntology } from "./inspection.js";
@@ -23,6 +24,7 @@ export const operations = {
   verify: (s: Storage, a: Access, input: In<Storage["verify"]>) => s.verify(input, a),
   sourceCheck: (s: Storage, a: Access, input: In<Storage["sourceCheck"]>) => s.sourceCheck(input, a),
   batch: (s: Storage, a: Access, input: In<Storage["batch"]>) => s.batch(input, a, "agent"),
+  editBody: (s: Storage, a: Access, input: In<Storage["editBody"]>) => s.editBody(input, a),
   reconcileEvidence: (s: Storage, a: Access, input: In<Storage["reconcileEvidence"]>) => s.reconcileEvidence(input, a),
   annotate: (s: Storage, a: Access, input: In<Storage["annotate"]>) => s.annotate(input, a, "agent"),
   timeline: (s: Storage, a: Access, input: In<Storage["timeline"]>) => s.timeline(input, a),
@@ -39,7 +41,7 @@ export const operations = {
   recall: (s: Storage, a: Access, input: In<Storage["recall"]>) => s.recall(input, a, "agent"),
   connections: (s: Storage, a: Access, input: In<Storage["connections"]>) => s.connections(input, a),
   resume: (s: Storage, a: Access, input: { requestId: string }) => s.resume(a, input.requestId),
-  revision: (s: Storage, a: Access, input: { sequence: number }) => s.revision(a, input.sequence),
+  revision: (s: Storage, a: Access, input: { sequence: number; offset?: number; maxChars?: number }) => s.revision(a, input.sequence, input),
   mutation: (s: Storage, a: Access, input: Parameters<Storage["mutation"]>[2] & { requestId: string }) => s.mutation(a, input.requestId, input),
   history: async (s: Storage, a: Access, input: Parameters<Storage["history"]>[1]) => { await s.initialize(a); return s.history(a, input); },
   search: (s: Storage, a: Access, input: In<Storage["search"]>) => s.search(input, a),
@@ -62,7 +64,14 @@ export const operations = {
     if (input.revision !== undefined && input.revision !== revision(r)) throw Error("Knowledge record changed; search again before reading this revision.");
     const text = `# ${r.title}\n${attribution(r.metadata.assertion_origin, r.metadata.attribution)}\n${r.body}`;
     const all = text.split("\n"), chunk = all.slice(input.from - 1, input.from - 1 + input.count);
-    return { status: "ok" as const, record: { id: r.id, title: r.title, path: r.path, revision: r.revision, hash: r.hash }, evidence: (r.metadata.evidence ?? []).slice(0, 20), text: chunk.join("\n"), lines: chunk.length, total: all.length };
+    const result = { status: "ok" as const, record: { id: r.id, title: r.title, path: r.path, revision: r.revision, hash: r.hash }, evidence: (r.metadata.evidence ?? []).slice(0, 20), text: chunk.join("\n"), lines: chunk.length, total: all.length };
+    // Line counts alone cannot bound a single very large paragraph. Never skip its tail.
+    while (!withinBudget(result) && result.evidence.length) result.evidence.pop();
+    while (!withinBudget(result) && chunk.length > 1) {
+      chunk.pop(); result.text = chunk.join("\n"); result.lines = chunk.length;
+    }
+    if (!withinBudget(result)) throw Error("Memory line exceeds transport budget; use knowledge_record with content offsets to read this record without losing text.");
+    return result;
   }),
   memoryCandidates: (s: Storage, a: Access, input: { kind: "trigger" | "project"; limit: number }) => s.memoryCandidates(input, a),
   memoryHealth: (s: Storage, a: Access) => s.run(a, async vault => {
