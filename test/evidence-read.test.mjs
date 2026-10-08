@@ -223,6 +223,11 @@ test('private and conversation passages cannot share access or continuation curs
     const target = path.join(scopeRoot, relative);
     await mkdir(path.dirname(target), { recursive: true }); await writeFile(target, bytes);
   }
+  // A digest is not authority: the receiving partition must retain its descriptor too.
+  await assert.rejects(f.service.evidence_read(input, group), /unavailable/i);
+  const descriptorPath = `artifacts/sources/${evidence.source}.json`;
+  await mkdir(path.join(scopeRoot, "artifacts/sources"), { recursive: true });
+  await writeFile(path.join(scopeRoot, descriptorPath), await readFile(path.join(f.root, "private", descriptorPath)));
   assert.equal((await f.service.evidence_read(input, group)).text, first.text);
   await assert.rejects(f.service.evidence_read({ ...input, cursor: first.nextCursor }, group), /cursor/i);
 });
@@ -307,7 +312,7 @@ test('missing optional filename uses a retained basename longer than 200 charact
   // permit longer basenames. Construct that valid legacy source in the temp vault.
   const filename = 'legacy-'.repeat(32) + '.txt';
   assert.ok(filename.length > 200 && Buffer.byteLength(filename) <= 255);
-  const { filename: omitted, ...evidence } = uploaded;
+  const { filename: omitted, source: originalSource, ...evidence } = uploaded;
   assert.equal(omitted, 'source.txt');
   evidence.path = path.posix.join(path.posix.dirname(uploaded.path), filename);
   await rename(path.join(f.root, 'private', uploaded.path), path.join(f.root, 'private', evidence.path));
@@ -339,7 +344,7 @@ test('annotation-only identity and attribution sources are readable', async t =>
 
 test('ranged UTF-8 sources need no recognized extension or media type', async t => {
   const f = await fixture(t), uploaded = await upload(f, 'first\nsecond\nthird');
-  const { filename, mediaType, ...evidence } = uploaded;
+  const { filename, mediaType, source: originalSource, ...evidence } = uploaded;
   evidence.path = path.posix.join(path.posix.dirname(uploaded.path), 'transcript');
   evidence.start_line = 1; evidence.end_line = 2;
   await rename(path.join(f.root, 'private', uploaded.path), path.join(f.root, 'private', evidence.path));

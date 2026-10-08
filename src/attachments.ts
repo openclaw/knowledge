@@ -1,3 +1,5 @@
+import { describeSource, expandEvidence } from "./source-descriptors.js";
+import { readSourceDescriptor } from "./source-records.js";
 import * as fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
@@ -34,6 +36,7 @@ export function attachChunk(db: DatabaseSync, root: string, scope: string, input
   }
   if (row.receipt) {
     const receipt = JSON.parse(String(row.receipt)) as AttachOutput;
+    expandEvidence(receipt.evidence!, p => readSourceDescriptor(path.join(root, scope), p));
     inspectEvidence(path.join(root, scope), receipt.evidence!);
     return receipt;
   }
@@ -70,6 +73,13 @@ export function attachChunk(db: DatabaseSync, root: string, scope: string, input
   // Only our staging names are removed. Existing destinations must hash-match.
   fs.unlinkSync(staging); fs.rmdirSync(stageDir); files.sync(path.dirname(destination));
   inspectEvidence(path.join(root, scope), evidence);
+  // Install the immutable descriptor before discarding recoverable upload bytes.
+  const source = describeSource(evidence), descriptorPath = `${scope}/${source.path}`;
+  files.publish({ path: descriptorPath, before: null, after: source.raw,
+    backup: `${scope}/artifacts/${input.requestId}/.descriptor-before`,
+    stage: `${scope}/artifacts/${input.requestId}/.descriptor-stage` }, stage => hook(`attachment-descriptor-${stage}`));
+  evidence.source = source.id;
+  expandEvidence(evidence, p => readSourceDescriptor(path.join(root, scope), p));
   hook("attachment-before-receipt");
   const receipt: AttachOutput = { requestId: input.requestId, state: "complete", receivedBytes: Number(row.received), evidence };
   db.prepare("UPDATE attachment_uploads SET receipt=? WHERE scope=? AND request=?").run(JSON.stringify(receipt), scope, input.requestId);

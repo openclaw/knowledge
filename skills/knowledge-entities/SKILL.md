@@ -140,6 +140,25 @@ After saving, verify both the intended change and the unchanged facts,
 qualifications and user assessments. On a no-op, verify the existing record and
 source coverage; no new revision is required to prove work was done.
 
+## Reconcile evidence associations
+
+Use returned resolved evidence as-is, including its `source` ID. Source descriptors
+are shared within the authorized vault scope; do not re-upload originals or invent
+IDs to reduce profile size. Retain passage ranges, quotes and attribution.
+
+When an authorized repair requires replacing the current evidence set, read the
+complete State, Timeline and annotation support first. Use
+`knowledge_reconcile_evidence` with a reason, exact vault/ontology/revision/hash
+fences and the reviewed complete `evidence` set. Preview with `dryRun: true`;
+apply with `dryRun: false` only after inspecting the result. Preserve historical
+Timeline support even if it is absent from State. Annotation support is retained
+automatically. Removing an association does not delete originals or history.
+
+For an explicitly requested representation migration, omit `evidence` and select
+`representation: compact` or `expanded`. Do not migrate or save a no-op profile
+merely to produce a receipt. After a change, verify the complete body, unchanged
+metadata, retained evidence and published revision/hash.
+
 ## Page structure
 
 ### Entity-focused synthesis gate

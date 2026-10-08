@@ -1,3 +1,4 @@
+import { hydrateMetadata, readSourceDescriptor, sourceDescriptorStamp } from "./source-records.js";
 import { queryFreshness } from "./query-freshness.js";
 import { readEvidence } from "./evidence-read.js";
 import { EvidenceReadInput } from "./evidence-read-contract.js";
@@ -34,7 +35,7 @@ export function sameScope(a: unknown, b: Scope): boolean {
 
 export type ScanResult = { records: LoadedRecord[]; ontology: ReturnType<typeof resolveOntology>; sources: OntologySource[]; issues: Issue[]; checkedAt: string };
 /** One record file's parse, valid while the file keeps `stamp`. */
-type ParsedFile = { stamp: string; record?: LoadedRecord; issue?: string };
+type ParsedFile = { stamp: string; descriptors: Map<string, string>; record?: LoadedRecord; issue?: string };
 /** Holds one scope's scan state. The owner (RealVault) keeps it across operations.
  * `entry` is the whole last scan, reused only while every file the scan read
  * still has its stamp. `files` and `evidence` are per-file results, so a change
@@ -53,7 +54,7 @@ export class SampleVault {
     if (overlay || !this.cache || this.empty) return (await this.load(overlay)).data;
     // Stamp before reading so a change during the scan forces the next rescan.
     const tree = this.treeStamp(), hit = this.cache.entry;
-    if (tree && hit?.tree === tree && [...hit.evidence].every(([file, stamp]) => fileStamp(this.root, file) === stamp)) return hit.data;
+    if (tree && hit?.tree === tree && [...hit.evidence].every(([file, stamp]) => settledStamp(stamp) && (file.startsWith("artifacts/sources/") ? sourceDescriptorStamp(this.root, file) : fileStamp(this.root, file)) === stamp)) return hit.data;
     const { data, evidence } = await this.load();
     if (tree) this.cache.entry = { tree, evidence: evidence.stamps, data: freeze(data) };
     else this.cache.entry = undefined;
@@ -82,8 +83,8 @@ export class SampleVault {
     const issues: Issue[] = [];
     // One read per retained file for this scan; observation reuses the same checks.
     if (this.cache) { this.cache.files ??= new Map(); this.cache.evidence ??= new Map(); }
-    const evidence = new EvidenceInspector(this.root, this.cache?.evidence);
-    const parsed = this.cache?.files, seen = new Set<string>();
+    const evidence = new EvidenceInspector(this.root, overlay ? undefined : this.cache?.evidence);
+    const parsed = overlay ? undefined : this.cache?.files, seen = new Set<string>();
     const directory = this.empty ? null : await safeRoot(this.root);
     const records: LoadedRecord[] = [];
     const sources: OntologySource[] = [await bundledOntology(issues)];
@@ -111,13 +112,18 @@ export class SampleVault {
           // taken before reading, so a change during the read forces a reparse.
           seen.add(file);
           const stamp = fileStamp(this.root, file), known = parsed?.get(file);
-          if (known && known.stamp === stamp && settledStamp(stamp)) {
+          if (known && known.stamp === stamp && settledStamp(stamp) && [...known.descriptors].every(([p, s]) => settledStamp(s) && sourceDescriptorStamp(this.root, p) === s)) {
+            for (const [p, s] of known.descriptors) evidence.stamps.set(p, s);
             if (known.record) records.push({ ...known.record });
             else add(file, "invalid-record", known.issue!);
             continue;
           }
           // Cache only deterministic outcomes of settled files; a failed read is retried.
-          const remember = (value: Omit<ParsedFile, "stamp">) => { if (settledStamp(stamp)) parsed?.set(file, { stamp, ...value }); else parsed?.delete(file); };
+          const descriptors = new Map<string, string>();
+          const remember = (value: Omit<ParsedFile, "stamp" | "descriptors">) => {
+            if (settledStamp(stamp) && [...descriptors.values()].every(s => settledStamp(s))) parsed?.set(file, { stamp, descriptors, ...value });
+            else parsed?.delete(file);
+          };
           let raw: string;
           try { raw = await read(file); }
           catch (e) {
@@ -128,7 +134,7 @@ export class SampleVault {
           try {
             const match = /^(?:\uFEFF)?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(raw);
             if (!match) throw Error("Expected a closed YAML frontmatter block");
-            const metadata = parseYaml(match[1]);
+            let metadata = parseYaml(match[1]);
             // A moved/mislabeled record cannot acquire the containing partition's authority.
             const candidate = metadata && typeof metadata === "object" ? (metadata as { scope?: unknown }).scope : undefined;
             if (!sameScope(candidate, this.scope)) {
@@ -136,6 +142,16 @@ export class SampleVault {
               remember({ issue }); add(file, "invalid-record", issue);
               continue;
             }
+            metadata = hydrateMetadata(metadata, p => {
+              const stamp = sourceDescriptorStamp(this.root, p);
+              descriptors.set(p, stamp); evidence.stamps.set(p, stamp);
+              try { return overlay?.artifacts[p] ?? readSourceDescriptor(this.root, p); }
+              catch (error) {
+                // An I/O failure is not a permanent malformed-record verdict.
+                descriptors.set(p, "error:descriptor-read"); evidence.stamps.set(p, "error:descriptor-read");
+                throw error;
+              }
+            });
             if (!Check(Envelope, metadata)) throw Error("Record envelope is invalid");
             const record: LoadedRecord = { id: metadata.id, title: metadata.title, kind: metadata.kind, type: metadata.type ?? metadata.label ?? metadata.claim_kind ?? "", path: file, revision: metadata.revision, lifecycle: metadata.lifecycle, valid: true, metadata: parsed ? freeze(metadata) : metadata, body: raw.slice(match[0].length), raw, hash: digest(raw) };
             // Cache a pristine copy (metadata frozen, shared by later scans):

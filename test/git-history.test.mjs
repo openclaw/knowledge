@@ -34,7 +34,9 @@ test('default repository, exact grouped content, clean index, actor, and one com
   const saved = await f.service.save(input, f.access, 'operator');
   assert.ok(Check(Receipt, saved)); assert.equal(saved.git.state, 'committed', JSON.stringify(saved));
   assert.equal(git(f.root, 'rev-list', '--count', 'HEAD'), '1');
-  assert.deepEqual(git(f.root, 'ls-tree', '-r', '--name-only', 'HEAD').split('\n').sort(), [`private/${saved.path}`, `private/artifacts/${input.requestId}.txt`].sort());
+  const sourceId = (await f.read(saved.id)).metadata.evidence[0].source;
+  assert.match(sourceId, /^[a-f0-9]{64}$/);
+  assert.deepEqual(git(f.root, 'ls-tree', '-r', '--name-only', 'HEAD').split('\n').sort(), [`private/${saved.path}`, `private/artifacts/${input.requestId}.txt`, `private/artifacts/sources/${sourceId}.json`].sort());
   assert.equal(execFileSync('git', ['-C', f.root, 'show', `HEAD:private/${saved.path}`], {encoding:'utf8'}), await readFile(path.join(f.root, 'private', saved.path), 'utf8'));
   assert.equal(git(f.root, 'diff', '--cached', '--name-only'), '');
   assert.match(git(f.root, 'log', '-1', '--format=%B'), /operator/);

@@ -19,7 +19,7 @@ import type { StorageOperations } from "./storage-host.js";
 
 type Handlers = FeatureHandlers<typeof contract>;
 type StoreHandlers = Omit<Handlers, "stores_snapshot" | "stores_change" | "stores_change_status" | "agent_query" | "agent_action">;
-const WRITE_TOOLS = ["knowledge_save_page", "knowledge_correct", "knowledge_withdraw", "knowledge_recall"];
+const WRITE_TOOLS = ["knowledge_reconcile_evidence", "knowledge_save_page", "knowledge_correct", "knowledge_withdraw", "knowledge_recall"];
 const chatOnly = () => Error("Knowledge changes must be requested through chat and agent tools.");
 const operatorOnly = () => Error("Selecting an agent's store is an operator inspection; it is not available to agent tools.");
 
@@ -95,6 +95,7 @@ export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureE
       source_check: call("sourceCheck"),
       publish_batch: agentChange("batch"),
       annotate: agentChange("annotate"),
+      reconcile_evidence: agentChange("reconcileEvidence"),
       timeline: (input, context) => call("timeline", false, () => emptyChronicle(input))(input, context),
       chronicle_day: (input, context) => call("chronicleDay", false, () => {
         const { date: _date, timezone: _zone, week: _week, ...filters } = input;

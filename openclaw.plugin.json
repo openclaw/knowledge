@@ -48,9 +48,9 @@
     "onStartup": true
   },
   "controlUi": {
-    "entry": "dist/control-ui/34f547aa8ad335a21f7cee8c494f5eef5e068207bdabd6b35f223add0e5f745a/index.js",
+    "entry": "dist/control-ui/ae9a232b98f1a7545bd9fbd4596fe53918ce30d5f22ad130dcd8b35c9f0861a6/index.js",
     "styles": [
-      "dist/control-ui/34f547aa8ad335a21f7cee8c494f5eef5e068207bdabd6b35f223add0e5f745a/index.css"
+      "dist/control-ui/ae9a232b98f1a7545bd9fbd4596fe53918ce30d5f22ad130dcd8b35c9f0861a6/index.css"
     ]
   },
   "skills": [
@@ -77,6 +77,7 @@
       "knowledge_ontology",
       "knowledge_publish_batch",
       "knowledge_recall",
+      "knowledge_reconcile_evidence",
       "knowledge_record",
       "knowledge_records",
       "knowledge_resume",

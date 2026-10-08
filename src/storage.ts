@@ -1,3 +1,6 @@
+import { ReconcileEvidenceInput, type EvidencePreview } from "./evidence-reconciliation-contract.js";
+import { prepareEvidenceRevision } from "./evidence-reconciliation.js";
+import { encodeRecordEvidence, readSourceDescriptor, recordSourceDependencies } from "./source-records.js";
 import { EvidenceReadInput } from "./evidence-read-contract.js";
 import { chronicle } from "./chronicle.js";
 import { TimelineInput, DayInput, LastSeenInput, LastSeenOutput, SinceInput } from "./chronicle-contract.js";
@@ -39,8 +42,8 @@ export const scopeKey = (scope: Scope) => scope.visibility === "conversation" ? 
 const blocked = () => Error("Knowledge publication pending or conflicted; inspect mutation history and retry the original request. No partial catalog returned.");
 // `agentId` is the writing agent, fixed at acceptance so a resumed publication
 // keeps its original author whoever resumes it.
-type Plan = { activity?: ActivityOrigin; rootIdentity: string; before: Manifest; after: Manifest; changes: FileChange[]; actor: string; agentId?: string; scope: string; record: LoadedRecord; records?: LoadedRecord[]; source?: SourceIdentity };
-type Prepared = { record: LoadedRecord; artifacts: Record<string, string>; previous?: LoadedRecord; data: Awaited<ReturnType<SampleVault["scan"]>>; snapshot: string; additional?: { before?: LoadedRecord; after: LoadedRecord }[]; batch?: { items: NonNullable<Receipt["items"]>; source?: SourceIdentity; expectedPreviousRequestId?: string }; lifecycle?: CorrectInput | WithdrawInput; annotation?: boolean; metadataOnly?: boolean; annotationEvidence?: import("./model.js").Evidence[] };
+type Plan = { descriptors?: Record<string, string>; activity?: ActivityOrigin; rootIdentity: string; before: Manifest; after: Manifest; changes: FileChange[]; actor: string; agentId?: string; scope: string; record: LoadedRecord; records?: LoadedRecord[]; source?: SourceIdentity };
+type Prepared = { requiredDescriptors?: Record<string, string>; record: LoadedRecord; artifacts: Record<string, string>; previous?: LoadedRecord; data: Awaited<ReturnType<SampleVault["scan"]>>; snapshot: string; additional?: { before?: LoadedRecord; after: LoadedRecord }[]; batch?: { items: NonNullable<Receipt["items"]>; source?: SourceIdentity; expectedPreviousRequestId?: string }; lifecycle?: CorrectInput | WithdrawInput; annotation?: boolean; metadataOnly?: boolean; annotationEvidence?: import("./model.js").Evidence[] };
 type Row = { scope: string; request: string; intent: string; state: Receipt["state"]; plan: string; receipt: string };
 export type PublicationHook = (stage: string) => void;
 
@@ -278,7 +281,8 @@ export class KnowledgeStorage {
       }
       const records = parts.map(p => p.record);
       if (new Set(records.map(r => r.path)).size !== records.length) throw Error("Batch record path collision.");
-      const preview = await vault.scan({ records, artifacts: {} });
+      const artifacts = Object.assign({}, ...parts.map(p => p.artifacts)) as Record<string, string>;
+      const preview = await vault.scan({ records, artifacts });
       const active = this.store.withDatabase(db => eligible(preview, withdrawnIds(db, this.retrievalBinding(access)), false));
       for (const record of records) {
         if (!record.valid) throw Error("Batch validation failed for " + input.items[records.indexOf(record)].key + ": " + preview.issues.filter(i => i.path === record.path).map(i => i.code).join(", "));
@@ -287,10 +291,42 @@ export class KnowledgeStorage {
       }
       if (input.source && !records.some(r => r.metadata.evidence?.some(e => e.sha256 === input.source!.sha256))) throw Error("Source hash must match retained evidence on a batch record.");
       if (new PublicationFiles(this.config.root).snapshot(scope) !== snapshot) throw Error("Edit conflict: vault changed during batch validation.");
-      return { ...parts[0], additional: parts.slice(1).map(p => ({ before: p.previous, after: p.record })),
+      return { ...parts[0], artifacts, requiredDescriptors: Object.assign({}, ...parts.map(p => p.requiredDescriptors ?? {})), additional: parts.slice(1).map(p => ({ before: p.previous, after: p.record })),
         batch: { items: records.map((r, n) => ({ key: input.items[n].key, id: r.id, path: r.path, revision: r.revision, hash: r.hash })), source: input.source, expectedPreviousRequestId: input.expectedPreviousRequestId } };
     });
     return this.accept(input.requestId, intent, prepared, access, actor);
+  }
+  /** Preview or publish one explicit support/representation revision without source deletion. */
+  async reconcileEvidence(input: ReconcileEvidenceInput, access: VaultAccess): Promise<EvidencePreview | Receipt> {
+    if (!Check(ReconcileEvidenceInput, input) || !input.reason.trim()) throw Error("Invalid evidence reconciliation input.");
+    access.assertCurrent();
+    if (!this.config.writesEnabled) throw Error("Knowledge writes are disabled.");
+    if (input.expectedVaultId !== this.config.vaultId) throw Error("Connected vault changed; no publication accepted.");
+    await this.initialize(access);
+    const scope = scopeKey(access.scope), intent = digest(canonical({ operation: "reconcileEvidence", input }));
+    const prior = this.store.withDatabase(db => this.row(db, scope, input.requestId));
+    if (prior) { this.checkReplay(prior, intent); return this.resume(access, input.requestId); }
+    this.assertReadable();
+    const prepared = await this.real.run(access, async vault => {
+      const snapshot = new PublicationFiles(this.config.root).snapshot(scope), data = await vault.scan();
+      if (data.ontology?.fingerprint !== input.expectedOntologyFingerprint) throw Error("Ontology changed; inspect before reconciling evidence.");
+      const matches = data.records.filter(r => r.id === input.id);
+      if (matches.length !== 1) throw Error("Evidence reconciliation target unavailable or ambiguous.");
+      const previous = matches[0];
+      const encoded = prepareEvidenceRevision(previous, input, p => readSourceDescriptor(path.join(this.config.root, scope), p));
+      const preview = await vault.scan({ record: encoded.record, artifacts: encoded.descriptors });
+      if (!encoded.record.valid) throw Error("Evidence reconciliation validation failed: " + preview.issues.filter(i => i.path === previous.path).map(i => i.code).join(", "));
+      if (new PublicationFiles(this.config.root).snapshot(scope) !== snapshot) throw Error("Edit conflict: vault changed during validation.");
+      return { previous, record: encoded.record, data, snapshot, artifacts: encoded.descriptors, requiredDescriptors: encoded.requiredDescriptors, metadataOnly: true,
+        annotationEvidence: [...(encoded.record.metadata.evidence ?? []), ...annotationEvidence(encoded.record.metadata)] };
+    });
+    // Preview does not write descriptors or a mutation row. Apply always revalidates fences.
+    access.assertCurrent();
+    if (input.dryRun) return { state: "preview", id: input.id, revision: prepared.previous.revision, hash: prepared.previous.hash,
+      beforeBytes: Buffer.byteLength(prepared.previous.raw), afterBytes: Buffer.byteLength(prepared.record.raw),
+      beforeEvidence: prepared.previous.metadata.evidence?.length ?? 0, afterEvidence: prepared.record.metadata.evidence?.length ?? 0,
+      descriptors: Object.keys(prepared.artifacts).length, representation: input.representation };
+    return this.accept(input.requestId, intent, prepared, access, input.evidence === undefined ? "conversion" : "agent");
   }
   async annotate(input: AnnotateInput, access: VaultAccess, actor: string): Promise<Receipt> {
     if (!Check(AnnotateInput, input) || !input.reason.trim() || (!Object.keys(input.annotations).length && !input.addEvidence?.length)) throw Error("Invalid annotation input.");
@@ -319,10 +355,11 @@ export class KnowledgeStorage {
       doc.set("annotation_change", { reason: input.reason, actor, request_id: input.requestId, at: metadata.updated_at });
       parseYaml(doc.toString());
       const raw = `---\n${doc.toString()}---\n${previous.body}`;
-      if (Buffer.byteLength(raw) > 65536 || !Check(Envelope, metadata)) throw Error("Annotation exceeds record limits.");
-      const record = { ...previous, metadata, raw, hash: digest(raw), revision: metadata.revision };
+      const encoded = encodeRecordEvidence({ ...previous, metadata, raw, hash: digest(raw), revision: metadata.revision }, p => readSourceDescriptor(path.join(this.config.root, scope), p));
+      const record = encoded.record;
+      if (Buffer.byteLength(record.raw) > 65536) throw Error("Annotation exceeds record limits.");
       if (new PublicationFiles(this.config.root).snapshot(scope) !== snapshot) throw Error("Edit conflict: vault changed during validation.");
-      return { previous, record, data, snapshot, artifacts: {}, annotation: true, annotationEvidence: extra };
+      return { previous, record, data, snapshot, artifacts: encoded.descriptors, requiredDescriptors: encoded.requiredDescriptors, annotation: true, annotationEvidence: extra };
     });
     return this.accept(input.requestId, intent, prepared, access, actor);
   }
@@ -467,7 +504,7 @@ export class KnowledgeStorage {
     if (input.source && !sourceAttachment) {
       const artifact = `artifacts/${input.requestId}.txt`;
       artifacts[artifact] = input.source.text;
-      metadata.evidence = [...(metadata.evidence ?? []), { path: artifact, sha256: digest(input.source.text), start_line: 1, end_line: input.source.text.split(/\r?\n/).length }];
+      metadata.evidence = [...(metadata.evidence ?? []), { path: artifact, sha256: digest(input.source.text), attribution: input.source.attribution, start_line: 1, end_line: input.source.text.split(/\r?\n/).length }];
       // Attribution travels with the portable page, not only in the receipt.
       metadata.attribution = input.source.attribution;
     }
@@ -485,15 +522,18 @@ export class KnowledgeStorage {
     // Validate the serialized representation too: annotation support may reuse
     // evidence objects, but the portable reader deliberately rejects aliases.
     parseYaml(yaml);
-    if (Buffer.byteLength(raw) > 65536 || !Check(Envelope, metadata)) throw Error("Record exceeds limits or has invalid metadata.");
-    const record: LoadedRecord = { id, title: input.title, kind, type: type!, path: relative, revision, lifecycle: metadata.lifecycle, metadata, raw, body: input.body, hash: digest(raw), valid: true };
+    if (!Check(Envelope, metadata)) throw Error("Record has invalid metadata.");
+    let record: LoadedRecord = { id, title: input.title, kind, type: type!, path: relative, revision, lifecycle: metadata.lifecycle, metadata, raw, body: input.body, hash: digest(raw), valid: true };
+    const encoded = encodeRecordEvidence(record, p => readSourceDescriptor(path.join(this.config.root, scope), p));
+    record = encoded.record; Object.assign(artifacts, encoded.descriptors);
+    if (Buffer.byteLength(record.raw) > 65536) throw Error("Record exceeds limits.");
     if (!batch) {
       const preview = await vault.scan({ record, artifacts });
       if (!record.valid) throw Error("Record validation failed: " + preview.issues.filter(i => i.path === relative).map(i => i.code).join(", "));
     }
     if (!batch && new PublicationFiles(this.config.root).snapshot(scope) !== snapshot) throw Error("Edit conflict: vault changed during validation.");
     const additional = corrected && correction ? [{ before: corrected, after: lifecycleRecord(corrected, "superseded", correction, actor, id) }] : undefined;
-    return { record, artifacts, previous, data, snapshot, additional, lifecycle: correction };
+    return { record, artifacts, requiredDescriptors: encoded.requiredDescriptors, previous, data, snapshot, additional, lifecycle: correction };
   }
   private accept(requestId: string, intent: string, prepared: Prepared, access: VaultAccess, actor: string): Receipt {
     const scope = scopeKey(access.scope);
@@ -505,6 +545,10 @@ export class KnowledgeStorage {
       if (db.prepare("SELECT 1 FROM mutations WHERE state!='published' LIMIT 1").get()) throw blocked();
       const files = new PublicationFiles(this.config.root), before = this.identity(db, files);
       if (files.snapshot(scope) !== prepared.snapshot) throw Error("Edit conflict: vault changed during validation.");
+      // A descriptor already read during preparation cannot disappear and be recreated.
+      for (const [p, raw] of Object.entries(prepared.requiredDescriptors ?? {})) {
+        if (readSourceDescriptor(path.join(this.config.root, scope), p) !== raw) throw Error("Source descriptor changed during validation.");
+      }
       // Fence the exact snapshot used for schema and reference validation.
       for (const r of prepared.data.records) if (files.hash(`${scope}/${r.path}`) !== r.hash) throw Error("Edit conflict: vault changed during validation.");
       for (const source of prepared.data.sources.filter(s => !s.path.startsWith("bundled:"))) {
@@ -523,13 +567,26 @@ export class KnowledgeStorage {
       const m = prepared.record.metadata;
       const references = [...(m.dependencies ?? []), ...(m.entities ?? []), ...[m.from, m.to, m.owner].filter((id): id is string => Boolean(id))];
       if (!prepared.batch && !prepared.annotation && !prepared.metadataOnly && (!prepared.lifecycle || "replacement" in prepared.lifecycle) && references.some(id => !stillActive.some(r => r.id === id))) throw Error("Reference unavailable or inactive in this scope.");
+      // Bind every descriptor used for validation and every resulting record.
+      // New sidecars are journaled; reused sidecars remain explicit replay dependencies.
+      for (const record of prepared.data.records) recordSourceDependencies(record, p => readSourceDescriptor(path.join(this.config.root, scope), p));
+      const descriptors: Record<string, string> = {};
+      for (const record of [prepared.record, ...(prepared.additional ?? []).map(c => c.after)]) {
+        Object.assign(descriptors, recordSourceDependencies(record, p => prepared.artifacts[p] ?? readSourceDescriptor(path.join(this.config.root, scope), p)));
+      }
       const after = { ...before, generation: before.generation + 1, publicationId: randomUUID() };
       const changes: FileChange[] = [];
       const add = (target: string, old: string | null, raw: string) => {
         const n = changes.length;
         changes.push({ path: target, before: old, after: raw, backup: `${scope}/.knowledge-history/${requestId}/${n}.before`, stage: `${scope}/.knowledge-history/${requestId}/${n}.stage` });
       };
-      for (const [p, raw] of Object.entries(prepared.artifacts)) add(`${scope}/${p}`, null, raw);
+      for (const [p, raw] of Object.entries(prepared.artifacts)) {
+        if (p.startsWith("artifacts/sources/")) {
+          const existing = files.read(`${scope}/${p}`);
+          if (existing !== null) { if (existing !== raw) throw Error("Immutable source descriptor changed."); continue; }
+        }
+        add(`${scope}/${p}`, null, raw);
+      }
       add(`${scope}/${prepared.record.path}`, prepared.previous?.raw ?? null, prepared.record.raw);
       for (const change of prepared.additional ?? []) add(`${scope}/${change.after.path}`, change.before?.raw ?? null, change.after.raw);
       add("vault.json", files.read("vault.json"), JSON.stringify(after) + "\n");
@@ -543,7 +600,7 @@ export class KnowledgeStorage {
         receipt.reason = prepared.lifecycle.reason;
         receipt.impact = lifecycleImpact(prepared.data.records, prepared.lifecycle.id);
       }
-      const plan: Plan = { activity: access.activity, rootIdentity: files.identity(), before, after, changes, actor, agentId: actor === "agent" ? access.agentId : undefined, scope, source: prepared.batch?.source, record: prepared.record, records: [prepared.record, ...(prepared.additional ?? []).map(c => c.after)] };
+      const plan: Plan = { descriptors, activity: access.activity, rootIdentity: files.identity(), before, after, changes, actor, agentId: actor === "agent" ? access.agentId : undefined, scope, source: prepared.batch?.source, record: prepared.record, records: [prepared.record, ...(prepared.additional ?? []).map(c => c.after)] };
       access.assertCurrent();
       db.prepare("INSERT INTO mutations VALUES (?,?,?,?,?,?)").run(scope, requestId, intent, "accepted", JSON.stringify(plan), JSON.stringify(receipt));
     });
@@ -569,11 +626,16 @@ export class KnowledgeStorage {
       const checkpoint = JSON.parse(String(db.prepare("SELECT manifest FROM identities WHERE agent_key=?").get(checkpointKey(this.config.vaultId))!.manifest));
       if (canonical(checkpoint) !== canonical(plan.before)) throw Error("Stale publisher identity");
       try {
+        // A reused immutable source is not a file change, but is still fenced on replay.
+        for (const [p, raw] of Object.entries(plan.descriptors ?? {})) {
+          if (!plan.changes.some(c => c.path === `${plan.scope}/${p}`) && files.read(`${plan.scope}/${p}`) !== raw) throw Error("conflict");
+        }
         for (const change of plan.changes) {
           access.assertCurrent();
           files.publish(change, stage => this.hook(`${stage}:${change.path}`));
         }
         this.hook("before-receipt");
+        for (const [p, raw] of Object.entries(plan.descriptors ?? {})) if (files.read(`${plan.scope}/${p}`) !== raw) throw Error("conflict");
         for (const change of plan.changes) if (files.read(change.path) !== change.after || (change.before !== null && files.read(change.backup) !== change.before)) throw Error("conflict");
         access.assertCurrent();
         db.prepare("UPDATE identities SET manifest=? WHERE agent_key=?").run(JSON.stringify(plan.after), checkpointKey(this.config.vaultId));
@@ -582,7 +644,9 @@ export class KnowledgeStorage {
         observeWithdrawals(db, records, this.retrievalBinding(access));
         for (const record of records) this.recordObservation(db, plan.scope, record, plan.actor, plan.agentId);
         if (plan.activity && plan.agentId) appendActivity(db, plan.scope, plan.agentId, plan.activity, "write", records);
-        this.enqueueGit(db, plan.scope, plan.changes.filter(c => c.path !== "vault.json").map(c => ({ path: c.path, raw: c.after })), plan.actor, this.publicationToken(plan.scope, requestId));
+        const gitFiles = new Map(plan.changes.filter(c => c.path !== "vault.json").map(c => [c.path, c.after]));
+        for (const [p, raw] of Object.entries(plan.descriptors ?? {})) gitFiles.set(`${plan.scope}/${p}`, raw);
+        this.enqueueGit(db, plan.scope, [...gitFiles].map(([path, raw]) => ({ path, raw })), plan.actor, this.publicationToken(plan.scope, requestId));
         receipt.git = { state: "pending", message: "Published; local Git checkpoint pending." };
       } catch (e) {
         if ((e as Error).message !== "conflict") throw e;
@@ -713,7 +777,8 @@ export class KnowledgeStorage {
         for (const relative of this.observedHashes.keys()) if (relative.startsWith(`${key}/`) && !current.has(relative)) this.observedHashes.delete(relative);
         for (const r of records) {
           if (current.get(`${key}/${r.path}`) !== r.hash) throw Error("Vault changed during Git observation.");
-          for (const file of r.metadata.evidence ?? []) {
+          for (const [p, raw] of Object.entries(recordSourceDependencies(r, p => readSourceDescriptor(path.join(this.config.root, key), p)))) current.set(`${key}/${p}`, digest(raw));
+          for (const file of [...(r.metadata.evidence ?? []), ...annotationEvidence(r.metadata)]) {
             if (!file.path.startsWith("artifacts/")) continue;
             const relative = `${key}/${file.path}`;
             try {

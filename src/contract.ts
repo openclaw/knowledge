@@ -1,3 +1,4 @@
+import { ReconcileEvidenceInput, ReconcileEvidenceOutput } from "./evidence-reconciliation-contract.js";
 import { QueryFreshness } from "./query-freshness.js";
 import { EvidenceReadInput, EvidenceReadOutput } from "./evidence-read-contract.js";
 import { TimelineInput, DayInput, SinceInput, LastSeenInput, ChronicleOutput, LastSeenOutput, TemporalFilters } from "./chronicle-contract.js";
@@ -51,6 +52,11 @@ export const contract = defineFeatureContract({
     publish_batch: {
       kind: "action", description: "Publish 1–25 items; max 1 MiB. Unique item keys: 1–40 characters, start with lowercase a-z, then only a-z, 0-9, _ or - (e.g. josh_lehman, not JoshLehman). Refs must match keys exactly. Batch-level UUID, vault ID, ontology hash. Refs: @key; body links: [[@key|label]]. Upload evidence first; no inline source. Page edit: existing id + revision + hash. Arrays/fields replace; omitted preserves. Validate all, then journal. Retry: same UUID + payload, or knowledge_resume. Source unchanged: old receipt; new payload ignored. Source changed: reconcile, set expectedPreviousRequestId. Receipt state/Git applies to all items. No dedup, correction or rollback.",
       input: BatchInput, output: Receipt, tool: { name: "knowledge_publish_batch", label: "Publish knowledge batch" },
+    },
+    reconcile_evidence: {
+      kind: "action", description: "Explicit revision/hash/vault/ontology-fenced source representation migration or reviewed current-page evidence reconciliation. Run dryRun=true first, inspect byte counts, then dryRun=false with current fences. Omit evidence to preserve associations; supplied evidence replaces only an active page current set, retaining annotation support. Preserve Timeline support after reading it; no removal inferred from prose. Originals, descriptors and historical revisions are never deleted. expanded restores full descriptors as a new revision, not a binary downgrade. Body and unrelated metadata are unchanged. Retry identical mutation UUID/payload after uncertainty.",
+      input: ReconcileEvidenceInput, output: ReconcileEvidenceOutput,
+      tool: { name: "knowledge_reconcile_evidence", label: "Reconcile knowledge evidence" },
     },
     annotate: {
       kind: "action", description: "Revision-fenced, evidence-backed metadata annotation without changing assertion text or lifecycle. Set source-page association, identity uncertainty/candidates, speaker-attribution confidence, continuity links, or explicit fixture classification; append retained evidence to an unchanged assertion. Omitted fields are preserved; supplied arrays replace. Only fixture classification may change historical records. Similarity is not supersession, candidate identity is not a merge, and source grouping is not an ingestion batch. Inspect the target and evidence first; a reason and exact revision/hash are required.",

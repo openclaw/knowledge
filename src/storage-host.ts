@@ -23,6 +23,7 @@ export const operations = {
   verify: (s: Storage, a: Access, input: In<Storage["verify"]>) => s.verify(input, a),
   sourceCheck: (s: Storage, a: Access, input: In<Storage["sourceCheck"]>) => s.sourceCheck(input, a),
   batch: (s: Storage, a: Access, input: In<Storage["batch"]>) => s.batch(input, a, "agent"),
+  reconcileEvidence: (s: Storage, a: Access, input: In<Storage["reconcileEvidence"]>) => s.reconcileEvidence(input, a),
   annotate: (s: Storage, a: Access, input: In<Storage["annotate"]>) => s.annotate(input, a, "agent"),
   timeline: (s: Storage, a: Access, input: In<Storage["timeline"]>) => s.timeline(input, a),
   chronicleDay: (s: Storage, a: Access, input: In<Storage["chronicleDay"]>) => s.chronicleDay(input, a),

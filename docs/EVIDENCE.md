@@ -1,9 +1,11 @@
 # Original source files
 
 Evidence is retained as original files, not text squeezed into a page-save field.
-The page carries file references, SHA-256 hashes, attribution, filenames, media
-types and sizes. Text citations may narrow a file reference to an inclusive line
-range and optional exact quote; whole-file references need neither.
+Each scoped source has an immutable descriptor containing its retained path,
+SHA-256 hash, origin attribution and optional filename, media type and size. Pages
+store a descriptor ID plus an inclusive line range, exact quote or citation-specific
+attribution when needed. Whole-file citations need none of those passage fields.
+API reads expand descriptors and retain the `source` ID alongside the full fields.
 
 There is no 48,000-character source limit and no 20-reference-per-record limit.
 Pages may omit evidence. Existing claim/relationship evidence requirements are
@@ -41,6 +43,68 @@ transport's 64,000-character response budget. The browser offers a file picker f
 uploads and downloads; where supported it streams downloads to a chosen local
 file, otherwise it uses a browser Blob download. Source HTML/SVG is never rendered
 as trusted app content.
+
+## Immutable source identity
+
+Descriptors live at `<scope>/artifacts/sources/<id>.json`. The ID is the SHA-256
+of canonical, versioned descriptor JSON, including its trailing newline. Fields
+use lexicographic key order. Path, content hash and origin attribution all
+participate in identity: equal bytes from different origins do not collapse into
+one source. Changed or redacted original bytes require a new descriptor.
+
+```yaml
+evidence:
+  - source: <64-character-descriptor-id>
+    start_line: 12
+    end_line: 18
+    attribution: Speaker attribution for this passage
+```
+
+`attribution` on a citation overrides the source attribution for that passage,
+without changing the source origin. Resolved API evidence retains its `source`
+ID through later edits. Do not change a resolved source path, hash or descriptive
+metadata while retaining that ID. Full legacy evidence remains readable for
+historical revisions and explicit migrations. Its attribution is preserved as
+recorded; the containing page attribution is not inferred to be its source origin.
+
+Resolution starts only after record-scope authorization and reads a bounded regular
+file in that same partition. A digest is an identity, not an access credential.
+Authority comes from trusted scope selection and local placement, not a
+cryptographic scope binding. Copying a record alone does not transfer its source.
+
+Publication journals new descriptors before compact records and rechecks reused
+descriptors during acceptance and recovery. Both scan-cache levels track source
+dependencies, including missing descriptors. Git observation includes descriptors
+used only by annotations. Backups and exports must retain descriptor sidecars
+alongside originals and historical raw records. Removing a citation never deletes
+a descriptor or original.
+
+## Reviewed reconciliation and representation migration
+
+`knowledge_reconcile_evidence` targets one record with exact vault, ontology,
+revision and hash preconditions, a UUID request ID and a reason. Read the complete
+page, Timeline, annotations and relevant original passages first.
+
+1. Set `dryRun: true` and choose `representation: compact` or `expanded`. Omit
+   `evidence` for a representation-only migration. Inspect the byte and association
+   counts. A preview does not publish descriptors or a mutation.
+2. To replace an active page's current support, supply the reviewed complete
+   `evidence` set. Keep support for historical Timeline assertions as well as
+   current State. Annotation evidence remains attached automatically. Absence
+   from prose alone is not a reason to remove a source. Claims and relationships
+   use correction/annotation operations for support changes.
+3. Apply with `dryRun: false` and the same still-current preconditions. Publication
+   preserves the body and unrelated metadata, writes a new revision, and retains
+   source files, descriptors, other records and old raw revisions. A pure
+   representation conversion preserves the previous author attribution.
+4. Read back the complete result and verify retained evidence and expected
+   revision/hash. Exact retries reuse the mutation UUID and unchanged payload.
+
+`expanded` restores full evidence fields as a new revision. Source identity is
+retained, so this is data-format rollback, not permission to downgrade the plugin
+binary. Historical compact revisions and pending journals still require descriptor
+resolution. Preview refuses an expanded representation that exceeds record limits.
+There is no automatic bulk migration, citation pruning or source deletion.
 
 ## Gbrain precedent and deliberate differences
 
