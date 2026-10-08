@@ -84,6 +84,44 @@ dated open commitment, and Timeline records participation/contribution. None
 asserts an employer, job title, enduring personality trait or later completion.
 For the noncontiguous State citation attach separate line-2 and line-5 evidence.
 
+## Updating the same profile after a later review
+
+Assume a second retained transcript is returned at
+`meetings/reliability-follow-up.md`, with resolved Morgan identity:
+
+```text
+1  Meeting: Reliability follow-up
+2  Date: 2026-09-25. Attendee: Morgan Hale. Speaker mapping: Morgan = Morgan Hale.
+3  Morgan: I sent the failure report this morning. Both cases are understood now.
+4  Morgan: I approved the release. Deployment has not happened yet.
+```
+
+A meeting-log-shaped State would leave the earlier pending report statement and
+append “At the September 25 meeting Morgan reported sending it.” Rewrite the
+affected topic instead, while preserving earlier dated context:
+
+```markdown
+## State
+As of September 25, Morgan had sent the failure report, understood both failure
+cases and approved release; deployment had not happened.
+[[meetings/reliability-follow-up|Reliability follow-up · lines 2–4]]
+
+## Timeline
+- **2026-09-25:** Reported sending the failure report and understanding both
+  failure cases; approved release while deployment remained pending.
+  [[meetings/reliability-follow-up|Reliability follow-up · lines 2–4]]
+- **2026-09-23:** Participated in the reliability review, reported two unresolved
+  failure cases, held release pending investigation, and committed to sending
+  a failure report without a deadline.
+  [[meetings/reliability-review|Reliability review · lines 2–5]]
+```
+
+The supported introduction need not change. The pending report belongs to the
+earlier history; release approval must not become a claim of deployment. Keep
+both original transcripts and evidence for both dates. This body rewrite does
+not automatically correct, withdraw or mark a separate commitment complete.
+Read related assertions and follow their supported update/correction workflow.
+
 ## Structured records and checks
 
 - Use the observed meeting ID as `source_page` on extracted assertions and the

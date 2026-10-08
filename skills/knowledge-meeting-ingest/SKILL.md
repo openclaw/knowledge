@@ -266,7 +266,10 @@ Run every check for every meeting, including quick logistics meetings.
   event associations/attendance endpoints. Discover graph context or investigate
   failures with compact connections and record links; do not repeat successful
   structural checks merely to obtain larger responses. Automatic reverse
-  navigation does not prove an authored contextual link.
+  navigation does not prove an authored contextual link. Read entity State as a
+  synthesis of the supported situation, not successive meeting summaries; keep
+  dated participation and earlier developments in Timeline. Confirm that prose
+  cleanup preserved unique facts, qualifications and user assessments.
 - **V3 — Speaker map resolved or flagged.** No raw label silently masquerades as
   a known person. Every named speaker has an evidence basis/confidence.
 - **Structured readback.** Known commitment owners are resolved page IDs, not just

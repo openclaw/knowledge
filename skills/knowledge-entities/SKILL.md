@@ -109,10 +109,29 @@ Do not repeat recent enrichment absent new signal. Unknown facts remain absent.
 ### Entity-focused synthesis gate
 
 The opening answers “what do these sources establish about THIS entity?”, not
-“what happened in the last call?”. State synthesizes supported current context;
-Timeline records dated developments. Do not copy the same meeting summary into
-all three. If only one source is known, explicitly limit the summary to that
-context without fabricating a biography or adding stock disclaimers.
+“what happened in the last call?”. Give each section one job:
+
+- **Introduction:** supported identity, how the person is known, and relevant
+  continuing context. Do not turn a single meeting into an enduring biography.
+- **State:** synthesize the supported situation as of the source dates. Rewrite
+  an affected topic when the situation changes; never accumulate a meeting log
+  here. A reader should not need to replay old paragraphs to find the situation.
+- **Timeline:** preserve concise, reverse-chronological participation and dated
+  developments with contextual source links. Different entities receive their
+  own relevant context, not copies of the entire meeting summary.
+
+Do not repeat a passage across all three. The same fact can appear in State and
+its dated history when those serve different purposes; do not remove necessary
+history merely to avoid every overlap. Keep authored contextual Timeline links
+even when structured event claims and automatic backlink navigation exist.
+
+When repairing a repetitive profile, read the complete page and relevant retained
+sources first. Preserve each unique supported assertion in its appropriate
+section, along with user assessments, qualifications and citations. Keep resolved
+blockers and earlier plans in dated history rather than presenting them as current
+State. Do not alter retained originals or withdraw structured assertions merely
+because the prose was reorganized. If only one source is known, limit the summary
+to that context without adding stock disclaimers.
 
 Populate supported ontology fields such as `role` when the source establishes
 them, and create evidenced relationships separately. Unknown role, employer and
