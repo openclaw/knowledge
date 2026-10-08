@@ -48,9 +48,9 @@
     "onStartup": true
   },
   "controlUi": {
-    "entry": "dist/control-ui/ae9a232b98f1a7545bd9fbd4596fe53918ce30d5f22ad130dcd8b35c9f0861a6/index.js",
+    "entry": "dist/control-ui/92ae66c8c1930d18a7917a436a890187c3838d565faf79fba505f75738133e01/index.js",
     "styles": [
-      "dist/control-ui/ae9a232b98f1a7545bd9fbd4596fe53918ce30d5f22ad130dcd8b35c9f0861a6/index.css"
+      "dist/control-ui/92ae66c8c1930d18a7917a436a890187c3838d565faf79fba505f75738133e01/index.css"
     ]
   },
   "skills": [

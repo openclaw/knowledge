@@ -18,6 +18,11 @@ try {
   await page.addScriptTag({ content: bundle.outputFiles[0].text });
   const id = '0422d1aa-3d45-4d44-91ae-f2eac3490c3f';
   const source = '# Vincent Koc\n\nParticipated in **communications planning**.\n\n## State and source context\n\n- **2026-09-23:** Roundtable planning\n  - _Optional_ attendance\n- ~~Superseded~~ item\n\n## Timeline\n\n1. Planning\n2. [COMMAND weekly](../meetings/' + id + '.md)\n\n> Source quotation\n\n| Date | Meeting |\n| --- | --- |\n| Sep 23 | Weekly |\n\n- [x] Recorded\n- [ ] Follow up\n\n```html\n<script>window.pwned = true</script>\n' + 'x'.repeat(250) + '\n```\n\n[Documentation](https://example.com/docs)\n\n[Unsafe](javascript:alert%281%29) [Encoded](jav&#x61;script:alert%281%29) [File](file:///etc/passwd) [Data](data:text/html,hi) [Host](/settings) [Protocol-relative](//example.com)\n\n<img src="https://example.com/track" onerror="window.pwned=true">\n<script>window.pwned=true</script>\n<form><input autofocus onfocus="window.pwned=true"></form>\n<svg onload="window.pwned=true"></svg>\n\n![Remote image](https://example.com/image.png)';
+  // Internal comments disappear only as Markdown tokens, not literal code examples.
+  await page.evaluate(() => window.render('Visible <!-- project: path:/private/workspace --> paragraph\n\n<!-- hidden block -->\n\n`<!-- literal example -->`\n\n```html\n<!-- fenced example -->\n```'));
+  assert.doesNotMatch(await page.locator('main').innerText(), /private\/workspace|hidden block/);
+  assert.equal(await page.locator('p code').innerText(), '<!-- literal example -->');
+  assert.equal((await page.locator('pre code').innerText()).trim(), '<!-- fenced example -->');
   // Unknown local paths stay inert until the service supplies an authorized resolution.
   await page.evaluate(source => window.render(source), source);
   assert.equal(await page.getByRole('link', {name:'COMMAND weekly'}).count(), 0);

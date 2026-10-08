@@ -62,6 +62,9 @@ bodies continue using portable wikilinks and relative document links below.
 - Ambiguous names and missing targets remain unlinked and diagnosed; they do not
   invalidate the containing page. Code, image destinations, raw HTML and generated
   `<!-- backlinks:start --> … <!-- backlinks:end -->` sections do not add edges.
+- HTML comments (including internal project markers) are not displayed in rendered
+  Markdown. They remain in the stored source; code spans/fences and escaped
+  examples still show their literal text. Other raw HTML stays escaped and inert.
 - The same Marked parser drives rendering and extraction. `record` returns bounded
   `links` plus `linksTruncated`; `connections` accepts `links` and `backlinks` as
   directions, separate from `incoming`/`outgoing` evidenced relationships. One

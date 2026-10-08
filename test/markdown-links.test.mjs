@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { extractLinks, resolveLinks, wikiHref } from '../dist/markdown-links.js';
+import { markdown, extractLinks, resolveLinks, wikiHref } from '../dist/markdown-links.js';
 import { connections } from '../dist/connections.js';
 import { recordPath } from '../dist/record-path.js';
 const record = (id, title, path, body='', extra={}) => ({id,title,path,body,raw:body,hash:body,kind:'page',type:'person',valid:true,lifecycle:'active',revision:1,metadata:{aliases:[],lifecycle:'active',...extra}});
@@ -9,6 +9,18 @@ test('Markdown tokenization excludes code, escapes, HTML, images and generated b
   const body = '[Alex](../people/alex.md) [[Alex|A]]\n\n`[[Code]]`\n\n```md\n[[Fence]]\n```\n\n    [[Indent]]\n\n\\[[Escape]]\n\n<a href="people/html.md">HTML</a> ![image](people/image.md)\n\n<!-- backlinks:start -->\n[[Generated]]\n<!-- backlinks:end -->\n\n[ref][person]\n\n[person]: people/alex.md';
   assert.deepEqual(extractLinks(body), ['../people/alex.md',wikiHref('Alex'),'people/alex.md']);
 });
+test('comments are invisible while code examples and other HTML stay escaped', () => {
+  const source = 'Before <!-- project: path:/private/workspace --> after\n\n<!-- hidden\n[[Secret]]\n-->\n\n`<!-- inline example -->`\n\n```html\n<!-- fenced example -->\n```\n\n&lt;!-- escaped example --&gt;\n\n<script>unsafe()</script>';
+  const rendered = markdown.parse(source);
+  assert.doesNotMatch(rendered, /private\/workspace|hidden|Secret/);
+  assert.match(rendered, /Before  after/);
+  assert.match(rendered, /&lt;!-- inline example --&gt;/);
+  assert.match(rendered, /&lt;!-- fenced example --&gt;/);
+  assert.match(rendered, /&lt;!-- escaped example --&gt;/);
+  assert.match(rendered, /&lt;script&gt;unsafe/);
+  assert.deepEqual(extractLinks(source), []);
+});
+
 test('backlink markers inside code do not suppress subsequent authored links', () => {
   assert.deepEqual(extractLinks('```html\n<!-- backlinks:start -->\n```\n\n[[Alex]]'),[wikiHref('Alex')]);
 });

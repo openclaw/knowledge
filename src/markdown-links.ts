@@ -4,7 +4,8 @@ export const escapeHtml = (text: string) => text.replace(/[&<>"']/g, char => ({ 
 export const wikiHref = (target: string) => `#wiki=${encodeURIComponent(target)}`;
 /** One parser for navigation and rendering: code, escapes, HTML and images are not links. */
 export const markdown = new Marked({ gfm: true, async: false, renderer: {
-  html: ({ text }) => escapeHtml(text), image: ({ text }) => escapeHtml(text),
+  // Comment tokens are metadata, while other raw HTML remains inert visible text.
+  html: ({ text }) => /^\s*<!--/.test(text) ? "" : escapeHtml(text), image: ({ text }) => escapeHtml(text),
 }, extensions: [{
   name: "wikilink", level: "inline", start: src => src.indexOf("[["),
   tokenizer(src) {
