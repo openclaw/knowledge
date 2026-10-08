@@ -123,6 +123,35 @@ both original transcripts and evidence for both dates. This body rewrite does
 not automatically correct, withdraw or mark a separate commitment complete.
 Read related assertions and follow their supported update/correction workflow.
 
+## Decide whether another source changes State
+
+Continue from the September 25 profile above. These are hypothetical branches,
+not extra facts to publish:
+
+- **Unchanged rerun:** the identical September 25 transcript and its evidence
+  are already represented. Reuse the profile and existing assertions; do not
+  save another revision or repeat its Timeline entry.
+- **Additional support:** an independent retained report supports exactly the
+  same qualified September 25 account. Add missing source support and a useful
+  contextual citation, but do not restate State as another meeting paragraph.
+- **Reaffirmation:** at a September 26 review Morgan again says deployment is
+  pending. Add supported participation/reaffirmation to dated history; no new
+  State paragraph is needed merely because another meeting occurred.
+- **Changed fact:** a September 27 source explicitly reports deployment. Rewrite
+  that State topic as of September 27, retaining the September 25 pending status
+  in history. Do not infer deployment from approval alone.
+- **Conflicting account:** another speaker says deployment occurred September 24.
+  Inspect whether this concerns the same release; if unresolved, preserve both
+  attributed accounts. The source received last is not automatically correct.
+- **Late source:** the September 23 review arrives after the September 25 update.
+  Add any missing September 23 history/support, but do not restore the report as
+  pending or the release as held in State. If that history is already present,
+  reuse it. An explicit correction is handled separately from an older plan.
+
+In each branch, read current records first and record the decision in task working
+notes. Verify unchanged topics as well as changed ones. Never fabricate one of
+these branches to make a live test pass.
+
 ## Structured records and checks
 
 - Use the observed meeting ID as `source_page` on extracted assertions and the

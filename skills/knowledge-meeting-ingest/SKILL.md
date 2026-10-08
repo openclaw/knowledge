@@ -211,7 +211,9 @@ For EACH actual attendee, run `knowledge-entities`:
 1. Search and read the existing person page, or create a sourced one if identity
    is sufficient. Participation and actual contribution are meaningful context;
    do not create a content-free stub or fabricate a profile for UNKNOWN.
-2. Update State when verified new information materially changes it.
+2. Apply `knowledge-entities`' material-change decision: update affected State
+   only when the supported situation changes. A new meeting may require only
+   dated context or additional evidence; an already represented rerun is a no-op.
 3. Add a dated “Attended {meeting}” timeline reference with a link back and citation.
 4. Create/reuse an evidenced attendance relationship via
    `knowledge_create_relationship`; inspect the current label/direction first.
