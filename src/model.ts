@@ -26,6 +26,8 @@ export function approvedRecall(value: unknown): Recall | undefined {
   return observed.every((part, index) => part === Number(parts[index + 1])) ? value : undefined;
 }
 export const Evidence = Type.Object({
+  // Resolved citations retain origin identity across reads, edits and serialization.
+  source: Type.Optional(Type.String({ pattern: "^[a-f0-9]{64}$" })),
   path: text(500), sha256: Type.String({ pattern: "^[a-f0-9]{64}$" }),
   start_line: Type.Optional(Type.Integer({ minimum: 1 })), end_line: Type.Optional(Type.Integer({ minimum: 1 })),
   filename: Type.Optional(text(200)), mediaType: Type.Optional(text(200)), size: Type.Optional(Type.Integer({ minimum: 0 })),
