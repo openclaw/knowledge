@@ -19,7 +19,10 @@ const service = createKnowledgeService(host.api, { emit: () => {} });
 const transcript = Array.from({ length: 200 }, (_, i) => `Speaker ${i % 3}: line ${i + 1} mentions Josh.`).join('\n');
 const source = await service.attach({ requestId: randomUUID(), filename: 'meeting-transcript.txt', mediaType: 'text/plain', attribution: 'Granola meeting transcript', offset: 0, data: Buffer.from(transcript).toString('base64'), final: true }, toolContext(host.api));
 const attachments = Array.from({ length: 90 }, (_, i) => ({ ...source.evidence, start_line: i + 1, end_line: i + 2 }));
-const saved = await service.save_page({ requestId: randomUUID(), title: 'Josh Lehman', type: 'person', body: 'Maintains OpenClaw.', aliases: ['Josh'], attachments }, toolContext(host.api));
+const saved = await service.save_page({ requestId: randomUUID(), title: 'Josh Lehman', type: 'person', body: 'Maintains OpenClaw.\n\n' + 'Long synthesized notes. '.repeat(1200), aliases: ['Josh'], attachments }, toolContext(host.api));
+// Agent-written claim bodies can end in an internal comment that the card must not show.
+const fingerprint = (await service.ontology({}, toolContext(host.api))).fingerprint;
+await service.create_claim({ requestId: randomUUID(), expectedOntologyFingerprint: fingerprint, title: 'Release focus', body: 'Josh favored focused releases. <!-- project: path:/private/workspace -->', claim_kind: 'decision', assertion_origin: 'source', attribution: 'Granola meeting transcript', evidence: [{ ...source.evidence, start_line: 3, end_line: 3 }], entities: [saved.id] }, toolContext(host.api));
 const entry = "import plugin from './src/control-ui.ts';\nconst signal=new AbortController().signal;\nconst host={pluginId:'knowledge',signal,connection:{connected:true},redact:String,\n request:async(method,p)=>({ok:true,result:await window.invokeKnowledge(p.actionId,p.payload)}),\n onEvent:()=>()=>{},subscribe:()=>()=>{},agents:{rows:[{id:'main',name:'Main'}],selectedId:'main'},\n sessions:{create:async()=>'x',open:()=>{}},navigation:{openPage:()=>{}},\n ui:{registerNavigation:()=>()=>{},registerPage:view=>{view.mount(document.querySelector('main'),{host,signal,props:Object.fromEntries(new URL(location.href).searchParams)});return()=>{}}}};\nplugin.activate(host);";
 const bundle = await build({ stdin: { contents: entry, resolveDir: process.cwd() }, bundle: true, write: false, format: 'iife', loader: { '.css': 'empty' } });
 const css = ':root{--bg:#0b100e;--text:#e6ece9;--text-strong:#fff;--muted:#86928b;--border:#26312c;--card:#111815;--bg-hover:#1a2320;--accent:#6fd3a3;--warn:#e3b55c;--warn-subtle:#2a2416;--font-body:system-ui}*{box-sizing:border-box}body{margin:0;background:var(--bg)}' + await fs.readFile('src/control-ui.css', 'utf8');
@@ -40,6 +43,11 @@ try {
   await page.locator('.knowledge-entity-header h2').filter({ hasText: 'Josh Lehman' }).waitFor();
   assert.match(await page.locator('.knowledge-entity-header').innerText(), /Josh/);
   assert.equal(await page.getByText('Maintains OpenClaw.').count(), 1);
+  // Truncated notes offer the next part without notices; claim cards hide internal comments.
+  await page.getByRole('button', { name: 'Read more notes', exact: true }).waitFor();
+  await page.locator('.knowledge-claim-text', { hasText: 'Josh favored focused releases.' }).waitFor();
+  const visible = await page.locator('main').innerText();
+  assert.doesNotMatch(visible, /Preview is truncated|Some supporting previews|Showing part of this record|<!--|path:\/private/);
   // Structured metadata loads only when opened, without the expanded evidence list.
   await page.locator('.knowledge-file-details > summary').click();
   await page.locator('.knowledge-technical-details > summary').click();
@@ -50,5 +58,5 @@ try {
   assert.match(text, /"title": "Josh Lehman"/);
   assert.match(text, /Evidence descriptors omitted for size/);
   assert.deepEqual(failures, []); assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ passed: 'evidence-heavy person page opens from compact metadata; structured metadata loads on demand without expanded evidence', artifacts: base }));
+  console.log(JSON.stringify({ passed: 'evidence-heavy person page opens from compact metadata without notices or comment text; structured metadata loads on demand without expanded evidence', artifacts: base }));
 } finally { await browser.close(); for (const lifecycle of lifecycles) await lifecycle.stop(); }

@@ -50,7 +50,8 @@ const withoutTitleHeading = (body: string, title: string) => { const match = /^\
 /** Page bodies longer than this preview behind "Show full notes". */
 const longBodyChars = 3000;
 /** Claim text for compact rows: wikilinks read as their labels, since a row is one button. */
-const plainLinks = (text: string) => text.replace(/\[\[([^\]\n|]+)(?:\|([^\]\n]+))?\]\]/g, (_, target: string, label?: string) => (label ?? target).trim());
+/** Plain claim text: wiki links become their labels and internal comments, even ones cut off by a preview, are dropped. */
+const plainLinks = (text: string) => text.replace(/<!--[\s\S]*?(?:-->|$)/g, "").replace(/\[\[([^\]\n|]+)(?:\|([^\]\n]+))?\]\]/g, (_, target: string, label?: string) => (label ?? target).trim()).trim();
 /** Short file kind for a retained original, from its recorded media type or extension. */
 const fileKind = (e: { mediaType?: string; filename?: string; path: string }) => {
   const kinds: Record<string, string> = { "text/plain": "Text", "text/markdown": "Markdown", "application/json": "JSON", "application/pdf": "PDF", "text/html": "HTML", "text/csv": "CSV" };
@@ -454,12 +455,11 @@ export default defineControlUiPlugin({
               notesLinks = [...new Map([...notesLinks, ...(page.links ?? [])].map(link => [link.href, link])).values()];
               const rendered = markdownView(withoutTitleHeading(notesText, r.title), navigateNotes, notesLinks);
               renderedNotes.replaceWith(rendered); renderedNotes = rendered;
-              if (page.content.nextOffset === null) { more.remove(); progress.remove(); }
+              if (page.content.nextOffset === null) more.remove();
               else { next = page.content.nextOffset; more.disabled = false; }
             } catch (error) { if (live(n)) { body.append(failure(error)); more.disabled = false; } }
           }, "knowledge-quiet");
-          const progress = el("p", "Showing part of this record. Load the next part to continue.", "knowledge-muted");
-          body.append(progress, more);
+          body.append(more);
         }
         // Long agent-written notes preview behind a disclosure so structured
         // sections (attendance, claims) stay near the top of the page.
@@ -486,8 +486,6 @@ export default defineControlUiPlugin({
           statement.append(surface); main.append(statement);
           if (versionsNode) main.append(versionsNode);
         }
-        if (result.omitted?.length) main.append(el("p", "Some supporting previews are not shown here. Open File details for the complete record.", "knowledge-muted"));
-        if (result.content.nextOffset !== null) main.append(el("p", "Preview is truncated. Open the original Markdown in File details for paged content."));
         const attended = el("section", undefined, "knowledge-attended"), attendanceRows = el("div", undefined, "knowledge-surface"); const attendanceIds = new Set<string>();
         if (r.type === "meeting") { attended.append(el("h3", "Attended"), attendanceRows); main.append(attended); }
         const knownFrom = el("span"); if (r.type === "person") facts.append(knownFrom);
