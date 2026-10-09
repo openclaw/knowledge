@@ -12,7 +12,7 @@ const next = (offset: number, count: number, total: number) => offset + count < 
 
 export const RECORD_RESPONSE_BYTES = RECORD_RESPONSE_MAX_BYTES;
 const compactMetadata = (m: Envelope): CompactMetadata => {
-  const keys = ["owner", "due_at", "occurred_at", "source_page", "source_event", "entities", "dependencies", "from", "to", "label", "attribution", "assertion_origin", "claim_kind"] as const;
+  const keys = ["owner", "due_at", "occurred_at", "source_page", "source_event", "entities", "dependencies", "from", "to", "label", "attribution", "assertion_origin", "claim_kind", "aliases", "fields", "updated_at", "supersedes", "superseded_by", "lifecycle_change"] as const;
   return { ...Object.fromEntries(keys.filter(k => m[k] !== undefined).map(k => [k, m[k]])),
     ...(m.identity ? { identity: { status: m.identity.status, context: m.identity.context,
       ...(m.identity.candidates ? { candidates: m.identity.candidates.map(({ id, basis }) => ({ id, basis })) } : {}) } } : {}),
@@ -20,7 +20,7 @@ const compactMetadata = (m: Envelope): CompactMetadata => {
 };
 
 /** Bound complete JSON, not serialized fragments. Every cut has a continuation or omission marker. */
-function boundRecord(result: RecordOutput, input: RecordInput): RecordOutput {
+function boundRecord(result: RecordOutput, input: RecordInput, compact = false): RecordOutput {
   const size = () => Buffer.byteLength(JSON.stringify(result), "utf8");
   if (size() <= RECORD_RESPONSE_BYTES) return result;
   const omit = (key: "relatedStatements" | "sourceFiles" | "identityEvidence" | "links") => {
@@ -43,6 +43,11 @@ function boundRecord(result: RecordOutput, input: RecordInput): RecordOutput {
     (result.omitted ??= []).push("issues");
     while (result.issues.length > 1 && size() > RECORD_RESPONSE_BYTES) result.issues.pop();
   }
+  // Full metadata repeats every evidence descriptor; paged evidence remains available.
+  // Compact domain fields are a preview; full metadata keeps them for edits that replace fields.
+  const metadata = result.record?.metadata as { evidence?: unknown; fields?: unknown } | undefined;
+  if (metadata?.evidence !== undefined && size() > RECORD_RESPONSE_BYTES) { delete metadata.evidence; (result.omitted ??= []).push("metadata.evidence"); }
+  if (compact && metadata?.fields !== undefined && size() > RECORD_RESPONSE_BYTES) { delete metadata.fields; (result.omitted ??= []).push("metadata.fields"); }
   const r = result.record, key = result.view === "raw" ? "raw" : "body";
   if (r && typeof r[key] === "string" && size() > RECORD_RESPONSE_BYTES) {
     const original = r[key]!; let low = 0, high = original.length;
@@ -107,7 +112,7 @@ export async function inspectRecord(vault: SampleVault, input: RecordInput): Pro
       return { ...e, excerpt, excerptTruncated: excerpt.length < e.excerpt.length || e.excerptTruncated };
     });
   }
-  return boundRecord(result, input);
+  return boundRecord(result, input, metadataView === "compact");
 }
 
 export async function inspectOntology(vault: SampleVault, input: OntologyInput): Promise<OntologyOutput> {

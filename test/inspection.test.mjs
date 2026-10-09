@@ -136,6 +136,7 @@ test('record byte limit traverses escaped Unicode text losslessly', async t => {
   assert.equal(raw, original);
 });
 
+const fake2 = (detail, extra) => ({ detail: async () => ({ ...structuredClone(detail), record: { ...structuredClone(detail.record), metadata: JSON.stringify({ ...JSON.parse(detail.record.metadata), fields: undefined, ...extra }) } }) });
 test('compact metadata preserves uncertainty without nested evidence; explicit selectors and oversized full metadata', async () => {
   const vault = new SampleVault(), detail = await vault.detail('sample_claim_pilot');
   const metadata = JSON.parse(detail.record.metadata);
@@ -150,8 +151,18 @@ test('compact metadata preserves uncertainty without nested evidence; explicit s
   assert.equal(result.record.metadata.identity.candidates[0].basis, 'Unresolved match');
   assert.ok(!JSON.stringify(result).includes('secret-evidence'));
   assert.equal(result.record.metadata.fields, undefined);
+  assert.ok(result.omitted.includes('metadata.fields'), 'oversized compact fields are omitted, not fatal');
   await assert.rejects(inspectRecord(fake, {id:detail.record.id, metadataView:'compact', includeMetadata:false}), /not both/);
   await assert.rejects(inspectRecord(fake, {id:detail.record.id, view:'summary', metadataView:'full'}), /exceeds response budget/);
+  // Expanded evidence descriptors drop from full metadata instead of failing the read.
+  const many = JSON.parse(detail.record.metadata); delete many.fields;
+  many.evidence = Array.from({length:120}, (_, i) => ({path:`sources/meeting-${i}.md`, sha256:'b'.repeat(64), filename:`meeting-${i}.md`, attribution:'Granola meeting transcript', start_line:i+1, end_line:i+2}));
+  const evidenceHeavy = { detail: async () => ({ ...structuredClone(detail), record: { ...structuredClone(detail.record), metadata: JSON.stringify(many) } }) };
+  const heavy = checked('record', await inspectRecord(evidenceHeavy, {id:detail.record.id, view:'summary', metadataView:'full'}));
+  assert.equal(heavy.record.metadata.evidence, undefined); assert.ok(heavy.omitted.includes('metadata.evidence'));
+  assert.equal(heavy.record.metadata.identity.status, 'partial');
+  const small = checked('record', await inspectRecord(fake2(detail, {aliases:['Pilot'], fields:{role:'Lead'}}), {id:detail.record.id}));
+  assert.deepEqual(small.record.metadata.aliases, ['Pilot']); assert.deepEqual(small.record.metadata.fields, {role:'Lead'}); assert.ok(small.record.metadata.updated_at);
   const explicit = checked('record', await inspectRecord(vault, {id:'sample_claim_pilot', includeEvidence:true}));
   assert.equal(explicit.evidence[0].verified, true);
 });

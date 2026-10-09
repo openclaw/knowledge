@@ -59,7 +59,6 @@ const fileKind = (e: { mediaType?: string; filename?: string; path: string }) =>
 };
 /** Human-scale byte count, e.g. "49 KB". */
 const fileSize = (bytes: number) => bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${Math.round(bytes / 1024)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-const rawBlock = (label: string, text: string) => { const n = el("details"); n.append(el("summary", label), el("pre", text)); return n; };
 
 export default defineControlUiPlugin({
   id: contract.pluginId,
@@ -357,9 +356,20 @@ export default defineControlUiPlugin({
         card.append(evidence); return card;
       }
 
+      // Full metadata is only for inspection, so it loads when its disclosure first opens.
+      function metadataBlock(id: string, n: number) {
+        const block = el("details"), text = el("pre", "Loading…"); block.append(el("summary", "Structured metadata"), text);
+        block.addEventListener("toggle", () => {
+          if (!block.open || block.dataset.loaded) return; block.dataset.loaded = "true";
+          feature.invoke("record", { id, view: "summary", metadataView: "full" })
+            .then(result => { if (live(n)) text.textContent = JSON.stringify(result.record?.metadata ?? null, null, 2) + (result.omitted?.includes("metadata.evidence") ? "\n\nEvidence descriptors omitted for size. View Markdown for the complete frontmatter." : ""); })
+            .catch(error => { if (live(n)) { text.textContent = errorText(error); delete block.dataset.loaded; } });
+        });
+        return block;
+      }
       async function showDetail(id: string, n: number, target: HTMLElement, pages = 1, waitForPanels = false) {
         const pending: Promise<unknown>[] = [];
-        const result = await feature.invoke("record", { id, maxChars: 65536, includeEvidence: true, includeMetadata: true, includeReferences: true, referenceLimit: 20 });
+        const result = await feature.invoke("record", { id, maxChars: 65536, includeEvidence: true, metadataView: "compact", includeReferences: true, referenceLimit: 20 });
         if (!live(n)) return;
         if (!result.record) { target.replaceChildren(empty("Record unavailable", "This record cannot be opened in the current scope. No matching record was selected arbitrarily.")); return; }
         const r = result.record, meta = r.metadata;
@@ -400,7 +410,7 @@ export default defineControlUiPlugin({
             const found = new Map<string, Version>(), queue = [r.id];
             while (queue.length && found.size < 10) {
               const nextId = queue.shift()!; if (found.has(nextId)) continue;
-              const version = nextId === r.id ? r : (await feature.invoke("record", { id: nextId, includeMetadata: true, maxChars: 4000 })).record; if (!live(n)) return;
+              const version = nextId === r.id ? r : (await feature.invoke("record", { id: nextId, metadataView: "compact", maxChars: 4000 })).record; if (!live(n)) return;
               if (!version) continue; found.set(nextId, version);
               for (const linked of [version.metadata?.supersedes, version.metadata?.superseded_by]) if (linked && !found.has(linked)) queue.push(linked);
             }
@@ -464,7 +474,7 @@ export default defineControlUiPlugin({
           for (const candidate of meta.identity.candidates) {
             const match = result.references?.find(ref => ref.id === candidate.id);
             const card = el("section", undefined, "knowledge-candidate knowledge-surface"); card.append(button(`Possible match: ${match?.title ?? "Candidate identity"}`, () => open(candidate.id), "knowledge-quiet"), el("p", candidate.basis), el("p", `Both records stay separate unless ${agentName() ?? "your agent"} finds evidence they’re the same person.`, "knowledge-muted"), button(`${askLabel()} to check`, () => ask(r, false, { id: candidate.id, title: match?.title ?? candidate.id }), "knowledge-quiet"));
-            for (const evidence of candidate.evidence ?? []) { const verified = result.identityEvidence?.find(item => item.id === candidate.id)?.evidence.find(e => e.path === evidence.path && e.sha256 === evidence.sha256 && e.start_line === evidence.start_line && e.end_line === evidence.end_line); if (verified) card.append(evidenceView(feature, { ...result, evidence: [verified], evidenceTotal: 1, evidenceSourceTotal: 1, nextEvidenceOffset: null }, () => live(n), errorText)); else card.append(el("p", `Evidence: ${evidence.filename ?? evidence.path}${evidence.start_line ? ` · lines ${evidence.start_line}–${evidence.end_line ?? evidence.start_line}` : ""}. Open the record to inspect this citation.`, "knowledge-muted")); } candidates.append(card);
+            for (const evidence of result.identityEvidence?.find(item => item.id === candidate.id)?.evidence ?? []) { if (evidence.verified) card.append(evidenceView(feature, { ...result, evidence: [evidence], evidenceTotal: 1, evidenceSourceTotal: 1, nextEvidenceOffset: null }, () => live(n), errorText)); else card.append(el("p", `Evidence: ${evidence.filename ?? evidence.path}${evidence.start_line ? ` · lines ${evidence.start_line}–${evidence.end_line ?? evidence.start_line}` : ""}. Open the record to inspect this citation.`, "knowledge-muted")); } candidates.append(card);
           }
           main.append(candidates);
         }
@@ -489,7 +499,7 @@ export default defineControlUiPlugin({
         const filePanel = el("div", undefined, "knowledge-surface knowledge-file-panel"), fileActions = el("div", undefined, "knowledge-file-actions");
         const dl = el("dl"); for (const [label, value] of [["File", r.path], ["ID", r.id], ["Revision", String(r.revision)]]) dl.append(el("dt", label), el("dd", value));
         const checkpointValue = el("dd", "Checking…"); dl.append(el("dt", "History"), checkpointValue); filePanel.append(dl);
-        const technical = el("details", undefined, "knowledge-technical-details"); technical.append(el("summary", "Technical metadata"), el("p", `Lifecycle: ${r.lifecycle}`), el("code", `SHA-256: ${r.hash}`), rawBlock("Structured metadata", JSON.stringify(meta, null, 2)));
+        const technical = el("details", undefined, "knowledge-technical-details"); technical.append(el("summary", "Technical metadata"), el("p", `Lifecycle: ${r.lifecycle}`), el("code", `SHA-256: ${r.hash}`), metadataBlock(id, n));
         const raw = button("View Markdown", () => {
           raw.disabled = true; let next = 0; const text = el("pre"); const more = button("Read more Markdown", () => { void read(); });
           async function read() { more.disabled = true; try { const page = await feature.invoke("record", { id, view: "raw", metadataView: "none", offset: next, maxChars: 65536 }); if (disposed || !filePanel.isConnected || !context.host.connection.connected) return; if (page.record?.hash !== r.hash) throw Error("Record changed; reopen it to read the current Markdown."); text.textContent += page.record.raw ?? ""; if (page.content.nextOffset === null) more.remove(); else { next = page.content.nextOffset; more.disabled = false; } } catch (error) { filePanel.append(failure(error)); more.disabled = false; } }

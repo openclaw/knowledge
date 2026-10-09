@@ -50,10 +50,10 @@ or connected-record lists by default.
 
 - `view: "summary"`: omit text and evidence by default; inspect identity/state.
 - `view: "raw"`: original Markdown **instead of** body, for exact-file inspection.
-- `metadataView: "compact"` (default): structured associations, dates, endpoints and uncertainty, without evidence descriptors or arbitrary domain fields.
+- `metadataView: "compact"` (default): structured associations, dates, endpoints, aliases, domain fields, version links and uncertainty, without evidence descriptors.
 - `metadataView: "none"`: omit structured metadata.
 - `metadataView: "full"`: full frontmatter as a structured object, not a JSON string.
-  Use this to inspect domain fields before replacing the `fields` object in an edit.
+  When the expanded evidence list would exceed the response budget it is dropped and `omitted` lists `metadata.evidence`; page evidence with `includeEvidence` instead.
   Omitting `fields` from a save preserves existing fields. Legacy `includeMetadata: true/false` selects full/none; combining it with `metadataView` is an error.
 - `includeReferences: true`: connected summaries, default 20/page, with
   `referenceTotal` and `nextReferenceOffset`. Continue with `referenceOffset`;
