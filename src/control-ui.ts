@@ -34,6 +34,14 @@ const typeIcons: Record<string, [IconName, string]> = { person: ["circleUser", "
 const tile = (type: string, size = 28, kind = "page") => { const [glyph, tone] = (Object.hasOwn(typeIcons, type) ? typeIcons[type] : undefined) ?? [kind === "relationship" ? "link" : "fileText", "neutral"]; const n = el("span", undefined, `knowledge-tile knowledge-tone-${tone}${kind === "page" ? "" : " knowledge-tile-plain"}`); n.style.setProperty("--tile-size", `${size}px`); n.append(icon(glyph, size >= 48 ? 24 : size <= 24 ? 13 : 15)); return n; };
 const date = (text: string) => formatSourceDate(text);
 const time = (text: string) => new Date(text).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", timeZoneName: "short" });
+const clock = (text: string) => new Date(text).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+/** Local day label for grouped rows: Today, Yesterday, or a short date (with year outside the current one). */
+const dayHeading = (text: string) => {
+  const day = new Date(text), today = new Date(), yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
+  if (day.toDateString() === today.toDateString()) return "Today";
+  if (day.toDateString() === yesterday.toDateString()) return "Yesterday";
+  return day.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", ...(day.getFullYear() === today.getFullYear() ? {} : { year: "numeric" as const }) });
+};
 
 /** Summary label whose text swaps with its details element's open state. */
 const disclosureLabel = (closed: string, opened: string) => { const control = el("span", undefined, "knowledge-disclosure-label"); control.append(el("span", closed, "knowledge-when-closed"), el("span", opened, "knowledge-when-open"), icon("chevronDown", 14)); return control; };
@@ -644,6 +652,26 @@ export default defineControlUiPlugin({
         // expanded evidence, focus and scroll state. Only navigation streams it.
         if (waitForPanels) await panels;
       }
+      // Pages arrive newest-updated first, so rows group under day headings and show only the
+      // time of day; the full timestamp stays in each time's tooltip.
+      function pageTable(records: Summary[]) {
+        const table = el("table", undefined, "data-table knowledge-table"), head = el("thead"), headRow = el("tr");
+        for (const name of ["Name", "Type", "Occurred", "Last updated"]) { const th = el("th", name); if (name === "Last updated") { th.setAttribute("aria-sort", "descending"); th.append(el("span", " ↓", "knowledge-sort-indicator")); } headRow.append(th); }
+        head.append(headRow); table.append(head);
+        const body = el("tbody"); let currentDay: string | undefined;
+        for (const record of records) {
+          // A heading row starts whenever the update day changes.
+          const day = record.updatedAt ? dayHeading(record.updatedAt) : "Time not recorded";
+          if (day !== currentDay) { currentDay = day; const dayRow = el("tr", undefined, "knowledge-day-row"), cell = el("th", day); cell.colSpan = 4; cell.scope = "colgroup"; dayRow.append(cell); body.append(dayRow); }
+          // Empty occurrence cells stay blank so the few dated records stand out.
+          const row = el("tr", undefined, "knowledge-page-row"), name = el("td", undefined, "knowledge-name-cell"), occurred = el("td", undefined, "knowledge-occurred-cell"), updated = el("td", undefined, "knowledge-updated-cell");
+          name.append(summaryLink(record));
+          if (record.occurredAt) occurred.textContent = `${formatSourceDate(record.occurredAt)}${/^\d{4}-\d{2}-\d{2}$/.test(record.occurredAt) ? " · date only" : ""}`;
+          if (record.updatedAt) { updated.textContent = clock(record.updatedAt); updated.title = date(record.updatedAt); }
+          row.append(name, el("td", label(record.type), "knowledge-type-cell"), occurred, updated); body.append(row);
+        }
+        table.append(body); return table;
+      }
       async function browse(n: number, target: HTMLElement) {
         const result = await feature.invoke("records", { kind, offset, limit: kind === "claim" ? 20 : 50, includeCards: kind === "claim", includeEndpoints: kind === "relationship", ...(type ? { type } : {}), ...(browseQuery ? { query: browseQuery } : {}), ...(includeHistory ? { lifecycle: "all" } : {}), ...(originFilter && kind === "claim" ? { assertionOrigin: originFilter } : {}) });
         if (!live(n) || n !== generation) return;
@@ -669,7 +697,7 @@ export default defineControlUiPlugin({
             row.append(record.lifecycle === "active" ? confidenceView(record.attributionConfidence, true) : button(`Withdrawn · ${record.updatedAt ? date(record.updatedAt) : "Time not recorded"}`, () => open(record.id), "knowledge-quiet")); panel.append(row);
           }
         }
-        else { const table = el("table", undefined, "data-table knowledge-table"), head = el("thead"), row = el("tr"); for (const label of ["Name", "Type", "Occurred", "Last updated"]) { const th = el("th", label); if (label === "Last updated") { th.setAttribute("aria-sort", "descending"); th.append(el("span", " ↓", "knowledge-sort-indicator")); } row.append(th); } head.append(row); table.append(head); const body = el("tbody"); for (const record of result.records) { const row = el("tr"), name = el("td"); name.append(summaryLink(record)); row.append(name, el("td", label(record.type)), el("td", record.occurredAt ? `${formatSourceDate(record.occurredAt)}${/^\d{4}-\d{2}-\d{2}$/.test(record.occurredAt) ? " · date only" : ""}` : "—"), el("td", record.updatedAt ? date(record.updatedAt) : "Not recorded")); body.append(row); } table.append(body); panel.append(table); }
+        else panel.append(pageTable(result.records));
         if (!result.records.length) panel.append(empty("Nothing here yet", "Tell your agent in chat and saved knowledge will appear here."));
         const pages = el("div", undefined, "knowledge-pagination");
         const capped = result.nextOffset !== null && result.nextOffset > 500;
