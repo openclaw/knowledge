@@ -559,3 +559,9 @@ details[open] > summary > .knowledge-disclosure-label > .knowledge-icon { transf
   .knowledge-table-toolbar .knowledge-kind-switch { flex: 1 1 auto; flex-wrap: nowrap; }
   .knowledge-page .knowledge-table-toolbar .knowledge-kind-switch button { flex: 1; padding: 6px 8px; }
 }
+
+/* Folded Timeline months in rendered notes. */
+.knowledge-timeline-group { margin: 6px 0; }
+.knowledge-timeline-group > summary { cursor: pointer; color: var(--muted); font-size: 13px; padding: 4px 0; }
+.knowledge-timeline-group[open] > summary { color: var(--text); }
+.knowledge-timeline-group > ul { margin-top: 4px; }

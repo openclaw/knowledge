@@ -10,6 +10,7 @@ import { confidenceView, identityTag, assertionOrigin as origin, agentDisplayNam
 import { formatSourceDate, sourceDateNote } from "./temporal.js";
 import { captureReadingState } from "./reading-state.js";
 import { markdownView } from "./markdown-view.js";
+import { foldTimeline } from "./timeline-fold.js";
 import { readLocation, locationParams, locationKey } from "./page-location.js";
 import { temporalFilterForm, temporalQuery, temporalSelectionError, type TemporalSelection } from "./search-date-filters.js";
 import { viewingClient } from "./store-view-client.js";
@@ -438,7 +439,7 @@ export default defineControlUiPlugin({
           const originals = files.querySelector<HTMLDetailsElement>(".knowledge-retained-originals");
           if (originals) { originals.open = true; originals.scrollIntoView({ block: "nearest" }); }
         };
-        let renderedNotes = markdownView(bodyText, navigateNotes, notesLinks);
+        let renderedNotes = foldTimeline(markdownView(bodyText, navigateNotes, notesLinks));
         body.append(renderedNotes);
         // Fetch only an explicitly requested next window; reject mixed revisions.
         if (result.content.nextOffset !== null) {
@@ -453,7 +454,7 @@ export default defineControlUiPlugin({
               // may span transport windows and must not become separate documents.
               notesText += page.record.body ?? "";
               notesLinks = [...new Map([...notesLinks, ...(page.links ?? [])].map(link => [link.href, link])).values()];
-              const rendered = markdownView(withoutTitleHeading(notesText, r.title), navigateNotes, notesLinks);
+              const rendered = foldTimeline(markdownView(withoutTitleHeading(notesText, r.title), navigateNotes, notesLinks));
               renderedNotes.replaceWith(rendered); renderedNotes = rendered;
               if (page.content.nextOffset === null) more.remove();
               else { next = page.content.nextOffset; more.disabled = false; }
