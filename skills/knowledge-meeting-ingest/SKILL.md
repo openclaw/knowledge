@@ -214,7 +214,8 @@ For EACH actual attendee, run `knowledge-entities`:
 2. Apply `knowledge-entities`' material-change decision: update affected State
    only when the supported situation changes. A new meeting may require only
    dated context or additional evidence; an already represented rerun is a no-op.
-3. Add a dated “Attended {meeting}” timeline reference with a link back and citation.
+3. Add a one-line dated “Attended {meeting}” Timeline entry, newest first, with a
+   link back and citation, in the `knowledge-entities` Timeline format.
 4. Create/reuse an evidenced attendance relationship via
    `knowledge_create_relationship`; inspect the current label/direction first.
    In the shipped ontology, `attended` runs **participant → meeting**, unlike

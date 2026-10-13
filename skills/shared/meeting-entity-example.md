@@ -74,9 +74,7 @@ As of the September 23 review, Morgan had committed to sending a failure report
 without a deadline. [[meetings/reliability-review|Reliability review · lines 2, 5]]
 
 ## Timeline
-- **2026-09-23:** Participated in the reliability review and reported two failure
-  cases requiring investigation.
-  [[meetings/reliability-review|Reliability review · lines 2–3]]
+- **2026-09-23** — Reported two failure cases at the reliability review. [[meetings/reliability-review|Reliability review · lines 2–3]]
 ```
 
 The introduction describes Morgan's source-grounded context, State captures the
@@ -107,14 +105,12 @@ cases and approved release; deployment had not happened.
 [[meetings/reliability-follow-up|Reliability follow-up · lines 2–4]]
 
 ## Timeline
-- **2026-09-25:** Reported sending the failure report and understanding both
-  failure cases; approved release while deployment remained pending.
-  [[meetings/reliability-follow-up|Reliability follow-up · lines 2–4]]
-- **2026-09-23:** Participated in the reliability review, reported two unresolved
-  failure cases, held release pending investigation, and committed to sending
-  a failure report without a deadline.
-  [[meetings/reliability-review|Reliability review · lines 2–5]]
+- **2026-09-25** — Sent the failure report and approved release. [[meetings/reliability-follow-up|Reliability follow-up · lines 2–4]]
+- **2026-09-23** — Reported two failure cases and committed to a failure report. [[meetings/reliability-review|Reliability review · lines 2–5]]
 ```
+
+Each entry is one line, newest first. The September 25 entry does not repeat
+that deployment was pending; that qualification lives in State and the source.
 
 The supported introduction need not change. The pending report belongs to the
 earlier history; release approval must not become a claim of deployment. Keep

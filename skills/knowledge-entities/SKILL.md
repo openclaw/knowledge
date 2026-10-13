@@ -171,9 +171,15 @@ The opening answers “what do these sources establish about THIS entity?”, no
 - **State:** synthesize the supported situation as of the source dates. Rewrite
   an affected topic when the situation changes; never accumulate a meeting log
   here. A reader should not need to replay old paragraphs to find the situation.
-- **Timeline:** preserve concise, reverse-chronological participation and dated
-  developments with contextual source links. Different entities receive their
-  own relevant context, not copies of the entire meeting summary.
+- **Timeline:** newest first, one line per source event:
+  `- **YYYY-MM-DD** — what happened for this entity. [[source|Label · lines]]`.
+  Keep each entry to one sentence of about 25 words. Qualifications, hedges,
+  quotes and detail stay in the linked source page and its claims, so the entry
+  only needs to say what happened and where to read more. Different entities
+  receive their own relevant context, not copies of the entire meeting summary.
+  When a profile already has paragraph-length entries, condense them to this
+  form in the same revision, keeping each date and source link; move anything
+  that still describes the current situation into State.
 
 Do not repeat a passage across all three. The same fact can appear in State and
 its dated history when those serve different purposes; do not remove necessary
