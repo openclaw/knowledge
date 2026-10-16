@@ -94,51 +94,15 @@ Do not repeat recent enrichment absent new signal. Unknown facts remain absent.
    collections/fields replace the whole value. Never invent frontmatter fields.
    - CREATE: substantive cited summary and State, known relationship/context,
      first dated source reference; omit unsupported template sections.
-   - UPDATE: apply the material-change decision below before drafting. Rewrite
-     only affected State topics; preserve history and user assessments. Add
-     reverse-chronological Timeline entries without duplicates. Flag conflicting
-     accounts, don't silently choose.
+   - UPDATE: add new Timeline entries. Rewrite a State topic only when the new
+     source changes it. A rerun or repeated report changes nothing; don't save.
+     Keep user-written assessments. Flag conflicting accounts with both sources.
 7. **Cross-reference.** Link the source to the entity and the entity back to the
    source. Update related company/project pages when relevant evidence surfaced.
    Use actual returned paths for links. Create/reuse event claims connected to
    all relevant entities, with source dependencies; inspect existing claims first.
    Create explicit evidenced relationships only using inspected ontology labels
    and directions. Markdown links alone do not create these edges.
-
-## Decide what materially changed
-
-Before an update, compare the proposed assertion with the complete existing page
-and relevant evidence: subject, meaning, speaker, qualifications and event date.
-A new source, ingestion date or different wording is not itself a changed fact.
-Choose the smallest supported update for each topic:
-
-| Evidence relationship | Page action |
-|---|---|
-| Same assertion, same source already represented | Reuse the page; no save, duplicate evidence or extra Timeline entry. |
-| Additional support for the same qualified assertion | Keep State wording unless its evidential qualification changes; attach only missing support and add a source-specific contextual link where useful. |
-| New participation or a dated reaffirmation, situation unchanged | Add the missing dated context to Timeline; leave unrelated State untouched. |
-| Changed role, decision, plan, blocker or explicitly reported completion | Rewrite the affected State topic at the supported date; preserve the earlier situation in Timeline. A plan or approval does not establish execution. |
-| Conflicting accounts or explicit correction | Preserve unresolved accounts with attribution and both sources; an explicit correction follows `knowledge-correct`. Newer text alone does not win. |
-| Late-arriving older source | Place its contribution at the event date. Change State only if it changes the supported synthesis; never reset State to an older plan just because it was ingested last. |
-
-Several rows can apply to one source. A confidence change needs evidence, not
-just repeated copies of the same report. Preserve source precision and unresolved
-identity; do not infer completion from a missing later mention. Reorganizing a
-repetitive profile is a separate authorized repair, not a reason to rewrite an
-already adequate profile on every rerun.
-
-Keep a short task-local decision note naming the affected topic, evidence and
-chosen action, including no-op. Do not put this process log into the profile.
-Before saving, compare the proposed body and supplied metadata with the current
-record. If no substantive content, missing context or evidence changes remain,
-report reused without publishing. If only support changes, use the existing
-evidence/annotation path from publication guidance rather than rewriting prose.
-For structured claims, separately follow publication's reuse, added evidence,
-continuity and correction rules; a page rewrite never changes their lifecycle.
-
-After saving, verify both the intended change and the unchanged facts,
-qualifications and user assessments. On a no-op, verify the existing record and
-source coverage; no new revision is required to prove work was done.
 
 ## Reconcile evidence associations
 
@@ -168,31 +132,12 @@ The opening answers “what do these sources establish about THIS entity?”, no
 
 - **Introduction:** supported identity, how the person is known, and relevant
   continuing context. Do not turn a single meeting into an enduring biography.
-- **State:** synthesize the supported situation as of the source dates. Rewrite
-  an affected topic when the situation changes; never accumulate a meeting log
-  here. A reader should not need to replay old paragraphs to find the situation.
+- **State:** the current situation, in short `###` topics. When a topic
+  changes, rewrite it in place; earlier wording stays in the Timeline and in
+  revision history.
 - **Timeline:** newest first, one line per source event:
   `- **YYYY-MM-DD** — what happened for this entity. [[source|Label · lines]]`.
-  Keep each entry to one sentence of about 25 words. Qualifications, hedges,
-  quotes and detail stay in the linked source page and its claims, so the entry
-  only needs to say what happened and where to read more. Different entities
-  receive their own relevant context, not copies of the entire meeting summary.
-  When a profile already has paragraph-length entries, condense them to this
-  form in the same revision, keeping each date and source link; move anything
-  that still describes the current situation into State.
-
-Do not repeat a passage across all three. The same fact can appear in State and
-its dated history when those serve different purposes; do not remove necessary
-history merely to avoid every overlap. Keep authored contextual Timeline links
-even when structured event claims and automatic backlink navigation exist.
-
-When repairing a repetitive profile, read the complete page and relevant retained
-sources first. Preserve each unique supported assertion in its appropriate
-section, along with user assessments, qualifications and citations. Keep resolved
-blockers and earlier plans in dated history rather than presenting them as current
-State. Do not alter retained originals or withdraw structured assertions merely
-because the prose was reorganized. If only one source is known, limit the summary
-to that context without adding stock disclaimers.
+  One sentence; detail stays in the linked source.
 
 Populate supported ontology fields such as `role` when the source establishes
 them, and create evidenced relationships separately. Unknown role, employer and
@@ -202,10 +147,6 @@ never rewrite the retained original or “correct” a verbatim quote.
 For partial identity, record structured `identity.status` and context instead of
 relying solely on parenthetical title text. Candidates require their own evidence
 and remain distinct pages. Identity consolidation is still not implemented.
-
-Before scaling, compare 3–5 saved profiles with their cited passages. Check that
-the introduction, State and Timeline serve different purposes and known fields
-were not lost in prose. Schema validity alone does not pass this quality gate.
 
 Keep gbrain's useful structure, scaled to available evidence:
 
@@ -230,8 +171,7 @@ Run aggregate verification with independently planned authored links in both
 directions, associations and relationship endpoints. Read every changed page and
 assertion for substantive correctness using compact defaults; request
 `includeEvidence: true` for sources/attribution and `metadataView: "full"` for
-domain fields. Verify State and dated contextual entries, not merely structural
-membership. Follow shared pagination and exception-investigation rules; use
+domain fields. Follow shared pagination and exception-investigation rules; use
 compact connections for discovery rather than repeating passed structural checks.
 Verify contextual source links in the body separately from derived navigation.
 Return resolved IDs, created/updated/reused records, sources used and unresolved

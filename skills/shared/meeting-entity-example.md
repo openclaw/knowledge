@@ -70,17 +70,20 @@ Morgan described investigating failures and deciding whether to release.
 [[meetings/reliability-review|Reliability review · lines 3–4]]
 
 ## State
-As of the September 23 review, Morgan had committed to sending a failure report
-without a deadline. [[meetings/reliability-review|Reliability review · lines 2, 5]]
+### Release
+Morgan is holding the release until two failure cases are understood.
+[[meetings/reliability-review|Reliability review · lines 3–4]]
+
+### Open commitments
+Morgan will send a failure report; no deadline set.
+[[meetings/reliability-review|Reliability review · line 5]]
 
 ## Timeline
 - **2026-09-23** — Reported two failure cases at the reliability review. [[meetings/reliability-review|Reliability review · lines 2–3]]
 ```
 
-The introduction describes Morgan's source-grounded context, State captures the
-dated open commitment, and Timeline records participation/contribution. None
-asserts an employer, job title, enduring personality trait or later completion.
-For the noncontiguous State citation attach separate line-2 and line-5 evidence.
+The introduction says how Morgan is known, State holds the current situation by
+topic, and the Timeline records what happened.
 
 ## Updating the same profile after a later review
 
@@ -94,58 +97,25 @@ Assume a second retained transcript is returned at
 4  Morgan: I approved the release. Deployment has not happened yet.
 ```
 
-A meeting-log-shaped State would leave the earlier pending report statement and
-append “At the September 25 meeting Morgan reported sending it.” Rewrite the
-affected topic instead, while preserving earlier dated context:
+Both State topics change, so rewrite them in place:
 
 ```markdown
 ## State
-As of September 25, Morgan had sent the failure report, understood both failure
-cases and approved release; deployment had not happened.
-[[meetings/reliability-follow-up|Reliability follow-up · lines 2–4]]
+### Release
+Morgan approved the release after both failure cases were understood; it has not
+deployed yet. [[meetings/reliability-follow-up|Reliability follow-up · lines 3–4]]
+
+### Open commitments
+None; the failure report was sent.
+[[meetings/reliability-follow-up|Reliability follow-up · line 3]]
 
 ## Timeline
 - **2026-09-25** — Sent the failure report and approved release. [[meetings/reliability-follow-up|Reliability follow-up · lines 2–4]]
 - **2026-09-23** — Reported two failure cases and committed to a failure report. [[meetings/reliability-review|Reliability review · lines 2–5]]
 ```
 
-Each entry is one line, newest first. The September 25 entry does not repeat
-that deployment was pending; that qualification lives in State and the source.
-
-The supported introduction need not change. The pending report belongs to the
-earlier history; release approval must not become a claim of deployment. Keep
-both original transcripts and evidence for both dates. This body rewrite does
-not automatically correct, withdraw or mark a separate commitment complete.
-Read related assertions and follow their supported update/correction workflow.
-
-## Decide whether another source changes State
-
-Continue from the September 25 profile above. These are hypothetical branches,
-not extra facts to publish:
-
-- **Unchanged rerun:** the identical September 25 transcript and its evidence
-  are already represented. Reuse the profile and existing assertions; do not
-  save another revision or repeat its Timeline entry.
-- **Additional support:** an independent retained report supports exactly the
-  same qualified September 25 account. Add missing source support and a useful
-  contextual citation, but do not restate State as another meeting paragraph.
-- **Reaffirmation:** at a September 26 review Morgan again says deployment is
-  pending. Add supported participation/reaffirmation to dated history; no new
-  State paragraph is needed merely because another meeting occurred.
-- **Changed fact:** a September 27 source explicitly reports deployment. Rewrite
-  that State topic as of September 27, retaining the September 25 pending status
-  in history. Do not infer deployment from approval alone.
-- **Conflicting account:** another speaker says deployment occurred September 24.
-  Inspect whether this concerns the same release; if unresolved, preserve both
-  attributed accounts. The source received last is not automatically correct.
-- **Late source:** the September 23 review arrives after the September 25 update.
-  Add any missing September 23 history/support, but do not restore the report as
-  pending or the release as held in State. If that history is already present,
-  reuse it. An explicit correction is handled separately from an older plan.
-
-In each branch, read current records first and record the decision in task working
-notes. Verify unchanged topics as well as changed ones. Never fabricate one of
-these branches to make a live test pass.
+The introduction need not change. A page rewrite does not change the separate
+commitment claim; follow publication guidance for that.
 
 ## Structured records and checks
 

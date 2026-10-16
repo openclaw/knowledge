@@ -51,8 +51,8 @@ source_summary: "..."          # recorder summary is a CLAIM, not a FACT
 source_url: "..."              # if supplied
 ```
 
-Retain source segment order/timestamps when present. Invitees are not necessarily
-attendees. A summary is two lossy layers removed (transcription + summarization).
+Retain source segment order/timestamps when present. A summary is two lossy
+layers removed (transcription + summarization).
 Retain the original export and transcript with `knowledge_attach`, then attach
 returned evidence to the meeting page. Normalized text is a labeled derivative,
 not a replacement for the original. Inspect for captured credentials before
@@ -135,10 +135,10 @@ Use the current ontology's meeting definition and actual resolved page links:
 **Duration:** {if available}
 
 ## Summary
-{3–5 substantive key outcomes with citations}
+{3–5 key outcomes, each citing the lines that support it}
 
 ## Key Decisions
-{Decisions with context, qualifications and citations.
+{Decisions with context and citations.
 If none: _No decisions — discussion only._}
 
 ## Action Items
@@ -199,7 +199,7 @@ After this gate, create/reuse separately useful claims with
 `knowledge_create_claim`: decisions, commitments, material facts/beliefs and dated
 events. Use `assertion_origin: source` for transcript statements and name the
 speaker in attribution, including unresolved labels. Preserve conditions such as
-“subject to review”; proposed targets are not launch commitments. Use resolved
+“subject to review”. Use resolved
 entity IDs and a meeting dependency, plus exact transcript evidence. Known owner
 and due date belong on a commitment; omit unknown ones. Relative dates require
 sufficient source date/timezone context. No task or reminder is created.
@@ -211,9 +211,7 @@ For EACH actual attendee, run `knowledge-entities`:
 1. Search and read the existing person page, or create a sourced one if identity
    is sufficient. Participation and actual contribution are meaningful context;
    do not create a content-free stub or fabricate a profile for UNKNOWN.
-2. Apply `knowledge-entities`' material-change decision: update affected State
-   only when the supported situation changes. A new meeting may require only
-   dated context or additional evidence; an already represented rerun is a no-op.
+2. Rewrite a State topic only if this meeting changes it.
 3. Add a one-line dated “Attended {meeting}” Timeline entry, newest first, with a
    link back and citation, in the `knowledge-entities` Timeline format.
 4. Create/reuse an evidenced attendance relationship via
@@ -222,7 +220,7 @@ For EACH actual attendee, run `knowledge-entities`:
    gbrain's meeting auto-link direction. Knowledge has no auto-link post-hook.
 
 Back-link known people mentioned or speaking in the transcript too, not just
-attendees, but only supported identifications. Mention alone is not attendance.
+attendees, but only supported identifications.
 Unknown speaker attribution can remain flagged without a fabricated entity.
 
 ### Phase 8: Entity propagation + timeline merge (MANDATORY)
@@ -269,10 +267,7 @@ Run every check for every meeting, including quick logistics meetings.
   event associations/attendance endpoints. Discover graph context or investigate
   failures with compact connections and record links; do not repeat successful
   structural checks merely to obtain larger responses. Automatic reverse
-  navigation does not prove an authored contextual link. Read entity State as a
-  synthesis of the supported situation, not successive meeting summaries; keep
-  dated participation and earlier developments in Timeline. Confirm that prose
-  cleanup preserved unique facts, qualifications and user assessments.
+  navigation does not prove an authored contextual link.
 - **V3 — Speaker map resolved or flagged.** No raw label silently masquerades as
   a known person. Every named speaker has an evidence basis/confidence.
 - **Structured readback.** Known commitment owners are resolved page IDs, not just

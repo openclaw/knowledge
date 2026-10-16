@@ -24,9 +24,8 @@ existing tools, not a separate ingestion engine.
 
 ## Evidence and attribution
 
-- Write specific qualifications where they apply. Do not append a stock “Evidence
-  boundaries” paragraph to every page. Keep portable inline source links, but do
-  not repeat the same passage in the introduction, State and Timeline.
+- Write what the source says, plainly; the verb carries certainty (proposed,
+  planned, reported, agreed). Keep portable inline source links.
 - A retained file and citations into it are different units. Reuse the original;
   deduplicate identical citations while retaining distinct passages, attributions,
   derived transcripts and separate recordings. Exact quotes are optional; precise
