@@ -12,8 +12,7 @@ writes, [publication](references/publication.md).
 ## Contract
 
 - Check Knowledge BEFORE asking the user or reaching for external lookups.
-- Every enriched page has substantive current State with inline citations,
-  dated source context where known, and bidirectional content back-links.
+- Every enriched page has inline citations and bidirectional content back-links.
 - Scale effort to importance. No empty stubs, invented roles or boilerplate.
 - Preserve user-written assessments; flag contradictions with both citations.
 
