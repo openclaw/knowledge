@@ -131,9 +131,12 @@ The opening answers “what do these sources establish about THIS entity?”, no
 
 - **Introduction:** supported identity, how the person is known, and relevant
   continuing context. Do not turn a single meeting into an enduring biography.
-- **State:** the current situation, in short `###` topics. When a topic
-  changes, rewrite it in place; earlier wording stays in the Timeline and in
-  revision history.
+- **State:** the current situation, in short `###` topics named for what they
+  cover. A new source usually changes nothing here; its contribution is the
+  Timeline entry. When it does change the situation, edit the sentences of the
+  existing topic so they read as current; earlier wording stays in the Timeline
+  and in revision history. Never add a topic or paragraph named for a date,
+  meeting or source.
 - **Timeline:** newest first, one line per source event:
   `- **YYYY-MM-DD** — what happened for this entity. [[source|Label · lines]]`.
   One sentence; detail stays in the linked source.

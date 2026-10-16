@@ -267,6 +267,9 @@ Run every check for every meeting, including quick logistics meetings.
   failures with compact connections and record links; do not repeat successful
   structural checks merely to obtain larger responses. Automatic reverse
   navigation does not prove an authored contextual link.
+- **V2b — State reads as current.** No State topic or paragraph on an updated
+  page is named for a date, meeting or source; a changed fact was edited into its
+  existing topic.
 - **V3 — Speaker map resolved or flagged.** No raw label silently masquerades as
   a known person. Every named speaker has an evidence basis/confidence.
 - **Structured readback.** Known commitment owners are resolved page IDs, not just
