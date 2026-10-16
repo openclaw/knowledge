@@ -42,7 +42,12 @@ try {
     for (const width of [1280,390]) {
       await page.setViewportSize({width,height:900});
       const header = await page.locator('.knowledge-entity-header').innerText();
-      assert.equal(header.split('Coordinates launch operations.').length - 1, 1);
+      // Identity context is ingestion reasoning: out of the header, once, in a closed disclosure.
+      assert.doesNotMatch(header, /Coordinates launch operations\./);
+      const identification = page.locator('details.knowledge-identification');
+      assert.equal(await identification.count(), 1);
+      assert.equal(await identification.evaluate(n => n.open), false);
+      assert.equal((await identification.textContent()).split('Coordinates launch operations.').length - 1, 1);
       assert.doesNotMatch(header, /is how the source describes|recorded as a role or employer/);
       if (fixture.role) assert.match(header, /Role: Launch lead/);
       else assert.doesNotMatch(header, /Role:/);
@@ -57,6 +62,6 @@ try {
     assert.equal(saved.revision, fixture.revision);
   }
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({passed:'single identity context, no disclaimer, role and uncertainty preserved, hidden comments, unchanged records, desktop/mobile',artifacts:base}));
+  console.log(JSON.stringify({passed:'identity context collapsed once outside the header, no disclaimer, role and uncertainty preserved, hidden comments, unchanged records, desktop/mobile',artifacts:base}));
 } finally { await browser.close(); for (const lifecycle of lifecycles) await lifecycle.stop(); }
 

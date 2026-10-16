@@ -44,6 +44,16 @@ const dayHeading = (text: string) => {
   return day.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", ...(day.getFullYear() === today.getFullYear() ? {} : { year: "numeric" as const }) });
 };
 
+/** Collapsed ingestion reasoning: how an identity was resolved and how speech was attributed. */
+const identificationDetails = (context?: string, confidence?: { level: string; basis: string }) => {
+  if (!context && !confidence) return undefined;
+  const details = el("details", undefined, "knowledge-identification"), summary = el("summary", "How this was identified");
+  summary.append(icon("chevronDown", 12)); details.append(summary);
+  if (context) details.append(el("p", context));
+  if (confidence) details.append(el("p", `Speaker attribution confidence: ${confidence.level}. ${confidence.basis}`));
+  return details;
+};
+
 /** Summary label whose text swaps with its details element's open state. */
 const disclosureLabel = (closed: string, opened: string) => { const control = el("span", undefined, "knowledge-disclosure-label"); control.append(el("span", closed, "knowledge-when-closed"), el("span", opened, "knowledge-when-open"), icon("chevronDown", 14)); return control; };
 /** Drop a leading `# Title` heading that repeats the page title shown in the entity header. */
@@ -382,7 +392,6 @@ export default defineControlUiPlugin({
         const facts = el("div", undefined, "knowledge-inline-facts"); facts.append(el("span", label(r.type)));
         if (meta?.aliases?.length) { const aliases = el("span", "Also called ", "knowledge-aliases"); for (const alias of meta.aliases) aliases.append(chip(alias)); facts.append(aliases); }
         facts.append(identityTag(meta?.identity?.status));
-        if (meta?.identity?.context) facts.append(el("span", `Context ${meta.identity.context}`));
         const fieldNodes = new Map<string, HTMLElement>();
         for (const [name, value] of Object.entries(meta?.fields ?? {})) { if (name === "occurred_at" || value === "" || value == null) continue; const node = el("span", `${human(name)}: ${name === "occurred_at" && typeof value === "string" ? formatSourceDate(value) : typeof value === "object" ? JSON.stringify(value) : value}`); fieldNodes.set(name, node); facts.append(node); }
         if (fieldNodes.size) pending.push(feature.invoke("ontology", { view: "definitions", name: r.type, limit: 1 }).then(schema => { if (!live(n)) return; for (const field of schema.definitions?.[0]?.fields ?? []) { const node = fieldNodes.get(field.name), value = meta?.fields?.[field.name]; if (node) node.textContent = `${field.label}: ${field.name === "occurred_at" && typeof value === "string" ? formatSourceDate(value) : typeof value === "object" ? JSON.stringify(value) : value}`; } }).catch(() => {}));
@@ -466,10 +475,8 @@ export default defineControlUiPlugin({
         // sections (attendance, claims) stay near the top of the page.
         if (bodyText.length > longBodyChars) { const notes = el("details", undefined, "knowledge-notes-toggle"), summary = el("summary"); notes.dataset.readingKey = `notes:${id}`; summary.append(disclosureLabel("Show full notes", "Show less")); notes.append(summary); body.dataset.clamped = "true"; body.append(notes); }
         body.append(el("span", `${r.writtenByAgentId ? `Saved by ${agentName(r.writtenByAgentId)}` : "Author not recorded"} · revision ${r.revision}${meta?.updated_at ? ` · updated ${date(meta.updated_at)}` : ""}`, "knowledge-summary-meta"));
-        if (meta?.attribution_confidence) {
-          const confidence = meta.attribution_confidence;
-          main.append(el("p", `Speaker attribution confidence: ${confidence.level}. ${confidence.basis}`, "knowledge-notice"));
-        }
+        const identification = identificationDetails(meta?.identity?.context, meta?.attribution_confidence);
+        if (identification) main.append(identification);
         if (meta?.identity?.candidates?.length) {
           const candidates = el("section"); candidates.append(el("h3", "Possible identity matches"));
           for (const candidate of meta.identity.candidates) {

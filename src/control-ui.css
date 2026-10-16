@@ -565,3 +565,9 @@ details[open] > summary > .knowledge-disclosure-label > .knowledge-icon { transf
 .knowledge-timeline-group > summary { cursor: pointer; color: var(--muted); font-size: 13px; padding: 4px 0; }
 .knowledge-timeline-group[open] > summary { color: var(--text); }
 .knowledge-timeline-group > ul { margin-top: 4px; }
+
+/* Collapsed identity resolution and attribution notes on record pages. */
+.knowledge-identification { margin: 8px 0; color: var(--muted); font-size: 13px; }
+.knowledge-identification > summary { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; list-style: none; }
+.knowledge-identification > summary::-webkit-details-marker { display: none; }
+.knowledge-identification > p { margin: 6px 0 0; }
