@@ -26,6 +26,7 @@ existing tools, not a separate ingestion engine.
 
 - Write what the source says, plainly; the verb carries certainty (proposed,
   planned, reported, agreed). Keep portable inline source links.
+- Pages describe the subject, not your ingestion decisions.
 - A retained file and citations into it are different units. Reuse the original;
   deduplicate identical citations while retaining distinct passages, attributions,
   derived transcripts and separate recordings. Exact quotes are optional; precise

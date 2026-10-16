@@ -1,6 +1,6 @@
 ---
 name: knowledge-meeting-ingest
-description: Ingest meeting transcripts from any recorder into Knowledge with attendee enrichment, entity propagation, timeline merge, supported decisions and commitments, and verification of substance and sequence. Summary-only input is not a verified meeting ingestion.
+description: Ingest meeting transcripts from any recorder into Knowledge with attendee enrichment, timeline merge, supported decisions and commitments, and verification of substance and sequence. Summary-only input is not a verified meeting ingestion.
 ---
 
 # Meeting Ingestion Skill — Unified Pipeline
@@ -19,7 +19,7 @@ pipeline. Do not build a per-vendor pipeline or a Knowledge ingestion job.
 - Meeting page includes attendees, Summary, Key Decisions, Action Items and
   Notable Quotes. Empty sections carry an explicit source-grounded reason.
 - Every sufficiently identified actual attendee gets a substantive person page.
-  Every relevant company/project/concept gets entity propagation.
+  Every relevant company/project/concept gets a Timeline entry and back-link.
 - Timeline context and bidirectional back-links cover all resolved mentioned
   entities with pages. Unverified claims do not fan out.
 - Supported decisions, commitments and events become independently retrievable
@@ -211,10 +211,9 @@ For EACH actual attendee, run `knowledge-entities`:
 1. Search and read the existing person page, or create a sourced one if identity
    is sufficient. Participation and actual contribution are meaningful context;
    do not create a content-free stub or fabricate a profile for UNKNOWN.
-2. Rewrite a State topic only if this meeting changes it.
-3. Add a one-line dated “Attended {meeting}” Timeline entry, newest first, with a
+2. Add a one-line dated “Attended {meeting}” Timeline entry, newest first, with a
    link back and citation, in the `knowledge-entities` Timeline format.
-4. Create/reuse an evidenced attendance relationship via
+3. Create/reuse an evidenced attendance relationship via
    `knowledge_create_relationship`; inspect the current label/direction first.
    In the shipped ontology, `attended` runs **participant → meeting**, unlike
    gbrain's meeting auto-link direction. Knowledge has no auto-link post-hook.
@@ -223,11 +222,11 @@ Back-link known people mentioned or speaking in the transcript too, not just
 attendees, but only supported identifications.
 Unknown speaker attribution can remain flagged without a fabricated entity.
 
-### Phase 8: Entity propagation + timeline merge (MANDATORY)
+### Phase 8: Timeline merge (MANDATORY)
 
-For each relevant company, project or concept discussed, check existing pages,
-create/update as appropriate under `knowledge-entities`, add sourced timeline
-context and back-link to the meeting. Link back from the meeting to each entity.
+For each relevant company, project or concept discussed, find its page (or create
+one under `knowledge-entities`), add a Timeline entry and back-link to the meeting.
+Link back from the meeting to each entity.
 
 The same event belongs on ALL resolved relevant entities' timelines. Represent
 it as one event claim with `occurred_at`, all relevant `entities`, a meeting
