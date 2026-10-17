@@ -7,7 +7,6 @@ import path from 'node:path';
 import { createGunzip, createGzip } from 'node:zlib';
 import { Transform } from 'node:stream';
 import { finished } from 'node:stream/promises';
-import readline from 'node:readline';
 import { DatabaseSync } from 'node:sqlite';
 
 const HASH = /^[a-f0-9]{64}$/;
@@ -38,7 +37,18 @@ const inputStream = filename => {
   const raw = filename === '-' ? process.stdin : createReadStream(filename);
   return filename.endsWith('.gz') ? raw.pipe(createGunzip()) : raw;
 };
-const lines = filename => readline.createInterface({ input: inputStream(filename), crlfDelay: Infinity });
+// Yields JSONL lines split on \n only; readline would also split on U+2028 inside JSON strings.
+async function* lines(filename) {
+  const decoder = new TextDecoder();
+  let pending = '';
+  for await (const chunk of inputStream(filename)) {
+    const parts = (pending + decoder.decode(chunk, { stream: true })).split('\n');
+    pending = parts.pop();
+    yield* parts;
+  }
+  pending += decoder.decode();
+  if (pending) yield pending;
+}
 function payloadFor(row) {
   if (row.payload !== undefined) return row.payload;
   if (row.data !== undefined) return row.data;
