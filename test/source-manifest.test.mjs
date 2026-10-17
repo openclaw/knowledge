@@ -141,6 +141,27 @@ test('Discrawl adapter resolves a stable channel and emits deterministic attachm
   assert.deepEqual((await readFile(output, 'utf8')).trim().split('\n').map(line => JSON.parse(line).id), ['start', '30', 'last']);
 });
 
+test('Discrawl adapter includes child threads only when asked', async t => {
+  const dir = await fixture(t), dbPath = path.join(dir, 'discrawl.sqlite');
+  const db = new DatabaseSync(dbPath);
+  db.exec('CREATE TABLE channels(id TEXT,guild_id TEXT,name TEXT,thread_parent_id TEXT); CREATE TABLE members(guild_id TEXT,user_id TEXT,username TEXT,global_name TEXT,display_name TEXT,nick TEXT,bot INTEGER); CREATE TABLE messages(id TEXT,guild_id TEXT,channel_id TEXT,author_id TEXT,message_type TEXT,created_at TEXT,edited_at TEXT,deleted_at TEXT,content TEXT,normalized_content TEXT,reply_to_message_id TEXT,pinned INTEGER,has_attachments INTEGER); CREATE TABLE message_attachments(message_id TEXT,attachment_id TEXT,content_sha256 TEXT,fetch_status TEXT);');
+  for (const row of [['20', '10', 'maintainers', null], ['21', '10', 'release plan', '20'], ['22', '10', 'elsewhere', '99']]) db.prepare('INSERT INTO channels VALUES(?,?,?,?)').run(...row);
+  for (const [id, channel] of [['1', '20'], ['2', '21'], ['3', '22']]) db.prepare('INSERT INTO messages VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)').run(id, '10', channel, '40', 'default', '2026-10-02T10:00:0' + id + 'Z', null, null, 'm' + id, 'm' + id, null, 0, 0);
+  db.close();
+  const bin = path.join(dir, 'bin'); await mkdir(bin);
+  await writeFile(path.join(bin, 'discrawl'), `#!/bin/sh\nprintf '%s\\n' '${JSON.stringify({ database_path: dbPath })}'\n`);
+  await chmod(path.join(bin, 'discrawl'), 0o755);
+  const output = path.join(dir, 'messages.jsonl');
+  const exportRows = extra => {
+    run(discrawlScript, ['--config', 'c', '--channel', '20', '--since', '2026-10-02T00:00:00Z', '--before', '2026-10-03T00:00:00Z', '--output', output, ...extra],
+      { env: { ...process.env, PATH: bin + path.delimiter + process.env.PATH }, stdio: ['ignore', 'pipe', 'pipe'] });
+    return readFile(output, 'utf8').then(text => text.trim().split('\n').map(line => JSON.parse(line)));
+  };
+  assert.deepEqual((await exportRows([])).map(row => row.id), ['1']);
+  const rows = await exportRows(['--threads', 'include']);
+  assert.deepEqual(rows.map(row => [row.id, row.payload.thread_name ?? null]), [['1', null], ['2', 'release plan']]);
+});
+
 test('Discrawl adapter exposes usable help without requiring paired arguments', () => {
   const help = run(discrawlScript, ['--help']);
   assert.match(help, /Usage: node discrawl-normalize\.mjs/);
