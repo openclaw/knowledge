@@ -27,6 +27,10 @@ retained as the acceptance plan; its “existing foundation” describes the bas
   retained evidence, and corrections use the separate explicit [lifecycle operations](CORRECTIONS.md). Gbrain's
   local `remember`, `add_link`, and `add_timeline_entry` implementations were
   inspected before making these choices. No dependency or background model added.
+- `knowledge_remember` (added 2026-10-19) is the exception for conversation
+  capture. It returns the existing claim for an exact repeat of text, kind and
+  linked subjects. `knowledge_create_claim` keeps distinct-assertion semantics.
+  See [MODEL_API.md](MODEL_API.md#remembering-claims).
 - Connection queries return separately labeled incoming/outgoing edges, reverse
   dependencies and entity/owner claims, with filtered totals, bounded evidence and
   snapshot-checked pagination. Historical inspection is explicit; ordinary

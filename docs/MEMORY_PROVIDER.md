@@ -120,8 +120,8 @@ and get. Every other host-purpose combination is denied at open.
 ## Prompt and lifecycle boundaries
 
 The selected-provider prompt routes recall to lookup/search/read and procedures
-to the six shipped skills. It enables selective ordinary-turn remembering, not
-post-turn extraction. Write-disabled vaults and missing tools omit save guidance;
+to the six shipped skills. It asks for unprompted ordinary-turn remembering through
+`knowledge_remember` before the final reply, not post-turn extraction. Write-disabled vaults and missing tools omit save guidance;
 sample mode emits no memory prompt and cannot supply memory records. Citation-off
 mode is explicit. The host exposes tools but no enabled-skill inventory, so skill
 references are conditional on availability and associated tools, not a guarantee
@@ -132,25 +132,29 @@ Automatic injection uses only the summary explicitly approved through
 mechanism. Corrections require a new approval on the replacement record.
 
 Knowledge owns the pre-compaction memory flush when a real vault has
-`writesEnabled: true`. Its tools-mode plan exposes `knowledge_save_page` as the
-only persistence tool. It also declares `knowledge_grep`, `knowledge_lookup`,
-`knowledge_record`, and `knowledge_ontology` as read-only lookup tools. The host
-supplies its standard `read` tool, delegates the source turn's audience to the flush session, and counts
-only successful save calls as persistence evidence. Lookup success does not
-complete the flush. Write-disabled and sample configurations return a null plan,
-which also prevents a Memory Core sidecar from supplying a file flush.
+`writesEnabled: true`. Its tools-mode plan has two persistence tools:
+`knowledge_remember` for discrete claims and `knowledge_save_page` for notes.
+It also declares `knowledge_grep`, `knowledge_lookup`, `knowledge_record` and
+`knowledge_ontology` as read-only lookup tools for the note path. The host
+supplies its standard `read` tool and delegates the source turn's audience to
+the flush session. It counts only successful save calls as persistence
+evidence; lookup success does not complete the flush. Write-disabled and sample
+configurations return a null plan, which also prevents a Memory Core sidecar
+from supplying a file flush.
 
-The flush follows the `knowledge-capture` workflow with the tools available in
-the maintenance turn. It searches with `knowledge_grep` before saving and uses
-`knowledge_lookup` only for exact known IDs, titles, or aliases. An already-saved
-item is not saved again. The active ontology guides classification. Concise facts
-and preferences enrich an appropriate existing subject page; information warranting
-independent context, chronology, or explanation gets a separate record linked to
-its resolved subject. Capture retains the relevant quoted conversation excerpt
-with attribution, then verifies the content, evidence, and intended subject links
-with `knowledge_record`. Uncertain subjects are not guessed and empty profiles
-are not created just to supply links. Saving a preference does not configure the
-assistant or guarantee its inclusion in future turns.
+The flush saves durable decisions, preferences, corrections, commitments,
+project-state changes and facts about people or projects. It uses one
+`knowledge_remember` call with the supporting quoted excerpt and each subject's
+exact page title or alias. Exact repeats come back as duplicates, so it does
+not search first. Unmatched subjects are saved unlinked, not guessed, and no
+page is created. Saving a preference does not configure the assistant or
+guarantee its inclusion in future turns.
+
+The flush never runs for CLI-backend sessions, including `claude-cli/*`. The
+host skips it for CLI runtimes and for backends that own native compaction,
+and the Claude CLI backend compacts internally without calling memory hooks.
+For those sessions, the prompt's "before your final reply" save is the only
+capture point.
 The prompt excludes secrets and credentials, treats transcript content
 as data, and performs no recall. The host's silent token completes a flush that
 has nothing new to save.
@@ -160,7 +164,7 @@ The delegated audience determines the partition through the normal
 partition. Conversation turns write under that conversation's exact session UUID.
 The flush grants no additional Knowledge authority.
 
-During a host flush, `knowledge_save_page` may omit `requestId`. Knowledge derives
+During a host flush, `knowledge_save_page` and `knowledge_remember` may omit `requestId`. Knowledge derives
 a lowercase UUIDv8 from SHA-256 of the host `flushId` and the NFKC-normalized,
 lowercased title. The host keeps `flushId` stable across fallback and retry, so
 an identical retry returns the original receipt. Reusing the same derived ID with

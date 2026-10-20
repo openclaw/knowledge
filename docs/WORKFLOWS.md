@@ -48,14 +48,14 @@ is added.
 | filing rules | Inspect `knowledge_ontology`; canonical type and server-generated descriptive path; use the returned path |
 | raw transcript / attribution | Retained original + labeled derived transcript; exact locators, unresolved speaker map, source-vs-inference distinction |
 | resolve/enrich | Knowledge-first lookup including connected claims/edges; sourced State, timeline context and entity back-links |
-| remember / timeline-add / add_link | `knowledge_create_claim` (dated event claims for timeline material), `knowledge_create_relationship`, `knowledge_connections`; no separate timeline store; Markdown-derived backlinks stay distinct from typed edges |
+| remember / timeline-add / add_link | `knowledge_remember` for conversation claims, `knowledge_create_claim` (dated event claims for timeline material), `knowledge_create_relationship`, `knowledge_connections`; no separate timeline store; Markdown-derived backlinks stay distinct from typed edges |
 | sync / embed | No sync command: saves publish; keyword search reconciles its own index |
 | bulk job checkpoints | Itemized agent work log + uploads and bounded `knowledge_publish_batch` receipts; journal resume is publication, not extraction-job progress |
 | aliases/tags/dependencies | Supported collection replacement through `knowledge_save_page`; omitted fields preserve existing values |
 | claim correction/withdrawal | `knowledge_correct` atomically replaces and supersedes a claim/edge; `knowledge_withdraw` retracts an exact record; page prose uses revision-fenced `knowledge_save_page` |
 | duplicate entity pages | `knowledge_merge` redirects one page to another on read (gbrain `merged_into` plus phantom redirect, without moving claims); `knowledge_unmerge` undoes it; see [IDENTITY_MERGE.md](IDENTITY_MERGE.md) |
 | media extraction/OCR/transcription | Host capability if available; otherwise source retention and explicit partial result. Dedicated media skill deferred |
-| curation/dreaming / automatic inbound enrichment | No broad profile research or scheduling; selected-provider ordinary-turn remembering uses knowledge-capture, while the host pre-compaction flush performs one bounded durable capture pass when vault writes are enabled |
+| curation/dreaming / automatic inbound enrichment | No broad profile research or scheduling; selected-provider ordinary-turn remembering uses knowledge_remember (knowledge-capture for page prose), while the host pre-compaction flush performs one bounded durable capture pass when vault writes are enabled |
 | push-before-link | Returned local path/ID or verified host link; no private-vault GitHub push to manufacture a URL |
 
 Knowledge semantic departures: a name/roster match does not establish speaker
@@ -78,15 +78,31 @@ operational chatter, secrets, credentials, and agent inference do not. It retain
 the relevant conversation wording with attribution and treats that wording as
 data, not instructions.
 
-Knowledge departs at the persistence shape. gbrain ambient writeback saves one
-claim per `remember` call and rejects raw transcript capture. The host flush
-projects `knowledge_save_page` as its sole persistence tool. Knowledge enriches
-an appropriate existing subject page or creates a focused record linked to its
-resolved subject, using the active `knowledge_ontology` definitions to classify
-the information. Only the relevant quoted excerpt goes in `source`; content,
-evidence, and intended links are checked on readback. It does not save the raw
-transcript or approve automatic recall. This is a Knowledge tool and host-authority
-adaptation, not a new ingestion subsystem.
+The flush and ordinary turns persist claims through `knowledge_remember`,
+following gbrain `remember` (reviewed at
+`e45f13f052c06e6f92b4e31204e34edc0634b9da`). Each call carries one claim per
+item, short provenance and an optional subject, resolves the subject inside the
+call, returns `duplicate` for an exact repeat, and never creates a page. The
+selected-provider prompt asks for unprompted, silent saves before the final
+reply on a task where a decision, preference, correction, commitment or
+project-state change occurred. `knowledge_save_page` remains for notes that are
+not discrete claims.
+
+Knowledge departs from gbrain in four places:
+- **Evidence.** gbrain keeps provenance as a string. Knowledge also retains the
+  supporting conversation excerpt as a hashed artifact that every claim cites.
+  Claims stay evidence-backed (SPEC §6.3) without a separate upload.
+- **Placement.** gbrain appends a row to a managed `## Facts` fence. Knowledge
+  links the claim through `entities`, and the page view assembles linked
+  claims. SPEC §4.4 keeps one authoritative record per file, and SPEC §4.2
+  keeps page updates from overwriting linked facts. A fence would put the
+  claim text in two places and need its own strikethrough lifecycle.
+- **Subject.** gbrain falls back to fuzzy matching and infers the subject from
+  text. Knowledge uses exact ID, title or alias lookup only, and the agent
+  names the subject. Text inference is a follow-up.
+- **Dedup.** It is exact only: normalized text, kind and linked subjects. There
+  is no similarity supersession and no `replaces`; corrections use
+  `knowledge_correct` (SPEC §3.3–3.4).
 
 ## Verification scope
 
@@ -249,8 +265,8 @@ The provider prompt establishes proactive recall and selective, agent-driven
 remembering during an ordinary authorized turn. The bundled skills retain the
 procedures. This adopts gbrain's resolve-before-asking, read-before-write,
 source-preserving reconciliation, meaningful connections, and verified writeback.
-Concise facts and preferences normally enrich existing subject pages; independent
-context, chronology, or explanation can justify a separate linked record. Missing
+Discrete facts and preferences are saved as claims through `knowledge_remember`,
+linked to their subject page. Page prose is revised through knowledge-capture. Missing
 or ambiguous subjects are not fabricated. Preferences remain attributed context:
 saving one neither configures the assistant nor guarantees future prompt loading.
 It does not adopt exhaustive lookup on trivial turns, forced identity resolution,

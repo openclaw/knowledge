@@ -197,6 +197,9 @@ title therefore replay the same publication intent: an identical payload returns
 the original receipt, while a changed payload is rejected as a request-ID reuse.
 Different titles or later flush IDs derive different IDs.
 
+`knowledge_remember.requestId` follows the same rule. It derives the ID from the
+flush ID and the call's claim texts joined by newlines.
+
 Normal agent calls and browser saves must supply a lowercase UUID. A supplied ID
 is used unchanged during a flush. The host-delegated audience still selects the
 agent-private or exact conversation partition; omitting the ID grants no scope.
@@ -303,6 +306,52 @@ The editor selects multiple files, retains completed uploads in draft recovery,
 and offers downloads from record detail. Browsers cannot restore an unuploaded
 File selection after reload: reselect those files. Completed originals remain in
 the vault even if the page draft is discarded. See [EVIDENCE.md](EVIDENCE.md).
+
+## Remembering claims
+
+`knowledge_remember` is the cheap capture path for discrete
+conversation-derived claims. One call takes these fields:
+- a short `attribution`,
+- the supporting conversation `excerpt` (at most 16 KiB),
+- 1–20 `items`. Each item has `text`, a claim `kind`, an optional `subject`,
+  an `origin` of `source` (default) or `user_belief`, and optional dates.
+
+Agent inference is rejected. The call needs no prior search, upload, ontology
+fingerprint or readback.
+
+```json
+{
+  "requestId": "00000000-0000-4000-8000-000000000020",
+  "attribution": "user in openclaw session 8f3a, 2026-10-19",
+  "excerpt": "User: use option B, it ships sooner.",
+  "items": [{ "text": "Chose option B because it ships sooner.", "kind": "decision", "subject": "Garden Pilot" }]
+}
+```
+
+The server takes these steps:
+1. **Resolve each subject** with exact lookup, the same rule as
+   `knowledge_lookup` (page ID, title or alias, active pages only, merge
+   redirects followed).
+   - A unique match puts the page in the claim's `entities`.
+   - An ambiguous or missing match saves the claim unlinked and returns
+     `subject: ambiguous | missing`, with candidate pages for an ambiguous match.
+   - No page is ever created.
+2. **Find exact repeats.** An item is a repeat when an active claim already has
+   the same normalized text, the same kind and the same linked subjects. An
+   earlier item in the same call also counts. A repeat returns
+   `status: duplicate` with the existing ID and writes nothing.
+3. **Retain the excerpt.** It is stored through the attachment service as
+   `artifacts/<requestId>/excerpt.txt`. Every inserted claim cites it by path,
+   hash and line range.
+4. **Publish.** The inserted claims go out as one journaled batch with one
+   receipt. A call where every item is a duplicate returns `receipt: null`.
+
+Retrying the same request ID with the same payload returns the original
+results. Reusing it with a different payload is rejected.
+
+Claims link to pages through `entities` only. The page view already lists the
+claims linked to it. Page prose is never rewritten, and to revise it you use
+`knowledge-capture`.
 
 ## Structured authoring
 
