@@ -401,7 +401,13 @@ export default defineControlUiPlugin({
         const breadcrumb = el("nav", undefined, "knowledge-breadcrumb"); breadcrumb.setAttribute("aria-label", "Breadcrumb"); breadcrumb.append(back, icon("chevronRight", 12), el("span", label(r.type)));
         const grid = el("div", undefined, "knowledge-entity-grid"), main = el("div", undefined, "knowledge-entity-main"), aside = el("aside", undefined, "knowledge-entity-aside");
         if (!r.valid) main.append(el("p", "This record has validation issues.", "knowledge-notice"));
-        if (r.lifecycle !== "active") { head.classList.add("knowledge-historical"); main.append(el("p", `Viewing history · ${r.lifecycle === "withdrawn" ? "Withdrawn" : "Replaced"}${meta?.lifecycle_change?.at ? ` ${date(meta.lifecycle_change.at)}` : ""}. ${r.lifecycle === "withdrawn" ? "Not used in search, connections or answers." : "An earlier version. Search and answers use the current one."}`, "knowledge-notice")); askButton.remove(); }
+        if (r.lifecycle === "merged") {
+          // A merged page is history; its name, links and claims now belong to the survivor.
+          const into = result.mergedInto, notice = el("p", `Merged${meta?.lifecycle_change?.at ? ` ${date(meta.lifecycle_change.at)}` : ""} into ${into?.title ?? "another page"}. Its name, links and claims now count toward that page.`, "knowledge-notice");
+          head.classList.add("knowledge-historical"); main.append(notice); askButton.remove();
+          if (into) main.append(button(`Open ${into.title} →`, () => open(into.id), "knowledge-quiet"));
+        } else if (r.lifecycle !== "active") { head.classList.add("knowledge-historical"); main.append(el("p", `Viewing history · ${r.lifecycle === "withdrawn" ? "Withdrawn" : "Replaced"}${meta?.lifecycle_change?.at ? ` ${date(meta.lifecycle_change.at)}` : ""}. ${r.lifecycle === "withdrawn" ? "Not used in search, connections or answers." : "An earlier version. Search and answers use the current one."}`, "knowledge-notice")); askButton.remove(); }
+        if (result.mergedFrom?.length) { const from = el("p", "Merged from ", "knowledge-merged-from knowledge-muted"); for (const page of result.mergedFrom) from.append(summaryLink(page)); main.append(from); }
         const lifecycle = meta as Record<string, unknown> | undefined;
         const change = lifecycle?.lifecycle_change;
         const reason = change && typeof change === "object" && "reason" in change && typeof change.reason === "string" ? change.reason : undefined;

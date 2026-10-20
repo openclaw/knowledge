@@ -124,6 +124,7 @@
 .knowledge-entity-header h2 { font-size: 26px; font-weight: 650; line-height: 1.15; letter-spacing: -.025em; color: var(--text-strong, var(--text)); margin-bottom: 6px; overflow-wrap: anywhere; }
 .knowledge-inline-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; color: var(--muted); font-size: 13px; }
 .knowledge-aliases { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.knowledge-merged-from { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .knowledge-entity-grid { display: grid; grid-template-columns: minmax(0,1fr) 300px; gap: 28px; align-items: start; }
 .knowledge-entity-main > button { align-self: flex-start; }
 .knowledge-entity-main, .knowledge-entity-aside { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
