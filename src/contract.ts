@@ -8,6 +8,7 @@ import { SessionActivityInput, SessionActivityOutput } from "./session-activity.
 import { BatchInput, SourceCheckInput, SourceCheckOutput, VerifyInput, VerifyOutput } from "./ingestion-contract.js";
 import { ConnectionsInput, ConnectionsOutput } from "./connections-contract.js";
 import { RecentInput, RecentOutput } from "./recent.js";
+import { RememberInput, RememberOutput } from "./remember-contract.js";
 import { AttachInput, AttachOutput, AttachmentInput, AttachmentOutput } from "./attachment-contract.js";
 import { SearchInput, SearchOutput, LookupInput, LookupOutput } from "./retrieval-contract.js";
 import { Type } from "typebox";
@@ -92,6 +93,10 @@ export const contract = defineFeatureContract({
     save_page: {
       kind: "action", description: "Create or edit a page in the authorized scope. requestId must be a generated lowercase UUID, never a source ID or slug; it may be omitted only during a host pre-compaction memory flush, when Knowledge derives it from the flush ID and normalized title. Creates omit id/expectedRevision/expectedHash; edits require all three from knowledge_record. Reuse requestId and identical payload for retries; inspect knowledge_mutation after an uncertain result. Calls share a serialized service lane, not a multi-record transaction. Aliases, tags, dependencies and fields replace their collections when supplied (empty clears); omission preserves on edit. Optional expectedOntologyFingerprint fences the observed schema. Append file evidence returned by knowledge_attach using attachments (no count cap). Legacy source text remains supported; saved pages are immediately available with no approval step. A published receipt is a completed save; accepted publication conflicts retain recovery material and block publication. Requests rejected before acceptance are not saved.",
       input: SavePage, output: Receipt, tool: { name: "knowledge_save_page", label: "Save knowledge page" },
+    },
+    remember: {
+      kind: "action", description: "Cheapest durable save: 1–20 claims (decision, preference, commitment, fact, event, belief) in one call, no search or readback needed. Give short attribution and the supporting conversation excerpt; it is retained as their evidence. Optional subject (exact page ID, title or alias) links each claim to a uniquely matching page; otherwise it is saved unlinked and reported. Never creates pages. Exact repeats return duplicate with the saved claim. One claim per item; never agent inference. Commitments are not scheduled. Use knowledge-capture to revise page prose.",
+      input: RememberInput, output: RememberOutput, tool: { name: "knowledge_remember", label: "Remember knowledge" },
     },
     create_claim: {
       kind: "action", description: "Publish one evidence-backed claim (fact, preference, decision, commitment, event or belief). Agent chooses what the source supports; no automatic extraction or semantic deduplication. Required current ontology fingerprint comes from knowledge_ontology. Explicit attribution and assertion_origin distinguish source statements, user beliefs and agent inference. Unknown owner/dates remain absent. occurred_at and due_at preserve date-only or offset timestamp precision; validity/expiry are UTC instants. No task is scheduled. Reuse the exact request and payload for retries; no claim overwrite or lifecycle mutation.",

@@ -37,6 +37,7 @@ export const operations = {
   save: (s: Storage, a: Access, input: { value: In<Storage["save"]>; actor: string }) => s.save(input.value, a, input.actor),
   createClaim: (s: Storage, a: Access, input: { value: In<Storage["createClaim"]>; actor: string }) => s.createClaim(input.value, a, input.actor),
   createRelationship: (s: Storage, a: Access, input: { value: In<Storage["createRelationship"]>; actor: string }) => s.createRelationship(input.value, a, input.actor),
+  remember: (s: Storage, a: Access, input: In<Storage["remember"]>) => s.remember(input, a, "agent"),
   correct: (s: Storage, a: Access, input: In<Storage["correct"]>) => s.correct(input, a, "agent"),
   withdraw: (s: Storage, a: Access, input: In<Storage["withdraw"]>) => s.withdraw(input, a, "agent"),
   merge: (s: Storage, a: Access, input: In<Storage["merge"]>) => s.merge(input, a, "agent"),

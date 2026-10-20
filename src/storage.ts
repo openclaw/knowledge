@@ -43,6 +43,8 @@ import { lifecycleRecord, lifecycleImpact, assertLifecycleTarget, applyLifecycle
 import { mergeRedirects, referenceIds } from "./merge.js";
 import { planMerge, planUnmerge, type MergeReport } from "./merge-write.js";
 import { MergeInput, UnmergeInput } from "./mutation-contract.js";
+import { RememberInput, REMEMBER_EXCERPT_MAX_BYTES, type RememberOutput } from "./remember-contract.js";
+import { planRemember, claimPayload } from "./remember.js";
 import type { VaultAccess } from "./access.js";
 
 const canonical = (x: unknown): string => JSON.stringify(x, (_, v) => v && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => a.localeCompare(b))) : v);
@@ -305,6 +307,51 @@ export class KnowledgeStorage {
         batch: { items: records.map((r, n) => ({ key: input.items[n].key, id: r.id, path: r.path, revision: r.revision, hash: r.hash })), source: input.source, expectedPreviousRequestId: input.expectedPreviousRequestId } };
     });
     return this.accept(input.requestId, intent, prepared, access, actor);
+  }
+  /**
+   * Save 1–20 conversation-derived claims in one call. Subjects resolve by
+   * exact ID/title/alias; exact repeats return the saved claim; pages are never
+   * created. The excerpt is retained once through the attachment service and
+   * every inserted claim cites it; inserts publish as one journaled batch.
+   */
+  async remember(input: RememberInput, access: VaultAccess, actor: string): Promise<RememberOutput> {
+    if (!Check(RememberInput, input) || !input.requestId || Buffer.byteLength(input.excerpt) > REMEMBER_EXCERPT_MAX_BYTES || !input.attribution.trim() || input.items.some(i => !i.text.trim())) throw Error("Invalid remember input: requestId, attribution, an excerpt of at most 16 KiB and 1–20 nonempty items are required.");
+    access.assertCurrent();
+    if (!this.config.writesEnabled) throw Error("Knowledge writes are disabled.");
+    if (input.expectedVaultId && input.expectedVaultId !== this.config.vaultId) throw Error("Connected vault changed; nothing was remembered.");
+    await this.initialize(access);
+    const requestId = input.requestId, scope = scopeKey(access.scope);
+    const { plan, fingerprint } = await this.run(access, async vault => {
+      const data = await vault.scan(), withdrawn = this.store.withDatabase(db => withdrawnIds(db, this.retrievalBinding(access)));
+      return { plan: planRemember(data, eligible(data, withdrawn, false), input, withdrawn), fingerprint: data.ontology?.fingerprint };
+    });
+    const prior = this.store.withDatabase(db => this.row(db, scope, requestId));
+    const inserts = plan.flatMap((p, n) => p.duplicateOf || p.sameAs !== undefined ? [] : [n]);
+    let receipt: Receipt | null = null;
+    if (prior) {
+      // A replay finds its own published claims as duplicates; keys map them back.
+      receipt = await this.resume(access, requestId);
+      for (const item of receipt.items ?? []) {
+        const n = Number(item.key.slice(1));
+        if (!/^i\d+$/.test(item.key) || plan[n]?.duplicateOf !== item.id) throw Error("Request ID already belongs to a different payload. Use the original payload for retries.");
+        delete plan[n]!.duplicateOf;
+      }
+    } else if (inserts.length) {
+      if (!fingerprint) throw Error("The ontology is unavailable; nothing was remembered.");
+      const upload = await this.attach({ requestId, expectedVaultId: this.config.vaultId, filename: "excerpt.txt", mediaType: "text/plain", attribution: input.attribution,
+        offset: 0, data: Buffer.from(input.excerpt).toString("base64"), final: true }, access);
+      const evidence = { ...upload.evidence!, start_line: 1, end_line: input.excerpt.split(/\r?\n/).length };
+      receipt = await this.batch({ requestId, expectedVaultId: this.config.vaultId, expectedOntologyFingerprint: fingerprint,
+        items: inserts.map(n => ({ key: `i${n}`, kind: "claim" as const, input: claimPayload(input.items[n]!, plan[n]!, evidence, input.attribution) })) }, access, actor);
+    }
+    const inserted = new Map((receipt?.items ?? []).map(i => [Number(i.key.slice(1)), i.id]));
+    const items = plan.map((p, n) => {
+      const first = p.sameAs ?? n, saved = inserted.get(first);
+      const { duplicateOf, sameAs: _sameAs, ...subject } = p;
+      return { status: saved && first === n ? "inserted" as const : "duplicate" as const, id: saved ?? duplicateOf ?? plan[first]!.duplicateOf!, ...subject };
+    });
+    const unlinked = items.filter(i => i.subject === "ambiguous" || i.subject === "missing").length;
+    return { items, receipt, message: `${items.filter(i => i.status === "inserted").length} saved, ${items.filter(i => i.status === "duplicate").length} already saved${unlinked ? `, ${unlinked} unlinked because the subject did not match exactly one page` : ""}. A published receipt is a completed save.` };
   }
   /** Publish one bounded page-body change through the normal fenced journal. */
   async editBody(input: EditBodyInput, access: VaultAccess): Promise<Receipt> {

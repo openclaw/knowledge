@@ -20,7 +20,7 @@ import type { StorageOperations } from "./storage-host.js";
 
 type Handlers = FeatureHandlers<typeof contract>;
 type StoreHandlers = Omit<Handlers, "stores_snapshot" | "stores_change" | "stores_change_status" | "agent_query" | "agent_action">;
-const WRITE_TOOLS = ["knowledge_edit_body", "knowledge_reconcile_evidence", "knowledge_save_page", "knowledge_correct", "knowledge_withdraw", "knowledge_merge", "knowledge_unmerge", "knowledge_recall"];
+const WRITE_TOOLS = ["knowledge_remember", "knowledge_edit_body", "knowledge_reconcile_evidence", "knowledge_save_page", "knowledge_correct", "knowledge_withdraw", "knowledge_merge", "knowledge_unmerge", "knowledge_recall"];
 const chatOnly = () => Error("Knowledge changes must be requested through chat and agent tools.");
 const operatorOnly = () => Error("Selecting an agent's store is an operator inspection; it is not available to agent tools.");
 
@@ -123,6 +123,12 @@ export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureE
         const flushId = context.source === "tool" ? context.tool.memoryFlush?.flushId : undefined;
         if (input.requestId === undefined && !flushId) return Promise.reject(Error("knowledge_save_page requires requestId outside a host pre-compaction memory flush."));
         return authored("save")({ ...input, requestId: input.requestId ?? deriveMemoryFlushRequestId(flushId!, input.title) }, context);
+      },
+      // Same flush rule as save_page; the claim texts stand in for the title.
+      remember: (input, context) => {
+        const flushId = context.source === "tool" ? context.tool.memoryFlush?.flushId : undefined;
+        if (input.requestId === undefined && !flushId) return Promise.reject(Error("knowledge_remember requires requestId outside a host pre-compaction memory flush."));
+        return agentChange("remember")({ ...input, requestId: input.requestId ?? deriveMemoryFlushRequestId(flushId!, input.items.map(i => i.text).join("\n")) }, context);
       },
       create_claim: authored("createClaim"),
       create_relationship: authored("createRelationship"),
