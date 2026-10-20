@@ -32,7 +32,7 @@ Physical layout, under the host state directory:
   registry.sqlite             # store identities, bindings, assignment journal
   registry.id                 # sentinel: a missing/emptied registry is recovery
   stores/<vaultId>/
-    state.sqlite              # operational journal, history, index, Git queue
+    state.sqlite              # operational journal, history, index, Git queue, Recent projection
     vault/
       vault.json
       .git/                   # initialized automatically in writable mode when Git is available

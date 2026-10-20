@@ -28,6 +28,40 @@ export const RecentOutput = Type.Object({
 }, { additionalProperties: false });
 type Item = Static<typeof RecentOutput>["items"][number];
 
+/** Bring the recent_* projection in line with this scope's published mutations.
+ * Plans are parsed once per request, not on every read; the key comparisons
+ * stop before the plan column. A projection written before an older plugin
+ * version published (or removed) requests is repaired here. */
+export function syncRecentProjection(db: DatabaseSync, scope: string) {
+  // A derived cache, so additive and version-independent: older plugin
+  // versions ignore it and this function repairs whatever they published.
+  db.exec(`CREATE TABLE IF NOT EXISTS recent_requests_v1 (
+      scope TEXT NOT NULL, request TEXT NOT NULL, operation TEXT, target_id TEXT, at TEXT, reason TEXT, replacement_id TEXT,
+      PRIMARY KEY(scope,request)
+    ) WITHOUT ROWID;
+    CREATE TABLE IF NOT EXISTS recent_records_v1 (
+      scope TEXT NOT NULL, request TEXT NOT NULL, ordinal INTEGER NOT NULL, id TEXT, hash TEXT, revision, actor TEXT, kind TEXT, type TEXT, title TEXT,
+      PRIMARY KEY(scope,request,ordinal)
+    ) WITHOUT ROWID;`);
+  const published = "SELECT request FROM mutations WHERE scope=? AND state='published'";
+  const missing = db.prepare(`SELECT 1 FROM mutations m WHERE m.scope=? AND m.state='published' AND NOT EXISTS (SELECT 1 FROM recent_requests_v1 r WHERE r.scope=m.scope AND r.request=m.request) LIMIT 1`).get(scope);
+  const stale = db.prepare(`SELECT 1 FROM recent_requests_v1 r WHERE r.scope=? AND r.request NOT IN (${published}) LIMIT 1`).get(scope, scope);
+  if (!missing && !stale) return;
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    if (stale) for (const table of ["recent_requests_v1", "recent_records_v1"]) db.prepare(`DELETE FROM ${table} WHERE scope=? AND request NOT IN (${published})`).run(scope, scope);
+    const fresh = `FROM mutations m WHERE m.scope=? AND m.state='published' AND NOT EXISTS (SELECT 1 FROM recent_requests_v1 r WHERE r.scope=m.scope AND r.request=m.request)`;
+    db.prepare(`INSERT INTO recent_records_v1(scope,request,ordinal,id,hash,revision,actor,kind,type,title)
+      SELECT m.scope, m.request, j.key, json_extract(j.value,'$.id'), json_extract(j.value,'$.hash'), json_extract(j.value,'$.revision'), json_extract(m.plan,'$.actor'),
+        json_extract(j.value,'$.kind'), COALESCE(json_extract(j.value,'$.metadata.claim_kind'),json_extract(j.value,'$.metadata.type'),json_extract(j.value,'$.kind')), json_extract(j.value,'$.title')
+      ${fresh.replace("FROM mutations m", "FROM mutations m, json_each(COALESCE(json_extract(m.plan,'$.records'), json_array(json_extract(m.plan,'$.record')))) j")}`).run(scope);
+    db.prepare(`INSERT INTO recent_requests_v1(scope,request,operation,target_id,at,reason,replacement_id)
+      SELECT m.scope, m.request, json_extract(m.receipt,'$.operation'), json_extract(m.receipt,'$.targetId'), json_extract(m.receipt,'$.at'), json_extract(m.receipt,'$.reason'), json_extract(m.receipt,'$.replacementId')
+      ${fresh}`).run(scope);
+    db.exec("COMMIT");
+  } catch (e) { db.exec("ROLLBACK"); throw e; }
+}
+
 /** Project exact published snapshots into logical events BEFORE cursor paging.
  * No timestamp heuristics or independently paginated receipt/history merging.
  * Earlier snapshots of inactive/dependency-hidden records stay in history only.
@@ -36,33 +70,30 @@ export function recentActivity(db: DatabaseSync, scope: string, active: LoadedRe
   const upperSequence = input.upperSequence ?? Number(db.prepare("SELECT COALESCE(MAX(sequence),0) AS n FROM history WHERE scope=?").get(scope)!.n);
   const byId = new Map(active.map(r => [r.id, r]));
   const sourceIds = Object.fromEntries(active.map(r => [r.id, r.kind === "page" && ["meeting", "source"].includes(r.type) ? r.id : r.metadata.source_page]).filter(([, id]) => typeof id === "string" && byId.has(id)));
-  // Reuse this expensive JSON/history join in both event branches. Inlining it
-  // makes SQLite reparse whole publication plans for each history row.
+  syncRecentProjection(db, scope);
+  // Reuse this history join in both event branches. The projection holds the
+  // plan and receipt fields, so no publication plan is parsed per read.
   const rows = db.prepare(`
     WITH published AS MATERIALIZED (
-      SELECT m.request, m.receipt, j.value AS record,
-        (SELECT MIN(h.sequence) FROM history h WHERE h.scope=m.scope
-          AND h.id=json_extract(j.value,'$.id') AND h.hash=json_extract(j.value,'$.hash')
-          AND h.revision=json_extract(j.value,'$.revision')
-          AND h.provenance=json_extract(m.plan,'$.actor')) AS sequence
-      FROM mutations m, json_each(COALESCE(json_extract(m.plan,'$.records'), json_array(json_extract(m.plan,'$.record')))) j
-      WHERE m.scope=? AND m.state='published'
+      SELECT p.request, q.operation, q.target_id, q.at, q.reason, q.replacement_id, p.id AS record_id, p.kind, p.type, p.title,
+        (SELECT MIN(h.sequence) FROM history h WHERE h.scope=p.scope
+          AND h.id=p.id AND h.hash=p.hash AND h.revision=p.revision AND h.provenance=p.actor) AS sequence
+      FROM recent_records_v1 p JOIN recent_requests_v1 q ON q.scope=p.scope AND q.request=p.request
+      WHERE p.scope=?
     ), plain AS MATERIALIZED (
       -- Sequence sets for the history branch. Joining history to the wide
       -- published rows scanned every published record per history event.
-      SELECT sequence FROM published WHERE sequence IS NOT NULL AND json_extract(receipt,'$.operation') IS NULL
+      SELECT sequence FROM published WHERE sequence IS NOT NULL AND operation IS NULL
     ), any_published AS MATERIALIZED (
       SELECT sequence FROM published WHERE sequence IS NOT NULL
     ), events AS (
-      SELECT MAX(sequence) AS sequence, json_extract(receipt,'$.targetId') AS id,
-        json_extract(receipt,'$.at') AS at,
-        CASE json_extract(receipt,'$.operation') WHEN 'correct' THEN 'corrected' ELSE 'withdrawn' END AS change,
-        MAX(CASE WHEN json_extract(record,'$.id')=json_extract(receipt,'$.targetId') THEN json_extract(record,'$.kind') END) AS kind,
-        MAX(CASE WHEN json_extract(record,'$.id')=json_extract(receipt,'$.targetId') THEN
-          COALESCE(json_extract(record,'$.metadata.claim_kind'),json_extract(record,'$.metadata.type'),json_extract(record,'$.kind')) END) AS type,
-        json_extract(receipt,'$.reason') AS reason, json_extract(receipt,'$.replacementId') AS replacementId,
-        MAX(CASE WHEN json_extract(record,'$.id')=json_extract(receipt,'$.targetId') THEN json_extract(record,'$.title') END) AS title
-      FROM published WHERE json_extract(receipt,'$.operation') IN ('correct','withdraw') GROUP BY request
+      SELECT MAX(sequence) AS sequence, target_id AS id, at,
+        CASE operation WHEN 'correct' THEN 'corrected' ELSE 'withdrawn' END AS change,
+        MAX(CASE WHEN record_id=target_id THEN kind END) AS kind,
+        MAX(CASE WHEN record_id=target_id THEN type END) AS type,
+        reason, replacement_id AS replacementId,
+        MAX(CASE WHEN record_id=target_id THEN title END) AS title
+      FROM published WHERE operation IN ('correct','withdraw') GROUP BY request
       UNION ALL
       SELECT h.sequence, h.id, h.at,
         CASE WHEN h.sequence IN (SELECT sequence FROM plain) THEN CASE h.revision WHEN 1 THEN 'created' ELSE 'updated' END
