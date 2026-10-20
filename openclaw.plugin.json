@@ -40,6 +40,28 @@
           }
         },
         "additionalProperties": false
+      },
+      "maintenance": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Run the scheduled maintenance pass over every configured store. Default true."
+          },
+          "schedule": {
+            "type": "string",
+            "minLength": 9,
+            "maxLength": 100,
+            "description": "Five-field cron expression. Default 30 3 * * * (03:30 daily)."
+          },
+          "timezone": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "description": "IANA time zone for the schedule. Default: the Gateway host's time zone."
+          }
+        },
+        "additionalProperties": false
       }
     },
     "additionalProperties": false
@@ -48,9 +70,9 @@
     "onStartup": true
   },
   "controlUi": {
-    "entry": "dist/control-ui/f39715f0d5d4c70b5a129c072ab909d72e0d9f55ae5b9dc3adc8752485bf0a17/index.js",
+    "entry": "dist/control-ui/836b9d73b2cd85b22434f2ffc0b0c8f6a7cd0d8d113ec15db67b316dffc68621/index.js",
     "styles": [
-      "dist/control-ui/f39715f0d5d4c70b5a129c072ab909d72e0d9f55ae5b9dc3adc8752485bf0a17/index.css"
+      "dist/control-ui/836b9d73b2cd85b22434f2ffc0b0c8f6a7cd0d8d113ec15db67b316dffc68621/index.css"
     ]
   },
   "skills": [
@@ -82,6 +104,7 @@
       "knowledge_reconcile_evidence",
       "knowledge_record",
       "knowledge_records",
+      "knowledge_relink",
       "knowledge_remember",
       "knowledge_resume",
       "knowledge_revision",
