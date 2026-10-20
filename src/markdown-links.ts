@@ -60,8 +60,10 @@ function linkIndex(records: LinkRecord[]): LinkIndex {
   }
   indexes.set(records, index); return index;
 }
-/** Input records must already be authorized and lifecycle-filtered. Never guess ambiguous names. */
-export function resolveLinks(record: LinkRecord, records: LinkRecord[]): LinkResolution[] {
+/** Input records must already be authorized and lifecycle-filtered. Never guess ambiguous names.
+ * `canonical` maps a merged page among `records` to the page it was merged into; a name matching
+ * both counts once, and a link whose final page is not among `records` is missing. */
+export function resolveLinks(record: LinkRecord, records: LinkRecord[], canonical?: (id: string) => string): LinkResolution[] {
   const results: LinkResolution[] = [], index = linkIndex(records);
   let parsed = extracted.get(record);
   if (parsed?.body !== record.body) { parsed = { body: record.body, hrefs: extractLinks(record.body) }; extracted.set(record, parsed); }
@@ -79,8 +81,9 @@ export function resolveLinks(record: LinkRecord, records: LinkRecord[]): LinkRes
     // Old UUID paths survive renames. IDs remain authoritative, not inferred from filenames.
     if (!matches.size) matches = new Set(index.byId.get(bare.split("/").at(-1)!) ?? []);
     if (!matches.size && wiki && !target.includes("/")) matches = new Set(index.byName.get(normalize(bare)) ?? []);
-    const [only] = matches;
-    results.push({ href, status: matches.size === 1 ? "resolved" : matches.size ? "ambiguous" : "missing", ...(matches.size === 1 ? { id: only.id } : {}) });
+    const ids = new Set([...matches].map(r => canonical ? canonical(r.id) : r.id).filter(id => !canonical || (index.byId.has(id) && canonical(id) === id)));
+    const [only] = ids;
+    results.push({ href, status: ids.size === 1 ? "resolved" : ids.size ? "ambiguous" : "missing", ...(ids.size === 1 ? { id: only } : {}) });
   }
   return results;
 }

@@ -48,9 +48,9 @@
     "onStartup": true
   },
   "controlUi": {
-    "entry": "dist/control-ui/604c5cbfd557d36fb706f7bc68fb6dc7cea78d24187aa2041402a0395c452cd0/index.js",
+    "entry": "dist/control-ui/71b5e56431547f73d9245c84fe525020732b737e38036b22ca4ee492c0d99fc0/index.js",
     "styles": [
-      "dist/control-ui/604c5cbfd557d36fb706f7bc68fb6dc7cea78d24187aa2041402a0395c452cd0/index.css"
+      "dist/control-ui/71b5e56431547f73d9245c84fe525020732b737e38036b22ca4ee492c0d99fc0/index.css"
     ]
   },
   "skills": [
@@ -74,6 +74,7 @@
       "knowledge_grep",
       "knowledge_history",
       "knowledge_lookup",
+      "knowledge_merge",
       "knowledge_mutation",
       "knowledge_ontology",
       "knowledge_publish_batch",
@@ -87,6 +88,7 @@
       "knowledge_source_check",
       "knowledge_status",
       "knowledge_timeline",
+      "knowledge_unmerge",
       "knowledge_verify",
       "knowledge_withdraw"
     ]

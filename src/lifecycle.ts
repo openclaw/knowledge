@@ -5,6 +5,7 @@ import { Check } from "typebox/value";
 import { Envelope, type LoadedRecord } from "./model.js";
 import { digest } from "./vault.js";
 import type { WithdrawInput } from "./mutation-contract.js";
+import { mergeRedirects, referenceIds } from "./merge.js";
 
 export function assertLifecycleTarget(records: LoadedRecord[], input: WithdrawInput, correcting: boolean): LoadedRecord {
   const matches = records.filter(r => r.id === input.id), r = matches.length === 1 ? matches[0] : undefined;
@@ -31,7 +32,9 @@ export function lifecycleRecord(previous: LoadedRecord, lifecycle: "superseded" 
 
 export function lifecycleImpact(records: LoadedRecord[], target: string) {
   const affected = new Set([target]);
-  const references = (r: LoadedRecord) => [...(r.metadata.dependencies ?? []), ...(r.metadata.entities ?? []), ...[r.metadata.from, r.metadata.to, r.metadata.owner].filter((id): id is string => Boolean(id))];
+  // References to pages merged into the target depend on it as well.
+  const redirects = mergeRedirects(records);
+  const references = (r: LoadedRecord) => referenceIds(r.metadata).map(id => redirects.get(id) ?? id);
   // Only deterministic dependencies; never pretend to discover all prose copies.
   let changed = true;
   while (changed) {

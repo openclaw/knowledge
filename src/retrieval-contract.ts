@@ -40,5 +40,6 @@ export const SearchOutput = Type.Object({
   index: Type.Object({ state: Type.Union([Type.Literal("ready"), Type.Literal("unavailable")]), lag: Type.Union([Type.Boolean(), Type.Null()]), snapshot: Type.Union([text(64), Type.Null()]), message: text(500) }),
 }, { additionalProperties: false });
 export type SearchOutput = Static<typeof SearchOutput>;
-export const LookupOutput = Type.Object({ ...common, total: Type.Integer(), outcome: Type.Union([Type.Literal("found"), Type.Literal("ambiguous"), Type.Literal("missing")]) }, { additionalProperties: false });
+export const LookupOutput = Type.Object({ ...common, total: Type.Integer(), outcome: Type.Union([Type.Literal("found"), Type.Literal("ambiguous"), Type.Literal("missing")]),
+  redirectedFrom: Type.Optional(Type.String({ maxLength: 96, description: "The queried ID belongs to a page merged into the returned page." })) }, { additionalProperties: false });
 export type LookupOutput = Static<typeof LookupOutput>;

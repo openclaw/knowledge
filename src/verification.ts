@@ -3,11 +3,13 @@ import { digest } from "./vault.js";
 import { eligible } from "./retrieval.js";
 import { recordSummary } from "./record-summary.js";
 import { resolveLinks } from "./markdown-links.js";
+import { linkTargets } from "./merge.js";
 import type { VerifyInput, VerifyOutput } from "./ingestion-contract.js";
 
 /** One authorized scan; compact exception codes never echo hidden references or source text. */
 export function verifyRecords(data: Awaited<ReturnType<SampleVault["scan"]>>, input: VerifyInput, indexed: Set<string> | null): VerifyOutput {
   const current = eligible(data, undefined, false), records = new Map(current.map(r => [r.id, r]));
+  const targets = linkTargets(data.records, current);
   const snapshot = digest(JSON.stringify([data.records.map(r => [r.id, r.path, r.hash, r.revision, r.valid]), [...records.keys()], data.ontology?.fingerprint, data.issues, indexed === null ? null : [...indexed].sort(), input.records]));
   if (input.snapshot && input.snapshot !== snapshot) throw Error("Verification snapshot changed; restart at offset 0.");
   const problems: VerifyOutput["problems"] = [];
@@ -31,7 +33,7 @@ export function verifyRecords(data: Awaited<ReturnType<SampleVault["scan"]>>, in
           add(id, "missing-expected-" + field, "Required " + field + " association is absent or unavailable in this scope.");
       }
       if (expectation.expectedLinks?.length) {
-        const links = resolveLinks(record, current);
+        const links = resolveLinks(record, targets.candidates, targets.canonical);
         for (const link of expectation.expectedLinks) {
           const candidates = link.href === undefined ? links : links.filter(actual => actual.href === link.href);
           if (!candidates.some(actual => actual.status === "resolved" && actual.id === link.id))

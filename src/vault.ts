@@ -10,6 +10,8 @@ import { claimCard } from "./claim-card.js";
 import { annotationEvidence, annotationProblems } from "./annotations.js";
 import { recordSummary as summary, sourceCount } from "./record-summary.js";
 import { eligible } from "./retrieval.js";
+import { linkTargets, mergeProblem, mergeRedirects } from "./merge.js";
+import { mergeDetail } from "./merge-view.js";
 import { temporalProblems } from "./temporal.js";
 import * as fs from "node:fs";
 import path from "node:path";
@@ -212,6 +214,8 @@ export class SampleVault {
       for (const message of temporalProblems(m)) problem("invalid-temporal", message);
       for (const message of annotationProblems(m, id => byId.get(id) ?? [])) problem("invalid-annotation", message);
       if (m.recall !== undefined && !approvedRecall(m.recall)) add(r.path, "invalid-recall", "Recall metadata is invalid or was not issued by the owner-private recall service. Automatic recall is disabled for this record.");
+      const merge = mergeProblem(r, byId);
+      if (merge) problem("invalid-merge", merge);
       if (m.owner) resolve(m.owner, true);
       for (const reference of m.entities ?? []) resolve(reference, true);
       for (const reference of m.dependencies ?? []) resolve(reference);
@@ -230,7 +234,8 @@ export class SampleVault {
     }
     if (!overlay) this.observe?.(records, this.scope, evidence);
     const navigable = eligible({ records, ontology, sources, issues, checkedAt: "" }, undefined, false);
-    for (const r of navigable) for (const link of resolveLinks(r, navigable)) if (link.status !== "resolved") add(r.path, `${link.status}-link`, `Document link is ${link.status}: ${link.href}`);
+    const targets = linkTargets(records, navigable);
+    for (const r of navigable) for (const link of resolveLinks(r, targets.candidates, targets.canonical)) if (link.status !== "resolved") add(r.path, `${link.status}-link`, `Document link is ${link.status}: ${link.href}`);
     records.sort((a,b) => a.path.localeCompare(b.path));
     if (this.cache?.evidence && !overlay) for (const key of this.cache.evidence.keys()) if (!evidence.used.has(key)) this.cache.evidence.delete(key);
     return { data: { records, ontology, sources, issues, checkedAt: new Date().toISOString() }, evidence };
@@ -287,7 +292,9 @@ export class SampleVault {
   async detail(id: string, evidenceOffset = 0, evidenceLimit = 20) {
     const data = await this.scan(), matches = data.records.filter(r => r.id === id);
     if (matches.length !== 1) return { record: null, issues: [], references: [], evidence: [] };
-    const r = matches[0], refs = new Set([...(r.metadata.entities ?? []), ...(r.metadata.dependencies ?? []), ...[r.metadata.from, r.metadata.to, r.metadata.owner, r.metadata.source_page, ...(r.metadata.continuity ?? []).map(c => c.id), ...(r.metadata.identity?.candidates ?? []).map(c => c.id)].filter((x): x is string => Boolean(x))]);
+    // Authored references to merged pages are shown as their survivors.
+    const redirects = mergeRedirects(data.records), resolved = (x: string) => redirects.get(x) ?? x;
+    const r = matches[0], refs = new Set([...(r.metadata.entities ?? []), ...(r.metadata.dependencies ?? []), ...[r.metadata.from, r.metadata.to, r.metadata.owner, r.metadata.source_page, ...(r.metadata.continuity ?? []).map(c => c.id), ...(r.metadata.identity?.candidates ?? []).map(c => c.id)].filter((x): x is string => Boolean(x))].map(resolved));
     const references = eligible(data, undefined, false).filter(other => refs.has(other.id) || other.metadata.from === id || other.metadata.to === id || other.metadata.entities?.includes(id) || other.metadata.dependencies?.includes(id) || other.metadata.owner === id).map(summary);
     const evidence = [], inspector = new EvidenceInspector(this.root);
     for (const e of (r.metadata.evidence ?? []).slice(evidenceOffset, evidenceOffset + evidenceLimit)) {
@@ -316,7 +323,8 @@ export class SampleVault {
         return { record: summary(other), text: other.body.slice(0, 4000), ...(other.metadata.attribution ? { attribution: other.metadata.attribution } : {}), ...(other.metadata.assertion_origin ? { assertionOrigin: other.metadata.assertion_origin } : {}), relation: link.relation, basis: link.basis, incoming, ...(source ? { source: summary(source) } : {}) };
       });
     }).slice(0, 100);
-    return { sourceFiles, sourceFilesTotal: files.size, identityEvidence, relatedStatements, record: { ...summary(r), body: r.body, raw: r.raw, hash: r.hash, metadata: JSON.stringify(r.metadata, null, 2) }, issues: data.issues.filter(i => i.path === r.path), references, links: resolveLinks(r, eligible(data, undefined, false)), evidence, evidenceTotal: r.metadata.evidence?.length ?? 0, evidenceSourceTotal: sourceCount(r.metadata.evidence) };
+    const targets = linkTargets(data.records, current);
+    return { sourceFiles, sourceFilesTotal: files.size, identityEvidence, relatedStatements, record: { ...summary(r), body: r.body, raw: r.raw, hash: r.hash, metadata: JSON.stringify(r.metadata, null, 2) }, issues: data.issues.filter(i => i.path === r.path), references, ...mergeDetail(data.records, current, r), links: resolveLinks(r, targets.candidates, targets.canonical), evidence, evidenceTotal: r.metadata.evidence?.length ?? 0, evidenceSourceTotal: sourceCount(r.metadata.evidence) };
   }
   /** Resolve the referenced source within this scope on every passage request. */
   async evidenceRead(input: EvidenceReadInput, withdrawn = new Set<string>()) {

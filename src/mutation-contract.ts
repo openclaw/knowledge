@@ -57,6 +57,29 @@ export const AnnotateInput = Type.Object({
 export type AnnotateInput = Static<typeof AnnotateInput>;
 export const WithdrawInput = Type.Object(target, { additionalProperties: false });
 export type WithdrawInput = Static<typeof WithdrawInput>;
+const pageFence = (description: string) => Type.Object({ id, expectedRevision: Type.Integer({ minimum: 1 }), expectedHash: Type.String({ pattern: "^[a-f0-9]{64}$" }) }, { additionalProperties: false, description });
+const mergeCommon = { requestId, expectedVaultId: Type.Optional(requestId), reason: Type.String({ minLength: 1, maxLength: 2000 }) };
+export const MergeInput = Type.Object({
+  ...mergeCommon,
+  survivor: pageFence("The page that remains. Its ID, current revision and hash from knowledge_record."),
+  absorbed: pageFence("The duplicate page. It becomes merged and its ID resolves to the survivor."),
+  title: Type.Optional(Type.String({ minLength: 1, maxLength: 200, description: "Rename the survivor; its old title becomes an alias." })),
+  body: Type.Optional(Type.String({ maxLength: BODY_INPUT_MAX_CHARS, description: "Replacement survivor body. Omit to keep it; the absorbed body stays readable by exact ID." })),
+  evidence: Type.Optional(Type.Array(Evidence, { minItems: 1, maxItems: 20, description: "Retained identity evidence (knowledge_attach), added to the survivor." })),
+}, { additionalProperties: false });
+export type MergeInput = Static<typeof MergeInput>;
+export const UnmergeInput = Type.Object({
+  ...mergeCommon,
+  merged: pageFence("The merged page to restore, with its current revision and hash."),
+  survivor: pageFence("The page it was merged into, with its current revision and hash."),
+}, { additionalProperties: false });
+export type UnmergeInput = Static<typeof UnmergeInput>;
+export const MergeReport = Type.Object({
+  survivorId: id, absorbedId: id,
+  aliases: Type.Array(text(200), { maxItems: 100, description: "Aliases the survivor gained (merge) or lost (unmerge)." }),
+  fieldConflicts: Type.Array(text(200), { maxItems: 100, description: "Fields both pages set differently; the survivor's values were kept." }),
+  redirectedRecords: Type.Integer({ minimum: 0, description: "Current records that named the absorbed page and now resolve to the survivor (merge), or back to the restored page (unmerge)." }),
+}, { additionalProperties: false });
 const recallTarget = {
   requestId, id, expectedRevision: Type.Integer({ minimum: 1 }),
   expectedHash: Type.String({ pattern: "^[a-f0-9]{64}$" }),
@@ -99,7 +122,8 @@ export const Receipt = Type.Object({
   requestId, state: Type.Union([Type.Literal("accepted"), Type.Literal("published"), Type.Literal("conflict")]),
   id: text(96), path: text(500), revision: Type.Integer(), hash: text(64),
   at: text(40), message: text(1000),
-  operation: Type.Optional(Type.Union([Type.Literal("correct"), Type.Literal("withdraw")])),
+  operation: Type.Optional(Type.Union([Type.Literal("correct"), Type.Literal("withdraw"), Type.Literal("merge"), Type.Literal("unmerge")])),
+  merge: Type.Optional(MergeReport),
   items: Type.Optional(Type.Array(Type.Object({ key: text(40), id, path: text(500), revision: Type.Integer(), hash: text(64) }, { additionalProperties: false }), { maxItems: 25 })),
   targetId: Type.Optional(id), replacementId: Type.Optional(id), reason: Type.Optional(text(2000)),
   impact: Type.Optional(LifecycleImpact), indexed: Type.Literal(false), git: Type.Optional(GitCheckpoint),

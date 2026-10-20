@@ -20,7 +20,7 @@ import type { StorageOperations } from "./storage-host.js";
 
 type Handlers = FeatureHandlers<typeof contract>;
 type StoreHandlers = Omit<Handlers, "stores_snapshot" | "stores_change" | "stores_change_status" | "agent_query" | "agent_action">;
-const WRITE_TOOLS = ["knowledge_edit_body", "knowledge_reconcile_evidence", "knowledge_save_page", "knowledge_correct", "knowledge_withdraw", "knowledge_recall"];
+const WRITE_TOOLS = ["knowledge_edit_body", "knowledge_reconcile_evidence", "knowledge_save_page", "knowledge_correct", "knowledge_withdraw", "knowledge_merge", "knowledge_unmerge", "knowledge_recall"];
 const chatOnly = () => Error("Knowledge changes must be requested through chat and agent tools.");
 const operatorOnly = () => Error("Selecting an agent's store is an operator inspection; it is not available to agent tools.");
 
@@ -128,6 +128,8 @@ export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureE
       create_relationship: authored("createRelationship"),
       correct: agentChange("correct"),
       withdraw: agentChange("withdraw"),
+      merge: agentChange("merge"),
+      unmerge: agentChange("unmerge"),
       recall: (input, context) => {
         if (context.source !== "tool") return Promise.reject(Error("Automatic recall approval is available only through an owner-private agent tool call; browser and operator actions are not allowed."));
         if (context.tool.memoryAudience?.kind !== "owner-private") return Promise.reject(Error("Automatic recall approval requires the owner's private memory audience; conversation audiences are not allowed."));

@@ -4,6 +4,7 @@ import { recordSummary } from "./record-summary.js";
 import type { Static } from "typebox";
 import { ConnectionsInput, ConnectionsOutput } from "./connections-contract.js";
 import { eligible } from "./retrieval.js";
+import { linkTargets, mergeRedirects } from "./merge.js";
 import { digest, type SampleVault } from "./vault.js";
 
 const compact = (r: ReturnType<typeof recordSummary>) => ({
@@ -17,6 +18,11 @@ export function connections(data: Awaited<ReturnType<SampleVault["scan"]>>, inpu
   const full = input.view === "full";
   if (input.includeCards && !full) throw Error("includeCards requires view=full; compact connections omit card bodies.");
   const records = eligible(data, withdrawn, input.historical ?? false);
+  // A merged page's connections are its survivor's.
+  const merged = input.historical ? undefined : mergeRedirects(data.records).get(input.id);
+  const redirectedFrom = merged && !withdrawn.has(input.id) ? input.id : undefined;
+  if (redirectedFrom) input = { ...input, id: merged! };
+  const links = linkTargets(data.records, records);
   const rows: Static<typeof ConnectionsOutput>["connections"] = [];
   if (records.some(r => r.id === input.id)) for (const r of records) {
     const m = r.metadata, directions: Static<typeof ConnectionsOutput>["connections"][number]["direction"][] = [];
@@ -34,7 +40,7 @@ export function connections(data: Awaited<ReturnType<SampleVault["scan"]>>, inpu
   const wantsLinks = !input.direction || input.direction === "links", wantsBacklinks = !input.direction || input.direction === "backlinks";
   if (current && (wantsLinks || wantsBacklinks)) for (const source of records) {
     if (source.id === current.id ? !wantsLinks : !wantsBacklinks) continue;
-    const targets = new Set(resolveLinks(source, records).flatMap(link => link.id ? [link.id] : []));
+    const targets = new Set(resolveLinks(source, links.candidates, links.canonical).flatMap(link => link.id ? [link.id] : []));
     if (source.id === current.id) {
       for (const target of records) if (targets.has(target.id) && target.id !== source.id) rows.push({ direction: "links", record: full ? recordSummary(target) : compact(recordSummary(target)), label: "References", ...(full ? { evidence: [], evidenceTruncated: false } : {}) });
     } else if (targets.has(current.id)) rows.push({ direction: "backlinks", record: full ? recordSummary(source) : compact(recordSummary(source)), label: "Referenced by", ...(full ? { evidence: [], evidenceTruncated: false } : {}) });
@@ -44,7 +50,7 @@ export function connections(data: Awaited<ReturnType<SampleVault["scan"]>>, inpu
   const envelope = (page: typeof rows): Static<typeof ConnectionsOutput> => {
     const endpointIds = new Set(page.filter(r => r.record.kind === "relationship").flatMap(r => [r.from, r.to]));
     return { connections: page, ...(input.includeEndpoints ? { endpoints: eligible(data, withdrawn, false).filter(r => endpointIds.has(r.id)).map(r => full ? recordSummary(r) : compact(recordSummary(r))) } : {}),
-      total: rows.length, nextOffset: offset + page.length < rows.length ? offset + page.length : null, snapshot };
+      total: rows.length, nextOffset: offset + page.length < rows.length ? offset + page.length : null, snapshot, ...(redirectedFrom ? { redirectedFrom } : {}) };
   };
   let result = envelope([]);
   for (const row of rows.slice(offset, offset + limit)) {

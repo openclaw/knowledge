@@ -3,6 +3,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { digest, type SampleVault } from "./vault.js";
 import type { LoadedRecord } from "./model.js";
 import { eligible } from "./retrieval.js";
+import { mergeRedirects } from "./merge.js";
 import { reconcileChronicle, chronologicalIds } from "./chronicle-index.js";
 import { calendarDay, dateInterval, recordDate, sameTemporalDate, shiftDay, type TimeField } from "./temporal-query.js";
 import { Check } from "typebox/value";
@@ -45,6 +46,9 @@ export function dayPredicate(input: DayInput): (value: string) => boolean {
 /** Query one authoritative scoped snapshot through its rebuildable SQLite date index. */
 export function chronicle(db: DatabaseSync, data: Snapshot, binding: string, input: TimelineInput, withdrawn = new Set<string>(), onDay?: DayInput): ChronicleOutput {
   const records = eligible(data, withdrawn, input.eligibility === "include_inactive");
+  // An entity filter naming a merged page asks about the page it was merged into.
+  const merged = mergeRedirects(data.records).get(input.entity ?? "");
+  if (merged && !withdrawn.has(input.entity!)) input = { ...input, entity: merged };
   const byId = new Map(records.map(r => [r.id, r])), visible = new Set(byId.keys());
   const predicate = onDay ? dayPredicate(onDay) : undefined;
   const field = input.timeField ?? "occurred_at";

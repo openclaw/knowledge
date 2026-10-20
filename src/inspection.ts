@@ -5,14 +5,14 @@ import type { SampleVault } from "./vault.js";
 import type { CompactMetadata, RecordInput, RecordOutput, OntologyInput, OntologyOutput } from "./inspection-contract.js";
 import type { Envelope, LoadedRecord } from "./model.js";
 
-const summary = ({ body, raw, hash, metadata, ...rest }: LoadedRecord) => rest;
+const summary = ({ body, raw, hash, metadata, redirected: _redirected, ...rest }: LoadedRecord) => rest;
 const withoutConfidenceEvidence = <T extends { attributionConfidence?: { level: "high" | "medium" | "low"; basis: string } }>(r: T): T => ({ ...r,
   ...(r.attributionConfidence ? { attributionConfidence: { level: r.attributionConfidence.level, basis: r.attributionConfidence.basis } } : {}) });
 const next = (offset: number, count: number, total: number) => offset + count < total ? offset + count : null;
 
 export const RECORD_RESPONSE_BYTES = RECORD_RESPONSE_MAX_BYTES;
 const compactMetadata = (m: Envelope): CompactMetadata => {
-  const keys = ["owner", "due_at", "occurred_at", "source_page", "source_event", "entities", "dependencies", "from", "to", "label", "attribution", "assertion_origin", "claim_kind", "aliases", "fields", "updated_at", "supersedes", "superseded_by", "lifecycle_change"] as const;
+  const keys = ["owner", "due_at", "occurred_at", "source_page", "source_event", "entities", "dependencies", "from", "to", "label", "attribution", "assertion_origin", "claim_kind", "aliases", "fields", "updated_at", "supersedes", "superseded_by", "lifecycle_change", "merged_into"] as const;
   return { ...Object.fromEntries(keys.filter(k => m[k] !== undefined).map(k => [k, m[k]])),
     ...(m.identity ? { identity: { status: m.identity.status, context: m.identity.context,
       ...(m.identity.candidates ? { candidates: m.identity.candidates.map(({ id, basis }) => ({ id, basis })) } : {}) } } : {}),
@@ -80,16 +80,22 @@ export async function inspectRecord(vault: SampleVault, input: RecordInput): Pro
   if (splitsPair(value, end)) end--;
   const chunk = value.slice(offset, end);
   const refs = detail.references.map(withoutConfidenceEvidence);
-  result.record = { ...withoutConfidenceEvidence(base), about: refs.filter(r => metadata.entities?.includes(r.id)).slice(0, 2),
+  // Authored references to merged pages are shown as the pages they resolve to.
+  const current = (id?: string) => id && (detail.redirects?.find(x => x.from === id)?.to ?? id);
+  const owner = refs.find(r => r.id === current(metadata.owner)), source = refs.find(r => r.id === current(metadata.source_page));
+  result.record = { ...withoutConfidenceEvidence(base), about: refs.filter(r => metadata.entities?.some(e => current(e) === r.id)).slice(0, 2),
     ...(view === "content" ? { body: chunk } : view === "raw" ? { raw: chunk } : {}),
     ...(metadata.attribution ? { attribution: metadata.attribution } : {}),
     ...(metadata.assertion_origin ? { assertionOrigin: metadata.assertion_origin } : {}),
     ...(metadata.claim_kind ? { claimKind: metadata.claim_kind } : {}),
-    ...(refs.find(r => r.id === metadata.owner) ? { owner: refs.find(r => r.id === metadata.owner) } : {}),
-    ...(refs.find(r => r.id === metadata.source_page) ? { source: refs.find(r => r.id === metadata.source_page) } : {}),
+    ...(owner ? { owner } : {}),
+    ...(source ? { source } : {}),
     ...(metadataView === "full" ? { metadata } : metadataView === "compact" ? { metadata: compactMetadata(metadata) } : {}),
   };
   if (view === "content") { result.links = (detail.links ?? []).slice(0, 1000); result.linksTruncated = (detail.links?.length ?? 0) > 1000; }
+  if (detail.mergedInto) result.mergedInto = detail.mergedInto;
+  if (detail.mergedFrom) result.mergedFrom = detail.mergedFrom;
+  if (detail.redirects) result.redirects = detail.redirects;
   result.content = { offset, totalChars: value.length, nextOffset: next(offset, chunk.length, value.length) };
   if (input.includeReferences) {
     const start = input.referenceOffset ?? 0, limit = input.referenceLimit ?? 20;

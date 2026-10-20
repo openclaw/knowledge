@@ -40,6 +40,9 @@ import { AnnotateInput, SavePage, ClaimInput, RelationshipInput, CorrectInput, W
 import { digest } from "./vault.js";
 import { approvedRecall, Envelope, RecordAnnotations, type LoadedRecord, type Recall, type Scope } from "./model.js";
 import { lifecycleRecord, lifecycleImpact, assertLifecycleTarget, applyLifecycleGuards } from "./lifecycle.js";
+import { mergeRedirects, referenceIds } from "./merge.js";
+import { planMerge, planUnmerge, type MergeReport } from "./merge-write.js";
+import { MergeInput, UnmergeInput } from "./mutation-contract.js";
 import type { VaultAccess } from "./access.js";
 
 const canonical = (x: unknown): string => JSON.stringify(x, (_, v) => v && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => a.localeCompare(b))) : v);
@@ -48,7 +51,7 @@ const blocked = () => Error("Knowledge publication pending or conflicted; inspec
 // `agentId` is the writing agent, fixed at acceptance so a resumed publication
 // keeps its original author whoever resumes it.
 type Plan = { descriptors?: Record<string, string>; activity?: ActivityOrigin; rootIdentity: string; before: Manifest; after: Manifest; changes: FileChange[]; actor: string; agentId?: string; scope: string; record: LoadedRecord; records?: LoadedRecord[]; source?: SourceIdentity };
-type Prepared = { requiredDescriptors?: Record<string, string>; record: LoadedRecord; artifacts: Record<string, string>; previous?: LoadedRecord; data: Awaited<ReturnType<SampleVault["scan"]>>; snapshot: string; additional?: { before?: LoadedRecord; after: LoadedRecord }[]; batch?: { items: NonNullable<Receipt["items"]>; source?: SourceIdentity; expectedPreviousRequestId?: string }; lifecycle?: CorrectInput | WithdrawInput; annotation?: boolean; metadataOnly?: boolean; annotationEvidence?: import("./model.js").Evidence[] };
+type Prepared = { requiredDescriptors?: Record<string, string>; record: LoadedRecord; artifacts: Record<string, string>; previous?: LoadedRecord; data: Awaited<ReturnType<SampleVault["scan"]>>; snapshot: string; additional?: { before?: LoadedRecord; after: LoadedRecord }[]; batch?: { items: NonNullable<Receipt["items"]>; source?: SourceIdentity; expectedPreviousRequestId?: string }; lifecycle?: CorrectInput | WithdrawInput; merge?: { operation: "merge" | "unmerge"; targetId: string; reason: string; report: MergeReport }; annotation?: boolean; metadataOnly?: boolean; annotationEvidence?: import("./model.js").Evidence[] };
 type Row = { scope: string; request: string; intent: string; state: Receipt["state"]; plan: string; receipt: string };
 export type PublicationHook = (stage: string) => void;
 
@@ -418,6 +421,73 @@ export class KnowledgeStorage {
     });
     return this.accept(input.requestId, intent, prepared, access, actor);
   }
+  /** Merge one duplicate page into another in a single publication; references resolve on read. */
+  async merge(input: MergeInput, access: VaultAccess, actor: string): Promise<Receipt> {
+    if (!Check(MergeInput, input) || !input.reason.trim()) throw Error("Invalid merge input.");
+    if (input.survivor.id === input.absorbed.id) throw Error("A page cannot be merged into itself.");
+    return this.publishPair(input, "merge", access, (data, withdrawn, at) => {
+      const survivor = this.activePage(data, input.survivor, "Survivor"), absorbed = this.activePage(data, input.absorbed, "Absorbed");
+      if (survivor.type !== absorbed.type) throw Error(`Only pages of the same type can be merged: ${survivor.title} is ${survivor.type}, ${absorbed.title} is ${absorbed.type}. No publication accepted.`);
+      for (const evidence of input.evidence ?? []) inspectEvidence(path.join(this.config.root, scopeKey(access.scope)), evidence);
+      const plan = planMerge(survivor, absorbed, input, { reason: input.reason, requestId: input.requestId, actor, at });
+      return { survivor, absorbed, plan, targetId: absorbed.id, evidence: input.evidence ?? [],
+        report: { survivorId: survivor.id, absorbedId: absorbed.id, aliases: plan.aliases, fieldConflicts: plan.fieldConflicts, redirectedRecords: this.namingCount(data, withdrawn, absorbed.id) } };
+    });
+  }
+  /** Undo one merge: the merged page is active again and the survivor loses what the merge added. */
+  async unmerge(input: UnmergeInput, access: VaultAccess, actor: string): Promise<Receipt> {
+    if (!Check(UnmergeInput, input) || !input.reason.trim()) throw Error("Invalid unmerge input.");
+    return this.publishPair(input, "unmerge", access, (data, withdrawn, at) => {
+      const survivor = this.activePage(data, input.survivor, "Survivor");
+      const matches = data.records.filter(r => r.id === input.merged.id), merged = matches.length === 1 ? matches[0] : undefined;
+      if (!merged || !merged.valid || merged.lifecycle !== "merged" || merged.hash !== input.merged.expectedHash || merged.revision !== input.merged.expectedRevision) throw Error(`Merged page unavailable, not merged, or changed: ${input.merged.id}. Reread it with knowledge_record and retry with a new request. No publication accepted.`);
+      if (merged.metadata.merged_into !== survivor.id) throw Error(`${merged.title} was merged into ${merged.metadata.merged_into}, not ${survivor.id}. Unmerge it from that page. No publication accepted.`);
+      const plan = planUnmerge(survivor, merged, { reason: input.reason, requestId: input.requestId, actor, at });
+      return { survivor, absorbed: merged, plan, targetId: merged.id, evidence: [],
+        report: { survivorId: survivor.id, absorbedId: merged.id, aliases: plan.aliases, fieldConflicts: [], redirectedRecords: this.namingCount(data, withdrawn, merged.id, true) } };
+    });
+  }
+  // Current records whose authored references name `id` (directly, or through pages merged into it).
+  private namingCount(data: Prepared["data"], withdrawn: Set<string>, id: string, authored = false) {
+    const redirects = mergeRedirects(data.records), names = (ref: string) => ref === id || redirects.get(ref) === id;
+    const records = authored ? data.records.filter(r => r.valid && r.lifecycle === "active") : eligible(data, withdrawn, false);
+    return records.filter(r => r.id !== id && [...referenceIds(r.metadata), ...(r.metadata.source_page ? [r.metadata.source_page] : [])].some(names)).length;
+  }
+  // One exact, active, valid page matching its revision fence.
+  private activePage(data: Prepared["data"], fence: { id: string; expectedRevision: number; expectedHash: string }, role: string): LoadedRecord {
+    const matches = data.records.filter(r => r.id === fence.id), page = matches.length === 1 ? matches[0] : undefined;
+    if (page?.lifecycle === "merged") throw Error(`${role} page ${page.title} was already merged into ${page.metadata.merged_into}. Use that page instead. No publication accepted.`);
+    if (!page || !page.valid || page.kind !== "page" || page.lifecycle !== "active" || page.hash !== fence.expectedHash || page.revision !== fence.expectedRevision) throw Error(`${role} page unavailable, inactive, invalid or changed: ${fence.id}. Reread it with knowledge_record and retry with a new request. No publication accepted.`);
+    return page;
+  }
+  // Shared journal path for merge and unmerge: plan both page revisions, validate them together, publish once.
+  private async publishPair(input: MergeInput | UnmergeInput, operation: "merge" | "unmerge", access: VaultAccess,
+    plan: (data: Prepared["data"], withdrawn: Set<string>, at: string) => { survivor: LoadedRecord; absorbed: LoadedRecord; plan: { survivor: LoadedRecord; absorbed: LoadedRecord }; targetId: string; evidence: import("./model.js").Evidence[]; report: MergeReport }): Promise<Receipt> {
+    access.assertCurrent();
+    if (!this.config.writesEnabled) throw Error("Knowledge writes are disabled.");
+    if (input.expectedVaultId && input.expectedVaultId !== this.config.vaultId) throw Error("Connected vault changed; no publication accepted.");
+    await this.initialize(access);
+    const scope = scopeKey(access.scope), intent = digest(canonical({ operation, input }));
+    const prior = this.store.withDatabase(db => this.row(db, scope, input.requestId));
+    if (prior) { this.checkReplay(prior, intent); return this.resume(access, input.requestId); }
+    this.assertReadable();
+    const prepared = await this.real.run(access, async vault => {
+      const snapshot = new PublicationFiles(this.config.root).snapshot(scope), data = await vault.scan();
+      const withdrawn = this.store.withDatabase(db => withdrawnIds(db, this.retrievalBinding(access)));
+      const planned = plan(data, withdrawn, new Date().toISOString());
+      // Both revisions are stored with compact evidence, exactly like any other page save.
+      const read = (p: string) => readSourceDescriptor(path.join(this.config.root, scope), p);
+      const survivor = encodeRecordEvidence(planned.plan.survivor, read), absorbed = encodeRecordEvidence(planned.plan.absorbed, read);
+      const artifacts = { ...survivor.descriptors, ...absorbed.descriptors };
+      const preview = await vault.scan({ records: [survivor.record, absorbed.record], artifacts });
+      for (const record of [survivor.record, absorbed.record]) if (!record.valid) throw Error(`${operation === "merge" ? "Merge" : "Unmerge"} validation failed for ${record.title}: ` + preview.issues.filter(i => i.path === record.path).map(i => i.message).join("; "));
+      if (new PublicationFiles(this.config.root).snapshot(scope) !== snapshot) throw Error("Edit conflict: vault changed during validation.");
+      return { previous: planned.survivor, record: survivor.record, additional: [{ before: planned.absorbed, after: absorbed.record }], data, snapshot, artifacts,
+        requiredDescriptors: { ...survivor.requiredDescriptors, ...absorbed.requiredDescriptors }, metadataOnly: true, annotationEvidence: planned.evidence,
+        merge: { operation, targetId: planned.targetId, reason: input.reason, report: planned.report } } satisfies Prepared;
+    });
+    return this.accept(input.requestId, intent, prepared, access, "agent");
+  }
   /** Publishes or clears one owner-approved recall block through the normal journal. */
   async recall(input: Static<typeof RecallInput>, access: VaultAccess, actor: string): Promise<Receipt> {
     if (!Check(RecallInput, input)) throw Error("Invalid automatic recall input.");
@@ -497,10 +567,14 @@ export class KnowledgeStorage {
     const references = [...(input.dependencies ?? []), ...(input.entities ?? []), ...[input.from, input.to, input.owner].filter((id): id is string => Boolean(id))];
     const affected = corrected ? new Set([corrected.id, ...lifecycleImpact(data.records, corrected.id).items.map(r => r.id)]) : undefined;
     if (affected && references.some(id => affected.has(id))) throw Error("Replacement cannot depend on its superseded original.");
+    // A stale ID of a merged page must not quietly start a new fragment.
+    const redirects = mergeRedirects(data.records), stale = [...references, ...(input.source_page ? [input.source_page] : [])].find(id => redirects.has(id));
+    if (stale) throw Error(`Reference ${stale} is a page that was merged into ${redirects.get(stale)}. Reference ${redirects.get(stale)} instead. No publication accepted.`);
     if (!batch && references.some(id => !allowed.some(r => r.id === id))) throw Error("Reference unavailable or inactive in this scope.");
     if (!batch && [...(input.entities ?? []), ...[input.from, input.to, input.owner].filter((id): id is string => Boolean(id))].some(id => !allowed.some(r => r.id === id && r.kind === "page"))) throw Error("Entity, owner and endpoint references must be pages.");
     const matches = data.records.filter(r => r.id === input.id);
     const previous = input.id && matches.length === 1 ? matches[0] : undefined;
+    if (previous?.lifecycle === "merged") throw Error(`${previous.title} was merged into ${previous.metadata.merged_into}. Edit that page instead. No files were changed.`);
     if (input.id && (!previous || previous.lifecycle !== "active" || !previous.valid || previous.kind !== "page" || previous.hash !== input.expectedHash || previous.revision !== input.expectedRevision)) throw Error("Edit conflict: record changed, disappeared, is ambiguous, or is invalid. No files were changed by this request, and this draft was not saved. Retain your proposed text, reread the current record, and reconcile before creating a new request.");
     const type = kind === "claim" ? input.claim_kind : kind === "relationship" ? input.label : input.type ?? previous?.type;
     const definition = data.ontology?.definitions.find(d => d.definition.name === type && d.definition.kind === kind)?.definition;
@@ -632,6 +706,10 @@ export class KnowledgeStorage {
         if (receipt.operation === "correct") receipt.replacementId = prepared.record.id;
         receipt.reason = prepared.lifecycle.reason;
         receipt.impact = lifecycleImpact(prepared.data.records, prepared.lifecycle.id);
+      }
+      if (prepared.merge) {
+        receipt.operation = prepared.merge.operation; receipt.targetId = prepared.merge.targetId;
+        receipt.reason = prepared.merge.reason; receipt.merge = prepared.merge.report;
       }
       const plan: Plan = { descriptors, activity: access.activity, rootIdentity: files.identity(), before, after, changes, actor, agentId: actor === "agent" ? access.agentId : undefined, scope, source: prepared.batch?.source, record: prepared.record, records: [prepared.record, ...(prepared.additional ?? []).map(c => c.after)] };
       access.assertCurrent();

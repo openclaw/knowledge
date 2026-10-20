@@ -39,6 +39,7 @@ export const CompactMetadata = Type.Object({
   claim_kind: Envelope.properties.claim_kind,
   aliases: Envelope.properties.aliases, fields: Envelope.properties.fields, updated_at: Type.Optional(Envelope.properties.updated_at),
   supersedes: Envelope.properties.supersedes, superseded_by: Envelope.properties.superseded_by, lifecycle_change: Envelope.properties.lifecycle_change,
+  merged_into: Envelope.properties.merged_into,
   identity: Type.Optional(Type.Object({ status: Type.Union([Type.Literal("partial"), Type.Literal("resolved")]), context: text(1000),
     candidates: Type.Optional(Type.Array(Type.Object({ id: text(96), basis: text(1000) }), { maxItems: 10 })) })),
   attribution_confidence: Type.Optional(Type.Object({ level: Type.Union([Type.Literal("high"), Type.Literal("medium"), Type.Literal("low")]), basis: text(1000) })),
@@ -82,6 +83,9 @@ export const RecordOutput = Type.Object({
   evidence: Type.Optional(Type.Array(InspectedEvidence, { maxItems: 100 })),
   links: Type.Optional(Type.Array(Type.Object({ href: text(200000), status: Type.Union([Type.Literal("resolved"), Type.Literal("missing"), Type.Literal("ambiguous")]), id: Type.Optional(text(96)) }), { maxItems: 1000 })),
   linksTruncated: Type.Optional(Type.Boolean()),
+  mergedInto: Type.Optional(Summary),
+  mergedFrom: Type.Optional(Type.Array(Summary, { maxItems: 100, description: "Pages merged into this one. Their IDs resolve here." })),
+  redirects: Type.Optional(Type.Array(Type.Object({ from: text(96), to: text(96) }, { additionalProperties: false }), { maxItems: 100, description: "Authored references to merged pages and the current pages they resolve to." })),
   evidenceTotal: Type.Optional(Type.Integer()), evidenceSourceTotal: Type.Optional(Type.Integer()), nextEvidenceOffset: Type.Optional(nullableOffset),
 }, { additionalProperties: false });
 export type RecordOutput = Static<typeof RecordOutput>;

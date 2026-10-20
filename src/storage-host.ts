@@ -3,6 +3,7 @@ import type { MessagePort } from "node:worker_threads";
 import { KnowledgeStorage } from "./storage.js";
 import { inspectRecord, inspectOntology } from "./inspection.js";
 import { eligible } from "./retrieval.js";
+import { mergeCandidates as findMergeCandidates } from "./merge.js";
 import { catalogFacts } from "./catalog.js";
 import type { VaultAccess } from "./access.js";
 import type { StoreConfig } from "./real-vault.js";
@@ -38,6 +39,8 @@ export const operations = {
   createRelationship: (s: Storage, a: Access, input: { value: In<Storage["createRelationship"]>; actor: string }) => s.createRelationship(input.value, a, input.actor),
   correct: (s: Storage, a: Access, input: In<Storage["correct"]>) => s.correct(input, a, "agent"),
   withdraw: (s: Storage, a: Access, input: In<Storage["withdraw"]>) => s.withdraw(input, a, "agent"),
+  merge: (s: Storage, a: Access, input: In<Storage["merge"]>) => s.merge(input, a, "agent"),
+  unmerge: (s: Storage, a: Access, input: In<Storage["unmerge"]>) => s.unmerge(input, a, "agent"),
   recall: (s: Storage, a: Access, input: In<Storage["recall"]>) => s.recall(input, a, "agent"),
   connections: (s: Storage, a: Access, input: In<Storage["connections"]>) => s.connections(input, a),
   resume: (s: Storage, a: Access, input: { requestId: string }) => s.resume(a, input.requestId),
@@ -53,7 +56,8 @@ export const operations = {
   ontology: (s: Storage, a: Access, input: Parameters<typeof inspectOntology>[1]) => s.run(a, vault => inspectOntology(vault, input)),
   diagnostics: (s: Storage, a: Access) => s.run(a, async vault => {
     const data = await vault.scan();
-    return { issues: data.issues.slice(0, 1000), total: data.issues.length, truncated: data.issues.length > 1000, checkedAt: data.checkedAt };
+    const mergeCandidates = findMergeCandidates(eligible(data, undefined, false));
+    return { issues: data.issues.slice(0, 1000), total: data.issues.length, truncated: data.issues.length > 1000, checkedAt: data.checkedAt, ...(mergeCandidates.length ? { mergeCandidates } : {}) };
   }),
   // Catalog facts for the status operation; service-level fields stay on the main thread.
   catalog: (s: Storage, a: Access) => s.run(a, async vault => catalogFacts(await vault.scan())),

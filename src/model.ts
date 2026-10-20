@@ -65,6 +65,16 @@ export const Scope = Type.Union([
   Type.Object({ visibility: Type.Literal("conversation"), sessionId: Type.String({ pattern: "^[a-f0-9-]{36}$" }) }, { additionalProperties: false }),
 ]);
 export type Scope = Static<typeof Scope>;
+/** What one identity merge added to its surviving page, so an unmerge can remove exactly that. */
+export const MergedFrom = Type.Object({
+  id, request_id: Type.String({ pattern: "^[a-f0-9-]{36}$" }), at: timestamp,
+  added: Type.Object({
+    aliases: strings, tags: strings, fields: strings,
+    evidence: Type.Array(Type.Object({ path: text(500), sha256: Type.String({ pattern: "^[a-f0-9]{64}$" }),
+      start_line: Type.Optional(Type.Integer({ minimum: 1 })), end_line: Type.Optional(Type.Integer({ minimum: 1 })) }, { additionalProperties: false }), { maxItems: 1000 }),
+  }, { additionalProperties: false }),
+}, { additionalProperties: false });
+export type MergedFrom = Static<typeof MergedFrom>;
 export const Envelope = Type.Object({
   ...RecordAnnotations.properties,
   format: Type.Literal("knowledge-record-v1"), id, revision: Type.Integer({ minimum: 1 }),
@@ -72,8 +82,9 @@ export const Envelope = Type.Object({
   title: Type.String({ minLength: 1, maxLength: 200 }),
   scope: Scope,
   recorded_at: timestamp, updated_at: timestamp,
-  lifecycle: Type.Union([Type.Literal("active"), Type.Literal("superseded"), Type.Literal("withdrawn")]),
+  lifecycle: Type.Union([Type.Literal("active"), Type.Literal("superseded"), Type.Literal("withdrawn"), Type.Literal("merged")]),
   supersedes: Type.Optional(id), superseded_by: Type.Optional(id),
+  merged_into: Type.Optional(id), merged_from: Type.Optional(Type.Array(MergedFrom, { maxItems: 100 })),
   lifecycle_change: Type.Optional(Type.Object({
     reason: Type.String({ minLength: 1, maxLength: 2000 }), at: timestamp,
     actor: text(100), request_id: Type.String({ pattern: "^[a-f0-9-]{36}$" }),
@@ -116,4 +127,5 @@ export type RecordSummary = {
   lifecycle: string; revision: number; valid: boolean;
   writtenByAgentId?: string;
 };
-export type LoadedRecord = RecordSummary & { metadata: Envelope; body: string; raw: string; hash: string };
+/** `redirected` maps authored references to merged pages onto their survivors (current reads only). */
+export type LoadedRecord = RecordSummary & { metadata: Envelope; body: string; raw: string; hash: string; redirected?: Record<string, string> };

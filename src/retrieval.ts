@@ -3,6 +3,7 @@ import { queryFreshness } from "./query-freshness.js";
 import { temporalPredicate } from "./temporal-query.js";
 import { observeLifecycleGuards } from "./lifecycle.js";
 import { activeNow } from "./temporal.js";
+import { effectiveRecord, mergeRedirects, referenceIds } from "./merge.js";
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { Check } from "typebox/value";
@@ -27,20 +28,24 @@ export function withdrawnIds(db: DatabaseSync, binding: string): Set<string> {
   return new Set(db.prepare("SELECT id FROM keyword_withdrawals_v1 WHERE binding=?").all(binding).map(r => String(r.id)));
 }
 
-/** Remove unavailable dependencies transitively; do not leak a hidden endpoint through its edge/prose. */
+/** Remove unavailable dependencies transitively; do not leak a hidden endpoint through its edge/prose.
+ * A reference to a merged page counts as a reference to its survivor, and returned records carry
+ * those references already resolved (see effectiveRecord). */
 export function eligible(data: Snapshot, withdrawn = new Set<string>(), historical = true) {
   const counts = new Map<string, number>();
   for (const r of data.records) counts.set(r.id, (counts.get(r.id) ?? 0) + 1);
   const allowed = new Map(data.records.filter(r => r.metadata.record_class !== "fixture" && r.valid && counts.get(r.id) === 1 && r.lifecycle !== "withdrawn" && !withdrawn.has(r.id) && (historical || activeNow(r.metadata))).map(r => [r.id, r]));
+  // A withdrawal tombstone on a merged page stops its redirect too.
+  const redirects = mergeRedirects(data.records), target = (id: string) => withdrawn.has(id) ? id : redirects.get(id) ?? id;
   let changed = true;
   while (changed) {
     changed = false;
     for (const [id, r] of allowed) {
-      const refs = [...(r.metadata.dependencies ?? []), ...(r.metadata.entities ?? []), ...[r.metadata.from, r.metadata.to, r.metadata.owner].filter((s): s is string => Boolean(s))];
-      if (refs.some(ref => !allowed.has(ref))) { allowed.delete(id); changed = true; }
+      if (referenceIds(r.metadata).some(ref => !allowed.has(target(ref)))) { allowed.delete(id); changed = true; }
     }
   }
-  return [...allowed.values()];
+  const live = new Map([...redirects].filter(([from]) => !withdrawn.has(from)));
+  return [...allowed.values()].map(r => effectiveRecord(r, live));
 }
 function filtered(data: Snapshot, records: LoadedRecord[], input: LookupInput | SearchInput) {
   const types = input.type ? expandTypes(data.ontology, input.type) : null;
@@ -69,16 +74,26 @@ function hit(r: LoadedRecord, field: Hit["snippet"]["field"], at: number, matche
 }
 export function exactLookup(data: Snapshot, input: LookupInput, withdrawn = new Set<string>()): LookupOutput {
   if (!Check(LookupInput, input) || !input.query.trim()) throw Error("Lookup requires a nonempty exact ID, name or alias and valid filters.");
-  const query = normalize(input.query);
-  const matches = filtered(data, eligible(data, withdrawn, input.lifecycle !== undefined && input.lifecycle !== "active"), input).flatMap(r => {
-    const fields = [...(r.id === input.query.trim() ? ["id"] : []), ...(normalize(r.title) === query ? ["title"] : []), ...((r.metadata.aliases ?? []).some(alias => normalize(alias) === query) ? ["aliases"] : [])];
+  const query = normalize(input.query), historical = input.lifecycle !== undefined && input.lifecycle !== "active";
+  // A current lookup of a merged page's ID resolves to the page it was merged into.
+  const redirects = mergeRedirects(data.records), asked = input.query.trim();
+  const redirectedFrom = !historical && redirects.has(asked) && !withdrawn.has(asked) ? asked : undefined;
+  const exactId = redirectedFrom ? redirects.get(asked)! : asked;
+  const matches = filtered(data, eligible(data, withdrawn, historical), input).flatMap(r => {
+    const fields = [...(r.id === exactId ? ["id"] : []), ...(normalize(r.title) === query ? ["title"] : []), ...((r.metadata.aliases ?? []).some(alias => normalize(alias) === query) ? ["aliases"] : [])];
     const field = fields.includes("title") ? "title" : fields.includes("aliases") ? "aliases" : "body";
     const at = field === "aliases" ? (r.metadata.aliases ?? []).join("\n").indexOf((r.metadata.aliases ?? []).find(alias => normalize(alias) === query)!) : 0;
     return fields.length ? [hit(r, field, at, fields, null)] : [];
   }).sort((a, b) => a.record.id.localeCompare(b.record.id));
   const offset = input.offset ?? 0, limit = input.limit ?? 20;
   const hits = matches.slice(offset, offset + limit);
-  return { hits, resultCount: hits.length, total: matches.length, outcome: matches.length === 0 ? "missing" : matches.length === 1 ? "found" : "ambiguous", offset, nextOffset: offset + limit < matches.length ? offset + limit : null, freshness: queryFreshness(data.checkedAt), coverage: coverage(data) };
+  const result: LookupOutput = { hits, resultCount: hits.length, total: matches.length, outcome: matches.length === 0 ? "missing" : matches.length === 1 ? "found" : "ambiguous", offset, nextOffset: offset + limit < matches.length ? offset + limit : null, freshness: queryFreshness(data.checkedAt), coverage: coverage(data), ...(redirectedFrom ? { redirectedFrom } : {}) };
+  // Several current pages of one type answering to one name are a merge candidate, not a choice to make.
+  const pages = matches.filter(h => h.record.kind === "page");
+  if (result.outcome === "ambiguous" && pages.length === matches.length && new Set(pages.map(h => h.record.type)).size === 1) {
+    result.coverage = { ...result.coverage, message: `${result.coverage.message} These ${pages.length} pages share this name; if they are one entity, merge them with knowledge_merge instead of choosing one.`.slice(0, 500) };
+  }
+  return result;
 }
 
 /** Deliberately literal modes, never raw FTS syntax/SQL/regex. Punctuation is token separation. */

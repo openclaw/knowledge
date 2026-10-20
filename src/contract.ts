@@ -16,12 +16,16 @@ import { text } from "./model.js";
 import { RecordInput, RecordOutput, OntologyInput, OntologyOutput, CardSummary, Summary } from "./inspection-contract.js";
 
 import { AgentProxyInput, StoreState, StoresChangeInput, StoresChangeOutput, StoresSnapshot } from "./stores-contract.js";
-import { AnnotateInput, SavePage, ClaimInput, RelationshipInput, CorrectInput, WithdrawInput, RecallInput, Receipt, HistoryEntry, GitStatus, requestId } from "./mutation-contract.js";
+import { AnnotateInput, SavePage, ClaimInput, RelationshipInput, CorrectInput, WithdrawInput, MergeInput, UnmergeInput, RecallInput, Receipt, HistoryEntry, GitStatus, requestId } from "./mutation-contract.js";
 
 const empty = Type.Object({}, { additionalProperties: false });
 const issue = Type.Object({ path: text(500), code: text(80), message: text(1000) });
 const record = CardSummary;
 const issues = Type.Array(issue, { maxItems: 1000 });
+const MergeCandidate = Type.Object({
+  type: text(64), key: text(200), strength: Type.Union([Type.Literal("identity-key"), Type.Literal("title")]),
+  pages: Type.Array(Type.Object({ id: text(96), title: text(200) }, { additionalProperties: false }), { maxItems: 100 }),
+}, { additionalProperties: false });
 export const contract = defineFeatureContract({
   pluginId: "knowledge",
   operations: {
@@ -105,6 +109,14 @@ export const contract = defineFeatureContract({
       kind: "action", description: "Agent-only withdrawal of one exact page, claim, or explicit relationship by ID, observed revision/hash, and reason. Preserves original/evidence/history; not physical erasure. A durable tombstone prevents stale restores from resurrecting the record. Active retrieval excludes known dependents without rewriting them. Withdraw an edge by its record ID, never by endpoint pair. Reuse identical request/payload for retries.",
       input: WithdrawInput, output: Receipt, tool: { name: "knowledge_withdraw", label: "Withdraw knowledge" },
     },
+    merge: {
+      kind: "action", description: "Agent-only identity merge of two pages of the same type confirmed to be one entity (the user said so, or a source states it). The absorbed page becomes merged and its ID resolves to the survivor everywhere: claims, relationships, links, Timeline and lookups that name it count toward the survivor, and nothing is rewritten. The survivor gains the absorbed title and aliases, tags, missing fields and evidence; its own field values win (conflicts are reported). Supply both pages' current revision/hash from knowledge_record, a reason, optional retained identity evidence, and optionally a new title or a combined body (bodies are never merged automatically). Never merge on name similarity alone; see knowledge_diagnostics mergeCandidates. Undo with knowledge_unmerge. Reuse identical request/payload for retries.",
+      input: MergeInput, output: Receipt, tool: { name: "knowledge_merge", label: "Merge duplicate pages" },
+    },
+    unmerge: {
+      kind: "action", description: "Agent-only undo of one knowledge_merge. The merged page becomes active again with its own ID, and the survivor loses the aliases, tags, fields and evidence that merge added (fields edited since are kept). A body or title written during the merge is not reverted. Supply both pages' current revision/hash and a reason. Reuse identical request/payload for retries.",
+      input: UnmergeInput, output: Receipt, tool: { name: "knowledge_unmerge", label: "Undo a page merge" },
+    },
     recall: {
       kind: "action", description: "Owner-private agent tool for explicit automatic-recall approval. Set a short summary plus optional trigger phrases, importance and host project keys on one exact active record; the service supplies approval identity/time. Source and agent-inference claims cannot be approved. Clear removes recall metadata. Revision/hash preconditions and exact request replay use the normal publication receipt and local Git checkpoint path. Corrections do not inherit approval.",
       input: RecallInput, output: Receipt,
@@ -183,9 +195,9 @@ export const contract = defineFeatureContract({
       tool: { name: "knowledge_ontology", label: "Inspect ontology" },
     },
     diagnostics: {
-      kind: "query", description: "Read current authorized-scope validation findings. Not a mutation or ingestion history. Files are never repaired or rewritten.",
+      kind: "query", description: "Read current authorized-scope validation findings and merge candidates. mergeCandidates groups current pages of one type that share an identity-key alias such as discord:<id> (strong) or a title (weak); confirm identity before calling knowledge_merge. Not a mutation or ingestion history. Files are never repaired or rewritten.",
       input: empty,
-      output: Type.Object({ issues, total: Type.Integer(), truncated: Type.Boolean(), checkedAt: text(40) }),
+      output: Type.Object({ issues, total: Type.Integer(), truncated: Type.Boolean(), checkedAt: text(40), mergeCandidates: Type.Optional(Type.Array(MergeCandidate, { maxItems: 100 })) }),
       tool: { name: "knowledge_diagnostics", label: "Vault diagnostics" },
     },
     stores_snapshot: {

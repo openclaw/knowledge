@@ -14,6 +14,7 @@ export const ConnectionsInput = Type.Object({
 export const ConnectionsOutput = Type.Object({
   endpoints: Type.Optional(Type.Array(Type.Union([Summary, CompactSummary]), { maxItems: 200 })),
   total: Type.Integer(), nextOffset: Type.Union([Type.Integer(), Type.Null()]), snapshot: text(64),
+  redirectedFrom: Type.Optional(Type.String({ maxLength: 96, description: "The requested ID belongs to a page merged into the page these connections describe." })),
   connections: Type.Array(Type.Object({
     direction: Type.Union([Type.Literal("incoming"), Type.Literal("outgoing"), Type.Literal("dependents"), Type.Literal("claims"), Type.Literal("backlinks"), Type.Literal("links")]),
     record: ConnectionRecord, from: Type.Optional(text(96)), to: Type.Optional(text(96)), label: Type.Optional(text(64)),
