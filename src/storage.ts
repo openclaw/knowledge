@@ -309,9 +309,9 @@ export class KnowledgeStorage {
     return this.accept(input.requestId, intent, prepared, access, actor);
   }
   /**
-   * Save 1–20 conversation-derived claims in one call. Subjects resolve by
-   * exact ID/title/alias; exact repeats return the saved claim; pages are never
-   * created. The excerpt is retained once through the attachment service and
+   * Save 1–20 conversation-derived claims in one call. Named subjects resolve
+   * by exact ID/title/alias, omitted ones are inferred from one named entity
+   * page; exact repeats return the saved claim; pages are never created. The excerpt is retained once through the attachment service and
    * every inserted claim cites it; inserts publish as one journaled batch.
    */
   async remember(input: RememberInput, access: VaultAccess, actor: string): Promise<RememberOutput> {
@@ -350,8 +350,8 @@ export class KnowledgeStorage {
       const { duplicateOf, sameAs: _sameAs, ...subject } = p;
       return { status: saved && first === n ? "inserted" as const : "duplicate" as const, id: saved ?? duplicateOf ?? plan[first]!.duplicateOf!, ...subject };
     });
-    const unlinked = items.filter(i => i.subject === "ambiguous" || i.subject === "missing").length;
-    return { items, receipt, message: `${items.filter(i => i.status === "inserted").length} saved, ${items.filter(i => i.status === "duplicate").length} already saved${unlinked ? `, ${unlinked} unlinked because the subject did not match exactly one page` : ""}. A published receipt is a completed save.` };
+    const unlinked = items.filter(i => i.subject === "ambiguous" || i.subject === "missing").length, inferred = items.filter(i => i.subject === "inferred").length;
+    return { items, receipt, message: `${items.filter(i => i.status === "inserted").length} saved, ${items.filter(i => i.status === "duplicate").length} already saved${inferred ? `, ${inferred} linked by inference from the text` : ""}${unlinked ? `, ${unlinked} unlinked because the subject did not match exactly one page` : ""}. A published receipt is a completed save.` };
   }
   /** Publish one bounded page-body change through the normal fenced journal. */
   async editBody(input: EditBodyInput, access: VaultAccess): Promise<Receipt> {

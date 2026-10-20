@@ -20,9 +20,10 @@ use `knowledge_attach` or `knowledge_recall`.
 
 0. Save a discrete claim (decision, preference, commitment, fact, event or
    belief) with `knowledge_remember` and stop: give one claim per
-   item, short attribution, the supporting conversation excerpt and the
-   subject's exact page title or alias. It resolves subjects, reports exact
-   repeats and never creates pages. Its published receipt is the save.
+   item, short attribution, the supporting conversation excerpt and, only when
+   you know it, the subject's exact page title or alias. An omitted subject is
+   inferred when the text names exactly one entity page. It resolves subjects,
+   reports exact repeats and never creates pages. Its published receipt is the save.
    Continue below only to revise a page's prose or save a longer note.
 1. Preserve the supplied wording, especially original ideas. Use the active
    ontology's type descriptions to classify the information. Decide whether to

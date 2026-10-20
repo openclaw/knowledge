@@ -10,7 +10,8 @@ export const REMEMBER_ITEMS_MAX = 20;
 export const RememberItem = Type.Object({
   text: Type.String({ minLength: 1, maxLength: 500, description: "One claim in plain words; becomes the claim body (titles longer than 200 characters are shortened)." }),
   kind: Type.Required(Type.Pick(Envelope, ["claim_kind"])).properties.claim_kind,
-  subject: Type.Optional(Type.String({ minLength: 1, maxLength: 200, description: "Exact page ID, title or alias of what the claim is about. A unique match links the claim; otherwise it is saved unlinked. Never creates a page." })),
+  subject: Type.Optional(Type.String({ minLength: 1, maxLength: 200, description: "Exact page ID, title or alias of what the claim is about. A unique match links the claim; otherwise it is saved unlinked. Omit it to infer the subject from a name in the text. Never creates a page." })),
+  infer_subject: Type.Optional(Type.Boolean({ description: "Default true. When subject is omitted, link the claim to the one entity page its text names by exact title or alias, if no other name competes. False saves it unlinked." })),
   origin: Type.Optional(Type.Union([Type.Literal("source"), Type.Literal("user_belief")], { description: "Default source: stated in the excerpt. user_belief: the user's own belief. Agent inference is not remembered." })),
   occurred_at: Envelope.properties.occurred_at, due_at: Envelope.properties.due_at,
   valid_from: Envelope.properties.valid_from, expires_at: Envelope.properties.expires_at,
@@ -29,7 +30,7 @@ export type RememberInput = Static<typeof RememberInput>;
 export const RememberResult = Type.Object({
   status: Type.Union([Type.Literal("inserted"), Type.Literal("duplicate")]),
   id,
-  subject: Type.Union([Type.Literal("attached"), Type.Literal("ambiguous"), Type.Literal("missing"), Type.Literal("none")]),
+  subject: Type.Union([Type.Literal("attached"), Type.Literal("inferred"), Type.Literal("ambiguous"), Type.Literal("missing"), Type.Literal("none")]),
   subjectId: Type.Optional(id),
   candidates: Type.Optional(Type.Array(Type.Object({ id, title: text(200) }, { additionalProperties: false }), { maxItems: 10 })),
 }, { additionalProperties: false });

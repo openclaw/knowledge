@@ -97,9 +97,16 @@ Knowledge departs from gbrain in four places:
   claims. SPEC §4.4 keeps one authoritative record per file, and SPEC §4.2
   keeps page updates from overwriting linked facts. A fence would put the
   claim text in two places and need its own strikethrough lifecycle.
-- **Subject.** gbrain falls back to fuzzy matching and infers the subject from
-  text. Knowledge uses exact ID, title or alias lookup only, and the agent
-  names the subject. Text inference is a follow-up.
+- **Subject.** A named subject uses exact ID, title or alias lookup only;
+  gbrain's named-entity path also tries prefix expansion and fuzzy matching.
+  An omitted subject follows gbrain's write-mode inference
+  (`src/core/facts/subject-infer.ts`): exactly one named entity page, no
+  competing name, no bare-first-name guesses, same opener and role-term lists.
+  Knowledge pages have no slugs, so the slug and basename arms become exact
+  title/alias/ID lookup, and gbrain's entity directories become the person,
+  company, concept, project and deal types. Knowledge has no per-claim note
+  like gbrain's "entity inferred from mention", so only the response reports
+  `inferred`; claim identity annotations are reserved for pages.
 - **Dedup.** It is exact only: normalized text, kind and linked subjects. There
   is no similarity supersession and no `replaces`; corrections use
   `knowledge_correct` (SPEC §3.3–3.4).

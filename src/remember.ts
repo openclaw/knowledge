@@ -1,4 +1,5 @@
 import { exactLookup } from "./retrieval.js";
+import { inferSubject } from "./subject-infer.js";
 import type { SampleVault } from "./vault.js";
 import type { Evidence, LoadedRecord } from "./model.js";
 import type { ClaimInput } from "./mutation-contract.js";
@@ -13,9 +14,18 @@ export type ClaimPayload = Omit<ClaimInput, "requestId" | "expectedVaultId" | "e
 const normalize = (value: string) => value.normalize("NFKC").trim().replace(/\s+/gu, " ").toLowerCase();
 const sameSet = (a: string[], b: string[]) => a.length === b.length && a.every(v => b.includes(v));
 
-/** Resolve one subject name with exact ID/title/alias lookup; never guesses. */
-function resolveSubject(data: Snapshot, subject: string | undefined, withdrawn: Set<string>): Resolution {
-  if (!subject?.trim()) return { subject: "none" };
+/**
+ * Resolve one item's subject. A named subject uses exact ID/title/alias
+ * lookup and never guesses; an omitted one is inferred from the claim text
+ * only when it names exactly one entity page and no competing name.
+ */
+function resolveSubject(data: Snapshot, item: RememberItem, withdrawn: Set<string>): Resolution {
+  const subject = item.subject;
+  if (!subject?.trim()) {
+    if (item.infer_subject === false) return { subject: "none" };
+    const inferred = inferSubject(data, item.text, withdrawn);
+    return inferred.id ? { subject: "inferred", subjectId: inferred.id } : { subject: "none" };
+  }
   const found = exactLookup(data, { query: subject, kind: "page", limit: 10 }, withdrawn);
   if (found.outcome === "found") return { subject: "attached", subjectId: found.hits[0]!.record.id };
   if (found.outcome === "ambiguous") return { subject: "ambiguous", candidates: found.hits.map(h => ({ id: h.record.id, title: h.record.title })) };
@@ -33,7 +43,7 @@ export function planRemember(data: Snapshot, active: LoadedRecord[], input: Reme
   const planned: PlannedItem[] = [];
   const keys: string[] = [];
   for (const item of input.items) {
-    const resolution = resolveSubject(data, item.subject, withdrawn);
+    const resolution = resolveSubject(data, item, withdrawn);
     const entities = resolution.subjectId ? [resolution.subjectId] : [];
     const text = normalize(item.text);
     // Exact repeat of saved knowledge: same words, kind and linked subjects.

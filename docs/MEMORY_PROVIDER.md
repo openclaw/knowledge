@@ -144,10 +144,11 @@ from supplying a file flush.
 
 The flush saves durable decisions, preferences, corrections, commitments,
 project-state changes and facts about people or projects. It uses one
-`knowledge_remember` call with the supporting quoted excerpt and each subject's
-exact page title or alias. Exact repeats come back as duplicates, so it does
-not search first. Unmatched subjects are saved unlinked, not guessed, and no
-page is created. Saving a preference does not configure the assistant or
+`knowledge_remember` call with the supporting quoted excerpt and a subject
+only when its exact page title or alias is known; an omitted subject is
+inferred when the text names exactly one entity page. Exact repeats come back
+as duplicates, so it does not search first. Unmatched subjects are saved
+unlinked, not guessed, and no page is created. Saving a preference does not configure the assistant or
 guarantee its inclusion in future turns.
 
 The flush never runs for CLI-backend sessions, including `claude-cli/*`. The

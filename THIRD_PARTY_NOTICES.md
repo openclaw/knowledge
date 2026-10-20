@@ -9,6 +9,12 @@ Bundled workflow skills and shared conventions are also adapted from that commit
 `skills/_brain-filing-rules.md`, and `skills/conventions/{quality,untrusted-content}.md`.
 See `docs/WORKFLOWS.md` for the operation map and deliberate departures.
 
+`knowledge_remember` subject inference (`src/subject-infer.ts`,
+`src/subject-candidates.ts`) is adapted from gbrain commit
+e45f13f052c06e6f92b4e31204e34edc0634b9da: `src/core/facts/subject-infer.ts`,
+the strict arms of `src/core/entities/resolve.ts`, and the strong-candidate
+pass of `src/core/context/entity-salience.ts`.
+
 MIT License
 
 Copyright (c) 2026 Garry Tan

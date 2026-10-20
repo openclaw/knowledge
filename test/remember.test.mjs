@@ -89,3 +89,28 @@ test('remember rejects agent inference, oversized excerpts and missing request I
   assert.equal(saved.items[0].status, 'inserted');
   assert.deepEqual(retried.items, saved.items);
 });
+
+test('an omitted subject is inferred only from one named entity page with no competing name', async t => {
+  const f = await fixture(t);
+  const pilot = await f.page('Garden Pilot'), alice = await f.page('Alice Example', { type: 'person' });
+  await f.page('Weekly Sync', { type: 'meeting' });
+  const out = await f.remember([
+    { text: 'Garden Pilot hired a CFO.', kind: 'event' },
+    { text: 'Decided Garden Pilot uses link-only placement.', kind: 'decision' },
+    { text: 'Met Alice Example for coffee.', kind: 'event' },
+    { text: 'Garden Pilot slipped a week in Weekly Sync.', kind: 'event' },
+    { text: 'Nimbus copied Garden Pilot pricing.', kind: 'fact' },
+    { text: 'Alice prefers mornings.', kind: 'preference' },
+    { text: 'Alice Example and Garden Pilot signed.', kind: 'event' },
+    { text: 'Ships on Friday.', kind: 'commitment' },
+    { text: 'Garden Pilot is paused.', kind: 'fact', infer_subject: false },
+  ]);
+  assert.deepEqual(out.items.map(i => [i.subject, i.subjectId]), [
+    ['inferred', pilot.id], ['inferred', pilot.id], ['inferred', alice.id], ['inferred', pilot.id],
+    ['none', undefined], ['none', undefined], ['none', undefined], ['none', undefined], ['none', undefined],
+  ]);
+  const read = (await f.service.record({ id: out.items[0].id, includeMetadata: true }, f.owner)).record.metadata;
+  assert.deepEqual(read.entities, [pilot.id]);
+  assert.equal((await f.service.record({ id: out.items[4].id, includeMetadata: true }, f.owner)).record.metadata.entities, undefined);
+  assert.match(out.message, /4 linked by inference/);
+});

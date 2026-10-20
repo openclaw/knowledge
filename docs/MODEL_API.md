@@ -335,6 +335,14 @@ The server takes these steps:
    - A unique match puts the page in the claim's `entities`.
    - An ambiguous or missing match saves the claim unlinked and returns
      `subject: ambiguous | missing`, with candidate pages for an ambiguous match.
+   - An omitted subject is inferred from the claim text (`subject: inferred`)
+     when the text names exactly one current entity page (person, company,
+     concept, project or deal) by ID, title or alias and no other name
+     competes, even a name with no page. Capitalized names and @handles are
+     the candidates; sentence openers ("Met", "Decided") and role terms
+     ("CFO") are not names, and a bare first name that only prefixes an
+     entity's title is never guessed. Otherwise it returns `subject: none`.
+     `infer_subject: false` turns inference off for that item.
    - No page is ever created.
 2. **Find exact repeats.** An item is a repeat when an active claim already has
    the same normalized text, the same kind and the same linked subjects. An
