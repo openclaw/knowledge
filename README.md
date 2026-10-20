@@ -25,6 +25,7 @@ capabilities, and limitations. Building does not switch the live memory slot.
 | Correction/withdrawal | Agent-only exact-target operations, recoverable two-record correction, durable lifecycle safeguards and dependency impact; [contract](docs/CORRECTIONS.md) |
 | Ingestion continuation | Agent work log plus existing records and receipts; enumerable sources can retain discoverable coverage snapshots and manifests without a separate ingestion service |
 | Live refresh | Private-vault filesystem invalidations, authorized snapshot refresh, reconnect and 30-second visible-page fallback; retired services are fenced |
+| Scheduled maintenance | Zero-LLM claim relink, on demand (`knowledge_relink`) and as a daily pass over every store, on by default; [maintenance guide](docs/MAINTENANCE.md) |
 | Full backup/restore | Not implemented |
 
 See [setup and authority](docs/REAL_VAULT.md), [model-facing API](docs/MODEL_API.md), [ontology](docs/ONTOLOGY.md), and [record format](docs/FORMAT.md). Verification reports distinguish local checks from live activation; a build alone does not update the running backend.
@@ -80,7 +81,7 @@ Use the CLI belonging to the actual running gateway. Inspect existing configurat
 openclaw plugins install --link --force --accept-capabilities /path/to/knowledge
 ```
 
-These flags acknowledge the local source and the reviewed plugin's capabilities. The checkout stays linked, so rebuilds update the installation. Open **Knowledge** in the sidebar. The shared tools are available after a tool-catalog refresh: `knowledge_status`, `knowledge_records`, `knowledge_record`, `knowledge_ontology`, `knowledge_diagnostics`, `knowledge_save_page`, `knowledge_history`, `knowledge_revision`, `knowledge_mutation`, `knowledge_resume`, `knowledge_grep`, `knowledge_lookup`, `knowledge_create_claim`, `knowledge_create_relationship`, `knowledge_connections`, `knowledge_correct`, and `knowledge_withdraw`. These expose only the caller’s authorized scope, or labeled sample data when no real vault is configured.
+These flags acknowledge the local source and the reviewed plugin's capabilities. The checkout stays linked, so rebuilds update the installation. Open **Knowledge** in the sidebar. The shared `knowledge_*` tools are available after a tool-catalog refresh; `openclaw.plugin.json` (`contracts.tools`) lists all 35, and the [API guide](docs/MODEL_API.md) describes them. They expose only the caller’s authorized scope, or labeled sample data when no real vault is configured.
 
 ## Live reload
 

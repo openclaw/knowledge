@@ -110,6 +110,10 @@ Knowledge departs from gbrain in four places:
 - **Dedup.** It is exact only: normalized text, kind and linked subjects. There
   is no similarity supersession and no `replaces`; corrections use
   `knowledge_correct` (SPEC §3.3–3.4).
+- **Relink.** Claims saved unlinked are linked later by gbrain's free relink
+  tiers (`src/core/facts/relink.ts`), on demand through `knowledge_relink` and
+  in a scheduled pass. gbrain's model tier is not ported. See
+  [MAINTENANCE.md](MAINTENANCE.md).
 
 ## Verification scope
 

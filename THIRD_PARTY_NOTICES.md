@@ -15,6 +15,10 @@ e45f13f052c06e6f92b4e31204e34edc0634b9da: `src/core/facts/subject-infer.ts`,
 the strict arms of `src/core/entities/resolve.ts`, and the strong-candidate
 pass of `src/core/context/entity-salience.ts`.
 
+Claim relink (`src/relink.ts`) adapts the `page` and `mention` tiers of gbrain
+commit e45f13f052c06e6f92b4e31204e34edc0634b9da: `src/core/facts/relink.ts`.
+See `docs/MAINTENANCE.md` for departures.
+
 MIT License
 
 Copyright (c) 2026 Garry Tan

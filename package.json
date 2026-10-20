@@ -35,7 +35,8 @@
     "docs/MARKDOWN_LINKS.md",
     "docs/MEMORY_PROVIDER.md",
     "docs/SESSION_ACTIVITY.md",
-    "docs/TEMPORAL.md"
+    "docs/TEMPORAL.md",
+    "docs/MAINTENANCE.md"
   ],
   "peerDependencies": {
     "openclaw": ">=2026.9.5"

@@ -412,7 +412,7 @@ Automatic recall respects authorized scope, budgets, cancellation, and the lifet
 
 Finalization assistance does not infer write success from assistant prose, blindly retry conflicts/access denials, or guarantee persistence on cancellation. It is not a substitute for tool commits or ingestion verification. Support differs by harness and requires validation.
 
-No required semantic extraction, flush, or bundle regeneration runs at compaction, reset, session start/end, or `agent_end`. No global harvesting of unrelated tool outputs. Curation can run as an ordinary user-requested workflow. Scheduled consolidation/dreaming is a follow-up using separately authorized OpenClaw automation; no new scheduler is introduced.
+No required semantic extraction, flush, or bundle regeneration runs at compaction, reset, session start/end, or `agent_end`. No global harvesting of unrelated tool outputs. Curation can run as an ordinary user-requested workflow. Scheduled consolidation/dreaming is a follow-up using separately authorized OpenClaw automation; no new scheduler is introduced. The one implemented scheduled job is the zero-LLM maintenance pass (claim relink), timed by the host's plugin service scheduler with no job store or queue; see [MAINTENANCE.md](MAINTENANCE.md).
 
 ### 11.1 Native Control UI integration
 
