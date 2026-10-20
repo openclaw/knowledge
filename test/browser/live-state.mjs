@@ -144,13 +144,15 @@ try {
   const delayedRecent = holdRequest('recent');
   await page.getByRole('button',{name:'Recent',exact:true}).click();
   await delayedRecent.entered;
-  assert.equal(await page.locator('.knowledge-browse-connection').count(),1,'Recent navigation keeps Browse readable');
+  assert.equal(await page.locator('.knowledge-browse-connection').count(),0,'Recent navigation removes the previous layout');
+  assert.equal(await page.locator('.knowledge-placeholder-feed').count(),1,'Recent navigation shows its destination skeleton');
   delayedRecent.release();
   await page.locator('.knowledge-feed-item').first().waitFor();
   const delayedBrowse = holdRequest('records');
   await page.getByRole('button',{name:'Browse',exact:true}).click();
   await delayedBrowse.entered;
-  assert.ok(await page.locator('.knowledge-feed-item').count(),'Browse navigation keeps Recent readable');
+  assert.equal(await page.locator('.knowledge-feed-item').count(),0,'Browse navigation removes the previous layout');
+  assert.equal(await page.locator('.knowledge-browse-data .knowledge-placeholder').count(),1,'Browse navigation shows its destination skeleton');
   delayedBrowse.release();
   await page.locator('.knowledge-browse-connection').waitFor();
   await page.evaluate(() => window.connect(false));

@@ -572,3 +572,37 @@ details[open] > summary > .knowledge-disclosure-label > .knowledge-icon { transf
 .knowledge-identification > summary { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; list-style: none; }
 .knowledge-identification > summary::-webkit-details-marker { display: none; }
 .knowledge-identification > p { margin: 6px 0 0; }
+
+/* Loading is static and pane-local: stable geometry, no shimmer or full-view fade. */
+.knowledge-pane-status { min-height: 30px; padding: 5px 12px; border-bottom: 1px solid var(--knowledge-hairline); color: var(--muted); font-size: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.knowledge-pane-status:empty::after { content: "\00a0"; }
+.knowledge-browse-data { min-height: 390px; }
+.knowledge-browse-data[inert] > :not(.knowledge-placeholder) { opacity: .6; }
+.knowledge-browse-data[aria-busy="true"] { border-top: 2px solid var(--accent); }
+.knowledge-browse-data:not([aria-busy="true"]) { border-top: 2px solid transparent; }
+.knowledge-placeholder { min-width: 0; padding: 14px; }
+.knowledge-placeholder > p { margin-bottom: 12px; }
+.knowledge-placeholder-blocks { display: grid; gap: 12px; }
+.knowledge-placeholder-block { display: grid; gap: 12px; min-height: 48px; padding: 16px; border: 1px solid var(--knowledge-hairline); border-radius: var(--radius-md, 10px); }
+.knowledge-skeleton { display: block; width: 78%; max-width: 560px; height: 10px; border-radius: 4px; background: color-mix(in srgb, var(--muted) 17%, var(--card)); }
+.knowledge-skeleton:nth-child(2) { width: 95%; }
+.knowledge-skeleton:last-child { width: 55%; }
+.knowledge-placeholder-rows .knowledge-placeholder-blocks { gap: 0; }
+.knowledge-placeholder-rows .knowledge-placeholder-block { border-radius: 0; border-width: 0 0 1px; min-height: 44px; }
+.knowledge-placeholder-feed .knowledge-placeholder-block { min-height: 130px; }
+.knowledge-placeholder-detail .knowledge-placeholder-blocks { grid-template-columns: minmax(0, 1fr) 300px; }
+.knowledge-placeholder-detail .knowledge-placeholder-block:first-child { grid-column: 1 / -1; min-height: 70px; }
+.knowledge-placeholder-detail .knowledge-placeholder-block:not(:first-child) { min-height: 260px; align-content: start; }
+.knowledge-entity-aside .knowledge-placeholder { padding: 12px; }
+.knowledge-entity-aside .knowledge-placeholder-block { min-height: 50px; }
+@media (max-width: 650px) {
+  .knowledge-placeholder-detail .knowledge-placeholder-blocks { grid-template-columns: minmax(0, 1fr); }
+  .knowledge-placeholder-detail .knowledge-placeholder-block:not(:first-child) { min-height: 150px; }
+}
+
+/* Reserve the agent/store row before its scope is known. */
+.knowledge-store-placeholder { min-height: 36px; }
+.knowledge-store-placeholder .knowledge-skeleton { width: 110px; height: 24px; }
+
+.knowledge-view-data { min-width: 0; min-height: 360px; }
+.knowledge-view-data[inert] > :not(.knowledge-placeholder) { opacity: .6; }

@@ -8,6 +8,7 @@ import { ontologyView } from "./ontology-view.js";
 import { icon, type IconName } from "./ui-icons.js";
 import { confidenceView, displayAliases, identityTag, assertionOrigin as origin, agentDisplayName } from "./knowledge-presentation.js";
 import { formatSourceDate, sourceDateNote } from "./temporal.js";
+import { loadingPlaceholder, syncBrowseControls, commitBrowse } from "./loading-view.js";
 import { captureReadingState } from "./reading-state.js";
 import { markdownView } from "./markdown-view.js";
 import { foldTimeline } from "./timeline-fold.js";
@@ -85,6 +86,7 @@ export default defineControlUiPlugin({
       const initialLocation = readLocation(context.props);
       let { agent: viewing, vault: expectedVault, section: settingsSection } = initialLocation;
       let storesSnapshot: StoresSnapshot | undefined;
+      let storeContextSignature = "";
       let routeKey = locationKey(initialLocation), scopeChecked = false, scopeMismatch = false;
       let storeState: FeatureOutput<typeof contract, "status">["store"] = "ready", storeMessage: string | undefined;
       const feature = viewingClient(base, () => ({ agent: viewing, defaultAgent: storesSnapshot?.defaultAgent }));
@@ -94,13 +96,15 @@ export default defineControlUiPlugin({
       const settingsButton = button("", () => openSettings("stores"), "knowledge-icon-button"); settingsButton.setAttribute("aria-label", "Settings"); settingsButton.title = "Stores, vocabulary and vault status"; settingsButton.append(icon("settings"));
       actions.append(status, settingsButton);
       const storeContext = el("div", undefined, "knowledge-store-slot"); title.append(storeContext);
+      const storePlaceholder = el("div", undefined, "knowledge-store-bar knowledge-store-placeholder"); storePlaceholder.setAttribute("aria-hidden", "true");
+      storePlaceholder.append(el("span", undefined, "knowledge-skeleton"), el("span", undefined, "knowledge-skeleton")); storeContext.append(storePlaceholder);
       const announcer = el("p", "", "knowledge-visually-hidden"); announcer.setAttribute("role", "status"); announcer.setAttribute("aria-live", "polite");
       const nav = el("nav", undefined, "knowledge-tabs"); nav.setAttribute("aria-label", "Knowledge views");
       // These are text navigation tabs, not host .btn controls. Theme-specific
       // .btn rules otherwise reintroduce filled backgrounds in light mode.
       const recentTab = button("Recent", () => navigate("recent"), "knowledge-tab"), browseTab = button("Browse", () => navigate("browse"), "knowledge-tab"); nav.append(recentTab, browseTab);
       const banner = el("p", "", "knowledge-notice"), toolbar = el("div", undefined, "knowledge-toolbar"), content = el("div", undefined, "knowledge-content");
-      header.append(title, nav, actions);
+      banner.hidden = true; header.append(title, nav, actions);
       const body = el("div", undefined, "knowledge-page-body"); const loading = el("div", "", "knowledge-loading knowledge-muted"); loading.hidden = true; loading.setAttribute("role", "status"); loading.setAttribute("aria-live", "polite");
       body.append(banner, toolbar, loading, content);
       root.append(header, body); container.append(root);
@@ -123,7 +127,7 @@ export default defineControlUiPlugin({
       let searchSnapshot: string | null | undefined;
       let displayGeneration = 0, viewReady = false, snapshot: string | undefined;
       let staging: HTMLElement | undefined;
-      let loadingGeneration = 0, displayView = "", displayScreen = "";
+      let loadingGeneration = 0, displayView = "", displayScreen = "", mountedScreen = "";
       const viewKey = () => JSON.stringify([viewing, expectedVault, scopeMismatch, storeState, tab, settingsSection, selectedId, kind, type, offset, includeHistory, browseQuery, originFilter, query, recentCursor, since, until, timeField]);
       let connectionPages = 1;
       const evidenceLoaders = new WeakMap<HTMLDetailsElement, () => Promise<void>>();
@@ -144,14 +148,17 @@ export default defineControlUiPlugin({
       function restoreLocation(props: Readonly<Record<string, string>>) {
         const next = readLocation(props), key = locationKey(next);
         if (key === routeKey) return;
+        const sameScope = scopeChecked && next.agent === viewing && next.vault === expectedVault;
         routeKey = key;
         ({ agent: viewing, vault: expectedVault, tab, record: selectedId, section: settingsSection, kind, type, query, filter: browseQuery, history: includeHistory, origin: originFilter, offset, back: browseBack, cursor: recentCursor } = next);
         ({ since, until, timeField } = next);
         ++generation; ++statusGeneration; ++suggestGeneration; loadingGeneration = 0;
-        scopeChecked = false; scopeMismatch = false; identity = ""; snapshot = undefined; searchSnapshot = undefined; vocabulary = undefined; viewReady = false;
+        snapshot = undefined; searchSnapshot = undefined;
         recentBack.length = 0; recentExpanded.clear(); updates.hidden = true; pendingSnapshot = undefined;
-        root.querySelector(".knowledge-chat-handoff")?.remove(); content.replaceChildren();
-        renderToolbar(); void refresh();
+        root.querySelector(".knowledge-chat-handoff")?.remove();
+        if (!sameScope) { scopeChecked = false; scopeMismatch = false; identity = ""; vocabulary = undefined; viewReady = false; mountedScreen = ""; content.replaceChildren(); }
+        renderToolbar(); prepareLoading(generation);
+        if (sameScope) void load(); else void refresh();
       }
       function navigate(next: typeof tab) { updates.hidden = true; pendingSnapshot = undefined; tab = next; selectedId = ""; offset = 0; browseBack = []; recentCursor = undefined; recentBack.length = 0; renderToolbar(); void load(); }
       /** Applying date filters restarts search pagination. */
@@ -165,8 +172,11 @@ export default defineControlUiPlugin({
       const announce = (text: string) => { announcer.textContent = ""; announcer.textContent = text; };
       function openSettings(section: SettingsSection) { settingsSection = section; navigate("settings"); }
       function renderStoreContext() {
-        storeContext.replaceChildren();
-        if (storesSnapshot?.agents.length) storeContext.append(storeBar(storesSnapshot, viewedAgent(), displayName, selectAgent, () => openSettings("stores")));
+        const signature = JSON.stringify([storesSnapshot, viewedAgent(), storesSnapshot?.agents.map(agent => displayName(agent.id))]);
+        if (signature !== storeContextSignature) {
+          storeContextSignature = signature; storeContext.replaceChildren();
+          if (storesSnapshot?.agents.length) storeContext.append(storeBar(storesSnapshot, viewedAgent(), displayName, selectAgent, () => openSettings("stores")));
+        }
         renderAgentCopy();
       }
       /** Switch the viewed agent. Store-bound state resets; nothing is provisioned. */
@@ -179,7 +189,7 @@ export default defineControlUiPlugin({
         const entry = storesSnapshot && storeOf(storesSnapshot, agent);
         announce(`Viewing ${displayName(agent)}’s knowledge${entry ? `: ${storeLabel(entry, displayName)}` : ""}.`);
         renderStoreContext(); tab = tab === "settings" ? "settings" : "recent"; selectedId = ""; offset = 0; recentCursor = undefined; recentBack.length = 0; renderToolbar();
-        void refresh(false);
+        mountedScreen = ""; prepareLoading(generation); void refresh(false);
       }
       // After an applied assignment, refresh facts; reset the reading view if the viewed store moved.
       function assignmentApplied(result: FeatureOutput<typeof contract, "stores_change">, agent: string) {
@@ -353,7 +363,7 @@ export default defineControlUiPlugin({
         if (detail) showEvidence(detail);
         const loadEvidence = async () => {
           if (loaded || loading || !alive()) return;
-          loading = true; evidenceBody.replaceChildren(el("p", "Loading evidence…", "knowledge-muted"));
+          loading = true; evidenceBody.replaceChildren(loadingPlaceholder("cards", "Loading evidence…", 1));
           try {
             const detail = await feature.invoke("record", { id: record.id, view: "summary", includeEvidence: true, includeMetadata: true, includeReferences: true });
             if (!alive()) return;
@@ -590,8 +600,8 @@ export default defineControlUiPlugin({
           }
         }
         const claimSurface = el("div", undefined, "knowledge-surface knowledge-claim-groups"); claims.append(claimSurface);
-        const connectionLoading = el("p", "Loading connections…", "knowledge-muted"); refs.append(connectionLoading);
-        const claimsLoading = el("p", "Loading saved claims…", "knowledge-muted"); if (r.kind === "page") claimSurface.append(claimsLoading);
+        const connectionLoading = loadingPlaceholder("rows", "Loading connections…", 3); refs.append(connectionLoading);
+        const claimsLoading = loadingPlaceholder("cards", "Loading saved claims…", 2); if (r.kind === "page") claimSurface.append(claimsLoading);
         // Claims and rail connections page independently. A single mixed stream
         // let a page of claims crowd out every relationship, so a person with
         // many claims showed no attendance. Dependents are omitted: they repeat
@@ -654,19 +664,40 @@ export default defineControlUiPlugin({
         const pageLoader = (loader: () => Promise<void>, control: () => HTMLButtonElement, section: HTMLElement) => () => { ++connectionPages; control().disabled = true; void loader().catch(error => { section.append(failure(error)); }).finally(() => { control().disabled = false; }); };
         const loadMore = button("More connections", pageLoader(moreConnections, () => loadMore, connections));
         const moreClaimsButton = button("More claims", pageLoader(moreClaims, () => moreClaimsButton, claims), "knowledge-quiet");
+<<<<<<< HEAD
         if (merged) refs.remove();
         else pending.push((async () => {
+=======
+        // Each panel owns its failure and retry; a slow sibling keeps its placeholder.
+        const readPanel = async (read: () => Promise<void>, placeholder: HTMLElement, section: HTMLElement, name: string) => {
+          try { await read(); }
+          catch (error) {
+            if (!live(n)) return;
+            if (!section.contains(placeholder)) section.append(placeholder);
+            placeholder.replaceChildren(failure(error), button("Retry " + name, () => {
+              placeholder.replaceChildren(loadingPlaceholder(name === "claims" ? "cards" : "rows", "Loading " + name + "…", 2));
+              void readPanel(read, placeholder, section, name);
+            }, "knowledge-quiet"));
+          }
+        };
+        pending.push(readPanel(async () => {
+>>>>>>> 41542d7 (fix: keep Knowledge loading scoped to affected panes (kn-341))
           for (let page = 0; page < pages; page++) {
             await moreConnections();
             if (!live(n) || !loadMore.parentElement) break;
           }
+<<<<<<< HEAD
         })());
         if (r.kind === "page" && !merged) pending.push((async () => {
+=======
+        }, connectionLoading, refs, "connections"));
+        if (r.kind === "page") pending.push(readPanel(async () => {
+>>>>>>> 41542d7 (fix: keep Knowledge loading scoped to affected panes (kn-341))
           for (let page = 0; page < pages; page++) {
             await moreClaims();
             if (!live(n) || claimOffset === null) break;
           }
-        })());
+        }, claimsLoading, claimSurface, "claims"));
         if (result.references?.length) { const references = el("details"); references.append(el("summary", "Record references · not asserted relationships")); for (const ref of result.references) references.append(summaryLink(ref)); if (result.nextReferenceOffset != null) references.append(el("p", "Showing the first 20 references.")); technical.append(references); }
         pending.push(feature.invoke("history", { id, limit: 10 }).then(history => {
           if (!live(n)) return;
@@ -679,7 +710,7 @@ export default defineControlUiPlugin({
         }).catch(error => { if (live(n)) { checkpointValue.textContent = "Unavailable"; historyList.append(failure(error)); } }));
         // Commit the primary content now. Secondary panels retain this view's
         // generation fence, so delayed responses cannot replace a newer page.
-        const panels = Promise.all(pending).catch(error => { if (live(n)) { connectionLoading.remove(); claimsLoading.remove(); connections.append(failure(error)); } });
+        const panels = Promise.all(pending).catch(error => { if (live(n)) { connections.append(failure(error)); } });
         // Background replacement needs the complete tree to preserve existing
         // expanded evidence, focus and scroll state. Only navigation streams it.
         if (waitForPanels) await panels;
@@ -707,37 +738,51 @@ export default defineControlUiPlugin({
       async function browse(n: number, target: HTMLElement) {
         const result = await feature.invoke("records", { kind, offset, limit: kind === "claim" ? 20 : 50, includeCards: kind === "claim", includeEndpoints: kind === "relationship", ...(type ? { type } : {}), ...(browseQuery ? { query: browseQuery } : {}), ...(includeHistory ? { lifecycle: "all" } : {}), ...(originFilter && kind === "claim" ? { assertionOrigin: originFilter } : {}) });
         if (!live(n) || n !== generation) return;
-        const layout = el("div", undefined, "knowledge-browse"), facets = el("nav", undefined, "knowledge-facets"); facets.setAttribute("aria-label", "Types");
-        const facet = (name: string, label: string, count?: number) => { const control = button(label, () => { type = name; offset = 0; void load(); }, "knowledge-facet"); control.prepend(name ? tile(name, 20) : el("span", undefined, "knowledge-facet-spacer")); control.setAttribute("aria-pressed", String(type === name)); if (count !== undefined) control.append(el("span", count.toLocaleString(), "knowledge-facet-count")); facets.append(control); };
-        facet("", kind === "claim" ? "All claims" : "Everything", kind === "page" && vocabulary ? vocabulary.definitions.reduce((sum, d) => sum + d.recordCount, 0) : !type ? result.total : undefined);
+        renderBrowse(n, target, result);
+      }
+      // Build the destination frame before data arrives; no placeholder totals are fabricated.
+      function renderBrowse(n: number, target: HTMLElement, result?: FeatureOutput<typeof contract, "records">) {
+        const layout = el("div", undefined, "knowledge-browse"), facets = el("nav", undefined, "knowledge-facets"); facets.setAttribute("aria-label", "Types"); layout.dataset.kind = kind;
+        const facet = (name: string, label: string, count?: number) => { const control = button(label, () => { type = name; offset = 0; void load(); }, "knowledge-facet"); control.dataset.facet = name; control.prepend(name ? tile(name, 20) : el("span", undefined, "knowledge-facet-spacer")); control.setAttribute("aria-pressed", String(type === name)); if (count !== undefined) control.append(el("span", count.toLocaleString(), "knowledge-facet-count")); facets.append(control); };
+        facet("", kind === "claim" ? "All claims" : "Everything", kind === "page" && vocabulary ? vocabulary.definitions.reduce((sum, d) => sum + d.recordCount, 0) : !type ? result?.total : undefined);
         if (kind === "page" && vocabulary) { let group = ""; for (const def of [...vocabulary.definitions].filter(d => d.recordCount > 0).sort((a, b) => ["entity", "concept", "media", "temporal", "annotation"].indexOf(a.primitive) - ["entity", "concept", "media", "temporal", "annotation"].indexOf(b.primitive))) { if (group !== def.primitive) { group = def.primitive; facets.append(el("h3", ({entity:"People & things",concept:"Ideas & projects",media:"Sources & writing",temporal:"Events & conversations",annotation:"Annotations"} as Record<string,string>)[group] ?? human(group), "knowledge-eyebrow")); } facet(def.name, ({Person:"People",Company:"Companies",Project:"Projects",Concept:"Concepts",Meeting:"Meetings",Note:"Notes",Source:"Sources"} as Record<string,string>)[def.label] ?? def.label, def.recordCount); } facets.append(el("p", `${vocabulary.definitions.filter(d => !d.recordCount).length} empty types hidden`, "knowledge-muted")); }
-        if (kind === "claim" && result.facets) { facets.prepend(el("h3", "Claim kinds", "knowledge-eyebrow")); for (const [name, count] of Object.entries(result.facets.kinds)) if (count > 0) facet(name, label(name), count); const origins = Object.entries(result.facets.origins); facets.append(el("p", `${origins.length === 1 && origins[0][0] === "source" ? `All ${origins[0][1]} claims are from sources.` : origins.map(([name, count]) => `${count} ${origin(name)}`).join(" · ")} Kinds with no claims are hidden.`, "knowledge-muted")); }
+        if (kind === "claim" && result?.facets) { facets.prepend(el("h3", "Claim kinds", "knowledge-eyebrow")); for (const [name, count] of Object.entries(result.facets.kinds)) if (count > 0) facet(name, label(name), count); const origins = Object.entries(result.facets.origins); facets.append(el("p", `${origins.length === 1 && origins[0][0] === "source" ? `All ${origins[0][1]} claims are from sources.` : origins.map(([name, count]) => `${count} ${origin(name)}`).join(" · ")} Kinds with no claims are hidden.`, "knowledge-muted")); }
+        if ((kind === "page" && !vocabulary) || (kind === "claim" && !result)) facets.append(loadingPlaceholder("rows", "Loading types…", 4));
         const panel = el("div", undefined, "knowledge-surface knowledge-table-wrap"), controls = el("div", undefined, "knowledge-table-toolbar");
         const filter = el("form", undefined, "knowledge-browse-filter"), input = el("input"); input.type = "search"; input.placeholder = kind === "claim" ? "Filter claim text" : "Filter by name or alias"; input.setAttribute("aria-label", input.placeholder); input.value = browseQuery; filter.append(input); filter.onsubmit = event => { event.preventDefault(); browseQuery = input.value.trim(); offset = 0; void load(); }; input.onchange = () => { browseQuery = input.value.trim(); offset = 0; void load(); }; controls.append(filter);
         const kinds = el("div", undefined, "knowledge-kind-switch"); kinds.setAttribute("role", "group"); kinds.setAttribute("aria-label", "Record kind");
         for (const [value, label] of [["page", "Pages"], ["claim", "Claims"], ["relationship", "Connections"]] as const) { const b = button(label, () => { kind = value; type = ""; offset = 0; void load(); }, "knowledge-quiet"); b.setAttribute("aria-pressed", String(kind === value)); kinds.append(b); }
         controls.append(kinds);
         const history = el("div", undefined, "knowledge-kind-switch"); for (const [all, name] of [[false, "Current"], [true, "Include history"]] as const) { const b = button(name, () => { includeHistory = all; offset = 0; void load(); }, "knowledge-quiet"); b.setAttribute("aria-pressed", String(includeHistory === all)); history.append(b); } controls.append(history);
-        if (kind === "claim" && result.facets && Object.keys(result.facets.origins).length > 1) { const select = el("select"); select.setAttribute("aria-label", "Assertion origin"); for (const value of ["", ...Object.keys(result.facets.origins)]) { const option = el("option", value ? origin(value) : "All origins"); option.value = value; select.append(option); } select.value = originFilter; select.onchange = () => { originFilter = select.value; offset = 0; void load(); }; controls.append(select); }
-        panel.append(controls);
-        if (kind === "claim") { for (const record of result.records) { if (record.lifecycle !== "active") { const row = el("div", undefined, "knowledge-historical knowledge-connection"); row.append(summaryLink(record), el("small", `${record.lifecycle === "withdrawn" ? "Withdrawn" : "Replaced"} · ${record.updatedAt ? date(record.updatedAt) : "Time not recorded"}`)); panel.append(row); } else { const card = claimCard(record, n); panel.append(card ?? summaryLink(record)); } } }
+        if (kind === "claim" && result?.facets && Object.keys(result.facets.origins).length > 1) { const select = el("select"); select.setAttribute("aria-label", "Assertion origin"); for (const value of ["", ...Object.keys(result.facets.origins)]) { const option = el("option", value ? origin(value) : "All origins"); option.value = value; select.append(option); } select.value = originFilter; select.onchange = () => { originFilter = select.value; offset = 0; void load(); }; controls.append(select); }
+        const paneStatus = el("div", "", "knowledge-pane-status"); paneStatus.setAttribute("role", "status"); paneStatus.setAttribute("aria-live", "polite");
+        const data = el("div", undefined, "knowledge-browse-data"); panel.append(controls, paneStatus, data);
+        // Vocabulary presentation changes replace facets; selection/count updates keep focus.
+        facets.dataset.signature = JSON.stringify([Boolean(kind === "page" ? vocabulary : result), kind === "page" ? vocabulary?.definitions.map(def => [def.name, def.label, def.primitive]) : undefined, ...[...facets.querySelectorAll<HTMLElement>("[data-facet]")].map(node => node.dataset.facet)]);
+        if (!result) {
+          if (kind === "page") data.append(pageTable([]));
+          const placeholder = loadingPlaceholder(kind === "claim" ? "cards" : "rows", loadingLabel());
+          placeholder.querySelector("p")?.remove(); data.append(placeholder);
+          const results = el("div", undefined, "knowledge-browse-results"); results.append(panel); layout.append(facets, results); target.replaceChildren(layout); return;
+        }
+        if (kind === "claim") { for (const record of result.records) { if (record.lifecycle !== "active") { const row = el("div", undefined, "knowledge-historical knowledge-connection"); row.append(summaryLink(record), el("small", `${record.lifecycle === "withdrawn" ? "Withdrawn" : "Replaced"} · ${record.updatedAt ? date(record.updatedAt) : "Time not recorded"}`)); data.append(row); } else { const card = claimCard(record, n); data.append(card ?? summaryLink(record)); } } }
         else if (kind === "relationship") {
           const endpoints = new Map((result.endpoints ?? []).map(record => [record.id, record]));
           for (const record of result.records) {
             const row = el("div", undefined, "knowledge-connection knowledge-browse-connection");
             for (const [i, id] of [record.from, record.to].entries()) { if (i) row.append(el("span", label(record.label ?? record.type))); const endpoint = id ? endpoints.get(id) : undefined; row.append(endpoint ? summaryLink(endpoint) : el("span", "Page unavailable")); }
-            row.append(record.lifecycle === "active" ? confidenceView(record.attributionConfidence, true) : button(`Withdrawn · ${record.updatedAt ? date(record.updatedAt) : "Time not recorded"}`, () => open(record.id), "knowledge-quiet")); panel.append(row);
+            row.append(record.lifecycle === "active" ? confidenceView(record.attributionConfidence, true) : button(`Withdrawn · ${record.updatedAt ? date(record.updatedAt) : "Time not recorded"}`, () => open(record.id), "knowledge-quiet")); data.append(row);
           }
         }
-        else panel.append(pageTable(result.records));
-        if (!result.records.length) panel.append(empty("Nothing here yet", "Tell your agent in chat and saved knowledge will appear here."));
+        else data.append(pageTable(result.records));
+        if (!result.records.length) data.append(empty("Nothing here yet", "Tell your agent in chat and saved knowledge will appear here."));
         const pages = el("div", undefined, "knowledge-pagination");
         const capped = result.nextOffset !== null && result.nextOffset > 500;
         pages.append(el("span", `${result.total ? offset + 1 : 0}–${offset + result.records.length} of ${result.total.toLocaleString()} · ${result.total > 550 ? "partial browse access" : `complete list${includeHistory ? " · including history" : ""}`}`));
         const previousOffset = browseBack.filter(n => n < offset).at(-1);
         const previous = button(previousOffset === undefined && offset ? "First" : "Previous", () => { offset = previousOffset ?? 0; browseBack = browseBack.filter(n => n < offset); void load(); }); previous.disabled = !offset;
-        const next = button("Next", () => { browseBack = [...browseBack.filter(n => n < offset), offset]; offset = result.nextOffset!; void load(); }); next.disabled = result.nextOffset === null || capped; pages.append(previous, next); panel.append(pages);
-        if (capped) panel.append(el("p", "This server cannot page beyond 550 records. Narrow the type filter to see more.", "knowledge-notice"));
+        const next = button("Next", () => { browseBack = [...browseBack.filter(n => n < offset), offset]; offset = result.nextOffset!; void load(); }); next.disabled = result.nextOffset === null || capped; pages.append(previous, next); data.append(pages);
+        if (capped) data.append(el("p", "This server cannot page beyond 550 records. Narrow the type filter to see more.", "knowledge-notice"));
         const results = el("div", undefined, "knowledge-browse-results"); results.append(panel); layout.append(facets, results); target.replaceChildren(layout);
       }
       async function recent(n: number, target: HTMLElement) {
@@ -862,20 +907,74 @@ export default defineControlUiPlugin({
         if (activity.nextBefore !== null) pages.append(button("Load older activity", () => { recentBack.push(recentCursor); recentCursor = { upperSequence: activity.upperSequence, beforeSequence: activity.nextBefore! }; void load(); }));
         feed.append(pages); target.replaceChildren(feed);
       }
+      // Loading belongs to the destination pane, not the whole application.
+      function loadingLabel() { return selectedId ? "Opening record…" : "Loading " + (tab === "browse" ? kind === "relationship" ? "connections" : kind === "claim" ? "claims" : "pages" : tab) + "…"; }
+      function prepareLoading(n: number) {
+        const screen = JSON.stringify([tab, selectedId]);
+        if (mountedScreen !== screen || !content.children.length) {
+          viewReady = false; mountedScreen = screen;
+          if (!selectedId && tab === "browse") renderBrowse(n, content);
+          else {
+            const placeholder = loadingPlaceholder(selectedId ? "detail" : tab === "recent" ? "feed" : "cards", loadingLabel());
+            placeholder.querySelector("p")?.remove(); content.replaceChildren(placeholder);
+          }
+        }
+        // Controls acknowledge the request immediately; retained rows cannot open stale records.
+        const frame = content.querySelector<HTMLElement>(".knowledge-browse");
+        if (!selectedId && tab === "browse" && frame) {
+          const candidate = el("div"); renderBrowse(n, candidate);
+          syncBrowseControls(frame.querySelector(".knowledge-table-toolbar")!, candidate.querySelector(".knowledge-table-toolbar")!, kind === "claim");
+          const facets = frame.querySelector<HTMLElement>(".knowledge-facets")!, nextFacets = candidate.querySelector<HTMLElement>(".knowledge-facets")!;
+          if (frame.dataset.kind !== kind || (facets.querySelector(".knowledge-placeholder") && !nextFacets.querySelector(".knowledge-placeholder"))) { facets.replaceChildren(...nextFacets.childNodes); facets.dataset.signature = nextFacets.dataset.signature; frame.dataset.kind = kind; }
+          for (const control of facets.querySelectorAll<HTMLElement>("[data-facet]")) control.setAttribute("aria-pressed", String(control.dataset.facet === type));
+          const originSelect = frame.querySelector<HTMLSelectElement>(".knowledge-table-toolbar select"); if (originSelect) originSelect.value = originFilter;
+          const data = frame.querySelector<HTMLElement>(".knowledge-browse-data")!;
+          data.inert = true; data.setAttribute("aria-busy", "true");
+          const note = frame.querySelector<HTMLElement>(".knowledge-pane-status")!;
+          note.textContent = loadingLabel() + (data.querySelector(".knowledge-placeholder") ? "" : " Showing previous results until ready.");
+          loading.hidden = true;
+        } else {
+          // Recent, Search and detail reloads have the same local data boundary.
+          let data = content.querySelector<HTMLElement>(":scope > .knowledge-view-data");
+          if (!data) {
+            data = el("div", undefined, "knowledge-view-data"); data.append(...content.childNodes);
+            const note = el("div", "", "knowledge-pane-status"); note.setAttribute("role", "status"); note.setAttribute("aria-live", "polite"); content.append(note, data);
+          }
+          data.inert = true; data.setAttribute("aria-busy", "true");
+          content.querySelector(".knowledge-pane-status")!.textContent = loadingLabel() + (data.querySelector(".knowledge-placeholder") ? "" : " Showing previous results until ready.");
+          loading.hidden = true;
+        }
+        announce(loadingLabel()); content.setAttribute("aria-busy", "true");
+      }
+      // The Browse workspace stays mounted through data commits, including background checks.
+      function commitContent(target: HTMLElement) {
+        const current = content.querySelector<HTMLElement>(".knowledge-browse"), next = target.querySelector<HTMLElement>(".knowledge-browse");
+        if (current && next) { commitBrowse(current, next); current.querySelector(".knowledge-pane-status")!.replaceChildren(); }
+        else {
+          const data = content.querySelector<HTMLElement>(":scope > .knowledge-view-data");
+          if (data && !next) { data.replaceChildren(...target.childNodes); data.inert = false; data.removeAttribute("aria-busy"); content.querySelector(".knowledge-pane-status")!.replaceChildren(); }
+          else content.replaceChildren(...target.childNodes);
+        }
+      }
+      // Terminal errors end loading without discarding a readable same-store snapshot.
+      function showLoadingFailure(error: unknown, retry: () => void) {
+        content.removeAttribute("aria-busy");
+        content.querySelectorAll("[aria-busy]").forEach(node => node.removeAttribute("aria-busy"));
+        content.querySelectorAll(".knowledge-browse-data > .knowledge-placeholder, .knowledge-view-data > .knowledge-placeholder, .knowledge-facets .knowledge-placeholder").forEach(node => node.remove());
+        const feedback = content.querySelector<HTMLElement>(".knowledge-pane-status") ?? loading;
+        feedback.replaceChildren(failure(error), button("Retry", retry, "knowledge-quiet")); feedback.hidden = false;
+      }
       async function load(background = false): Promise<boolean> {
         if (disposed) return false;
-        if (!scopeChecked) { void refresh(); return false; }
+        if (!scopeChecked) { prepareLoading(generation); void refresh(); return false; }
         writeLocation();
         const n = ++generation, nextView = viewKey(), nextScreen = JSON.stringify([tab, selectedId]);
         if (!context.host.connection.connected) { void refresh(); return false; }
         if (!background) connectionPages = 1;
-        // Build off-screen for navigation too. Keep the readable view and its
-        // controls mounted until the newest request is ready to commit.
+        // Stage incoming data while the destination frame stays mounted.
+        // Same-view requests retain readable rows until the newest response commits.
         const target = el("div"); staging = target; loadingGeneration = n;
-        if (!background) {
-          loading.textContent = selectedId ? "Opening record…" : tab === "browse" ? `Loading ${kind === "relationship" ? "connections" : kind === "claim" ? "claims" : "pages"}…` : `Loading ${tab}…`;
-          loading.hidden = false; content.setAttribute("aria-busy", "true");
-        }
+        if (!background) prepareLoading(n);
         try {
           await (async () => {
           if (scopeMismatch) {
@@ -912,12 +1011,12 @@ export default defineControlUiPlugin({
             if (!live(n) || n !== generation) return false;
             reading = captureReadingState(content);
             for (const node of target.querySelectorAll<HTMLElement>("[data-preserve-signature]")) { const old = reusable(node); if (old) node.replaceWith(old); }
-            content.replaceChildren(...target.childNodes);
+            commitContent(target);
             reading.restore(content);
           }
           else {
             const reading = captureReadingState(content);
-            content.replaceChildren(...target.childNodes);
+            commitContent(target);
             // Preserve list-option focus, but never carry a collapsed preview
             // into a standalone detail where evidence is open by default.
             if (displayScreen === nextScreen) reading.restore(content);
@@ -927,7 +1026,7 @@ export default defineControlUiPlugin({
         } catch (error) {
           if (live(n) && n === generation) {
             if (background) { status.textContent = "Refresh unavailable"; status.hidden = false; }
-            else { loading.replaceChildren(failure(error), button("Retry", () => { void load(); }, "knowledge-quiet")); loading.hidden = false; }
+            else showLoadingFailure(error, () => { void load(); });
           }
           return false;
         } finally {
@@ -994,7 +1093,7 @@ export default defineControlUiPlugin({
             pendingSnapshot = report.snapshot; updates.textContent = count ? `↑ ${count}${recent.nextBefore !== null ? "+" : ""} activity ${count === 1 ? "update" : "updates"} · Show` : "Knowledge changed · Show"; updates.hidden = false; return;
           }
           if (await load(viewReady && displayView === viewKey())) snapshot = report.snapshot;
-        } catch (error) { if (!disposed && n === statusGeneration) { status.textContent = "Refresh unavailable"; status.hidden = false; if (!viewReady) content.replaceChildren(failure(error)); } }
+        } catch (error) { if (!disposed && n === statusGeneration) { status.textContent = "Refresh unavailable"; status.hidden = false; if (!viewReady) showLoadingFailure(error, () => { void refresh(); }); } }
         finally { refreshing = false; if (refreshAgain) { refreshAgain = false; const replace = pendingReplaceLocation; pendingReplaceLocation = true; void refresh(replace); } }
       }
       let connected = context.host.connection.connected;
@@ -1009,7 +1108,7 @@ export default defineControlUiPlugin({
       const resync = setInterval(() => { if (context.host.connection.connected && !document.hidden) void refresh(); }, 30000);
       const focusSearch = (event: KeyboardEvent) => { if (event.key !== "/" || event.ctrlKey || event.metaKey || event.altKey || event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || (event.target instanceof HTMLElement && event.target.isContentEditable)) return; const input = root.querySelector<HTMLInputElement>("input[type=search]"); if (input) { event.preventDefault(); input.focus(); } };
       document.addEventListener("keydown", focusSearch);
-      renderToolbar(); renderAgentCopy(); void refresh();
+      renderToolbar(); renderAgentCopy(); prepareLoading(generation); void refresh();
       return { update(next) { context = next; restoreLocation(next.props); }, dispose() { document.removeEventListener("keydown", focusSearch); disposed = true; ++generation; ++statusGeneration; ++suggestGeneration; clearTimeout(timer); clearInterval(resync); unwatch(); unsubscribe(); root.remove(); } };
     } });
     return () => { removeSessionPanel(); removePage(); removeNavigation(); };
