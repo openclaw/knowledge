@@ -163,3 +163,27 @@ test('Recent batches attendee summaries only for the current group page',async t
   const after=await f.service.recent({...input,upperSequence:first.upperSequence},f.owner);
   assert.ok(after.items.every(item=>!item.group?.endpoints.some(r=>r.id===person.id)),'Pinned history cannot expose a now-withdrawn endpoint');
 });
+
+test('entity annotations link a claim by ID without changing its assertion, and reject non-pages, withdrawn pages and page targets',async t=>{
+  const f=await setup(t), alex=await f.page('Alex','person'), sam=await f.page('Sam','person'), claim=await f.claim();
+  const before=(await f.service.record({id:claim.id,includeMetadata:true},f.owner)).record;
+  assert.equal(before.metadata.entities,undefined);
+  const {input}=await f.annotate(claim.id,{},{entities:[alex.id],reason:'Relink unique subject'});
+  const linked=(await f.service.record({id:claim.id,includeMetadata:true},f.owner)).record;
+  assert.deepEqual(linked.metadata.entities,[alex.id]);
+  assert.equal(linked.body,before.body);assert.equal(linked.lifecycle,'active');assert.equal(linked.metadata.supersedes,undefined);
+  assert.deepEqual(linked.metadata.evidence,before.metadata.evidence);
+  assert.equal(linked.revision,before.revision+1);
+  const connected=await f.service.connections({id:alex.id,direction:'claims'},f.owner);
+  assert.ok(connected.connections.some(c=>c.record.id===claim.id),'The subject page now lists the claim');
+  // Exact replay returns the same receipt; a stale revision conflicts.
+  assert.equal((await f.service.annotate(input,f.owner)).revision,linked.revision);
+  await assert.rejects(f.service.annotate({...input,requestId:randomUUID(),entities:[sam.id]},f.owner),/conflict/);
+  await assert.rejects(f.annotate(claim.id,{},{entities:[claim.id]}),/active pages/);
+  await assert.rejects(f.annotate(alex.id,{},{entities:[sam.id]}),/require a claim/);
+  const samRecord=(await f.service.record({id:sam.id},f.owner)).record;
+  await f.service.withdraw({requestId:randomUUID(),id:sam.id,expectedRevision:samRecord.revision,expectedHash:samRecord.hash,reason:'Fixture withdrawal'},f.owner);
+  await assert.rejects(f.annotate(claim.id,{},{entities:[sam.id]}),/active pages/);
+  await f.annotate(claim.id,{},{entities:[]});
+  assert.equal((await f.service.record({id:claim.id,includeMetadata:true},f.owner)).record.metadata.entities,undefined);
+});

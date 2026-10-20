@@ -52,6 +52,7 @@ const target = {
 };
 export const AnnotateInput = Type.Object({
   ...target, annotations: RecordAnnotations,
+  entities: Type.Optional(Type.Array(id, { maxItems: 100, uniqueItems: true, description: "Claims only. Replaces the claim's linked entity pages (active pages in this scope); [] unlinks. Assertion text, evidence and lifecycle are unchanged." })),
   addEvidence: Type.Optional(Type.Array(Evidence, { minItems: 1, maxItems: 100 })),
 }, { additionalProperties: false });
 export type AnnotateInput = Static<typeof AnnotateInput>;

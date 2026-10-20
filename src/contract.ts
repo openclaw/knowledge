@@ -8,6 +8,7 @@ import { SessionActivityInput, SessionActivityOutput } from "./session-activity.
 import { BatchInput, SourceCheckInput, SourceCheckOutput, VerifyInput, VerifyOutput } from "./ingestion-contract.js";
 import { ConnectionsInput, ConnectionsOutput } from "./connections-contract.js";
 import { RecentInput, RecentOutput } from "./recent.js";
+import { RelinkInput, RelinkOutput } from "./relink-contract.js";
 import { RememberInput, RememberOutput } from "./remember-contract.js";
 import { AttachInput, AttachOutput, AttachmentInput, AttachmentOutput } from "./attachment-contract.js";
 import { SearchInput, SearchOutput, LookupInput, LookupOutput } from "./retrieval-contract.js";
@@ -66,7 +67,7 @@ export const contract = defineFeatureContract({
       tool: { name: "knowledge_reconcile_evidence", label: "Reconcile knowledge evidence" },
     },
     annotate: {
-      kind: "action", description: "Revision-fenced, evidence-backed metadata annotation without changing assertion text or lifecycle. Set source-page association, identity uncertainty/candidates, speaker-attribution confidence, continuity links, or explicit fixture classification; append retained evidence to an unchanged assertion. Omitted fields are preserved; supplied arrays replace. Only fixture classification may change historical records. Similarity is not supersession, candidate identity is not a merge, and source grouping is not an ingestion batch. Inspect the target and evidence first; a reason and exact revision/hash are required.",
+      kind: "action", description: "Revision-fenced, evidence-backed metadata annotation without changing assertion text or lifecycle. Set source-page association, identity uncertainty/candidates, speaker-attribution confidence, continuity links, or explicit fixture classification; replace a claim's linked entity pages (entities); append retained evidence to an unchanged assertion. Omitted fields are preserved; supplied arrays replace. Only fixture classification may change historical records. Similarity is not supersession, candidate identity is not a merge, and source grouping is not an ingestion batch. Inspect the target and evidence first; a reason and exact revision/hash are required.",
       input: AnnotateInput, output: Receipt,
       tool: { name: "knowledge_annotate", label: "Annotate knowledge context" },
     },
@@ -97,6 +98,10 @@ export const contract = defineFeatureContract({
     remember: {
       kind: "action", description: "Cheapest durable save: 1–20 claims (decision, preference, commitment, fact, event, belief) in one call, no search or readback needed. Give short attribution and the supporting conversation excerpt; it is retained as their evidence. Optional subject (exact page ID, title or alias) links each claim to a uniquely matching page; otherwise it is saved unlinked and reported. Never creates pages. Exact repeats return duplicate with the saved claim. One claim per item; never agent inference. Commitments are not scheduled. Use knowledge-capture to revise page prose.",
       input: RememberInput, output: RememberOutput, tool: { name: "knowledge_remember", label: "Remember knowledge" },
+    },
+    relink: {
+      kind: "action", description: "Link remembered claims saved without a subject to the one entity page each names, in this store partition only. Zero-LLM: the claim's recorded source page if it is an entity, else exactly one entity page named by ID, title or alias with no competing name; ambiguous and unnamed claims stay unlinked. Run dryRun=true first to review counts and examples; follow nextCursor. Each link is an entities annotation; claim text, evidence and lifecycle are unchanged.",
+      input: RelinkInput, output: RelinkOutput, tool: { name: "knowledge_relink", label: "Relink remembered claims" },
     },
     create_claim: {
       kind: "action", description: "Publish one evidence-backed claim (fact, preference, decision, commitment, event or belief). Agent chooses what the source supports; no automatic extraction or semantic deduplication. Required current ontology fingerprint comes from knowledge_ontology. Explicit attribution and assertion_origin distinguish source statements, user beliefs and agent inference. Unknown owner/dates remain absent. occurred_at and due_at preserve date-only or offset timestamp precision; validity/expiry are UTC instants. No task is scheduled. Reuse the exact request and payload for retries; no claim overwrite or lifecycle mutation.",

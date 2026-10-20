@@ -45,6 +45,8 @@ import { planMerge, planUnmerge, type MergeReport } from "./merge-write.js";
 import { MergeInput, UnmergeInput } from "./mutation-contract.js";
 import { RememberInput, REMEMBER_EXCERPT_MAX_BYTES, type RememberOutput } from "./remember-contract.js";
 import { planRemember, claimPayload } from "./remember.js";
+import { RelinkInput, RELINK_EXAMPLES_MAX, type RelinkExample, type RelinkOutput } from "./relink-contract.js";
+import { planRelink, relinkRequestId, unlinkedRemembered } from "./relink.js";
 import type { VaultAccess } from "./access.js";
 
 const canonical = (x: unknown): string => JSON.stringify(x, (_, v) => v && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => a.localeCompare(b))) : v);
@@ -53,7 +55,7 @@ const blocked = () => Error("Knowledge publication pending or conflicted; inspec
 // `agentId` is the writing agent, fixed at acceptance so a resumed publication
 // keeps its original author whoever resumes it.
 type Plan = { descriptors?: Record<string, string>; activity?: ActivityOrigin; rootIdentity: string; before: Manifest; after: Manifest; changes: FileChange[]; actor: string; agentId?: string; scope: string; record: LoadedRecord; records?: LoadedRecord[]; source?: SourceIdentity };
-type Prepared = { requiredDescriptors?: Record<string, string>; record: LoadedRecord; artifacts: Record<string, string>; previous?: LoadedRecord; data: Awaited<ReturnType<SampleVault["scan"]>>; snapshot: string; additional?: { before?: LoadedRecord; after: LoadedRecord }[]; batch?: { items: NonNullable<Receipt["items"]>; source?: SourceIdentity; expectedPreviousRequestId?: string }; lifecycle?: CorrectInput | WithdrawInput; merge?: { operation: "merge" | "unmerge"; targetId: string; reason: string; report: MergeReport }; annotation?: boolean; metadataOnly?: boolean; annotationEvidence?: import("./model.js").Evidence[] };
+type Prepared = { requiredDescriptors?: Record<string, string>; record: LoadedRecord; artifacts: Record<string, string>; previous?: LoadedRecord; data: Awaited<ReturnType<SampleVault["scan"]>>; snapshot: string; additional?: { before?: LoadedRecord; after: LoadedRecord }[]; batch?: { items: NonNullable<Receipt["items"]>; source?: SourceIdentity; expectedPreviousRequestId?: string }; lifecycle?: CorrectInput | WithdrawInput; merge?: { operation: "merge" | "unmerge"; targetId: string; reason: string; report: MergeReport }; annotation?: boolean; annotationReferences?: string[]; metadataOnly?: boolean; annotationEvidence?: import("./model.js").Evidence[] };
 type Row = { scope: string; request: string; intent: string; state: Receipt["state"]; plan: string; receipt: string };
 export type PublicationHook = (stage: string) => void;
 
@@ -353,6 +355,49 @@ export class KnowledgeStorage {
     const unlinked = items.filter(i => i.subject === "ambiguous" || i.subject === "missing").length, inferred = items.filter(i => i.subject === "inferred").length;
     return { items, receipt, message: `${items.filter(i => i.status === "inserted").length} saved, ${items.filter(i => i.status === "duplicate").length} already saved${inferred ? `, ${inferred} linked by inference from the text` : ""}${unlinked ? `, ${unlinked} unlinked because the subject did not match exactly one page` : ""}. A published receipt is a completed save.` };
   }
+  /**
+   * Link unlinked remembered claims to the one entity page each names, within
+   * this partition only (gbrain facts relink, zero-LLM tiers). Each link is an
+   * ordinary revision-fenced entities annotation with a stable request ID.
+   */
+  async relink(input: RelinkInput, access: VaultAccess, actor: string): Promise<RelinkOutput> {
+    if (!Check(RelinkInput, input)) throw Error("Invalid relink input.");
+    access.assertCurrent();
+    const dryRun = input.dryRun ?? false, limit = input.limit ?? 100;
+    if (!dryRun && !this.config.writesEnabled) throw Error("Knowledge writes are disabled.");
+    await this.initialize(access);
+    const { plans, nextCursor } = await this.run(access, async vault => {
+      const data = await vault.scan(), withdrawn = this.store.withDatabase(db => withdrawnIds(db, this.retrievalBinding(access)));
+      const active = eligible(data, withdrawn, false);
+      const pending = unlinkedRemembered(active).filter(r => input.cursor === undefined || r.id > input.cursor);
+      const batch = pending.slice(0, limit);
+      return { plans: batch.map(r => planRelink(data, active, withdrawn, r)), nextCursor: pending.length > limit ? batch[batch.length - 1]!.id : null };
+    });
+    let failed = 0;
+    const examples: RelinkExample[] = [], shown: Record<string, number> = {};
+    for (const plan of plans) {
+      let outcome: RelinkExample["outcome"] | "failed" = plan.outcome;
+      if (plan.outcome === "linked" && !dryRun) {
+        try {
+          await this.annotate({ requestId: relinkRequestId(plan.record, plan.subject!.id), id: plan.record.id, expectedRevision: plan.record.revision, expectedHash: plan.record.hash,
+            reason: `Relinked to ${plan.subject!.title} (${plan.tier === "page" ? "recorded source page" : "only entity named in the claim text"}).`, annotations: {}, entities: [plan.subject!.id] }, access, actor);
+        } catch (e) {
+          // A changed or conflicting claim stays unlinked; the next pass re-plans it.
+          if (/authority|reloaded|assignment changed|disabled|identity or storage/i.test((e as Error).message)) throw e;
+          failed++; outcome = "failed";
+        }
+      }
+      if (outcome === "failed" || (shown[outcome] ?? 0) >= RELINK_EXAMPLES_MAX) continue;
+      shown[outcome] = (shown[outcome] ?? 0) + 1;
+      examples.push({ id: plan.record.id, title: plan.record.title.slice(0, 200), outcome, ...(plan.tier ? { tier: plan.tier } : {}),
+        ...(plan.subject ? { subject: { id: plan.subject.id, title: plan.subject.title.slice(0, 200) } } : {}), ...(plan.reason ? { reason: plan.reason } : {}) });
+    }
+    const count = (o: RelinkExample["outcome"]) => plans.filter(p => p.outcome === o).length;
+    const linked = count("linked") - failed, ambiguous = count("ambiguous"), noSubject = count("no_subject");
+    const verb = dryRun ? "would link" : "linked";
+    return { dryRun, scanned: plans.length, linked, ambiguous, noSubject, failed, examples, nextCursor,
+      message: `${plans.length} unlinked remembered claims examined: ${linked} ${verb}, ${ambiguous} ambiguous, ${noSubject} with no entity page named${failed ? `, ${failed} not linked because the claim changed (retried next pass)` : ""}.${nextCursor ? " More remain; continue with nextCursor." : ""}` };
+  }
   /** Publish one bounded page-body change through the normal fenced journal. */
   async editBody(input: EditBodyInput, access: VaultAccess): Promise<Receipt> {
     if (!Check(EditBodyInput, input) || !input.reason.trim() || !withinBudget(input)) throw Error("Invalid or oversized body edit input.");
@@ -411,7 +456,7 @@ export class KnowledgeStorage {
     return this.accept(input.requestId, intent, prepared, access, input.evidence === undefined ? "conversion" : "agent");
   }
   async annotate(input: AnnotateInput, access: VaultAccess, actor: string): Promise<Receipt> {
-    if (!Check(AnnotateInput, input) || !input.reason.trim() || (!Object.keys(input.annotations).length && !input.addEvidence?.length)) throw Error("Invalid annotation input.");
+    if (!Check(AnnotateInput, input) || !input.reason.trim() || (!Object.keys(input.annotations).length && !input.addEvidence?.length && input.entities === undefined)) throw Error("Invalid annotation input.");
     access.assertCurrent();
     if (!this.config.writesEnabled) throw Error("Knowledge writes are disabled.");
     if (input.expectedVaultId && input.expectedVaultId !== this.config.vaultId) throw Error("Connected vault changed; no publication accepted.");
@@ -424,8 +469,17 @@ export class KnowledgeStorage {
       const snapshot = new PublicationFiles(this.config.root).snapshot(scope), data = await vault.scan();
       const matches = data.records.filter(r => r.id === input.id), previous = matches.length === 1 ? matches[0] : undefined;
       if (!previous || previous.hash !== input.expectedHash || previous.revision !== input.expectedRevision) throw Error("Annotation conflict: target unavailable or changed.");
-      if (previous.lifecycle !== "active" && (Object.keys(input.annotations).some(k => k !== "record_class") || input.addEvidence?.length)) throw Error("Only fixture classification may annotate historical records.");
+      if (previous.lifecycle !== "active" && (Object.keys(input.annotations).some(k => k !== "record_class") || input.addEvidence?.length || input.entities !== undefined)) throw Error("Only fixture classification may annotate historical records.");
       const metadata: Envelope = { ...previous.metadata, ...input.annotations, revision: previous.revision + 1, updated_at: new Date().toISOString() };
+      // Linking moves a claim by ID onto its subject (gbrain relink); it is not a correction.
+      if (input.entities !== undefined) {
+        if (previous.kind !== "claim") throw Error("Entity annotations require a claim.");
+        const redirects = mergeRedirects(data.records), stale = input.entities.find(id => redirects.has(id));
+        if (stale) throw Error(`Reference ${stale} is a page that was merged into ${redirects.get(stale)}. Reference ${redirects.get(stale)} instead. No publication accepted.`);
+        const allowed = this.store.withDatabase(db => eligible(data, withdrawnIds(db, this.retrievalBinding(access)), false));
+        if (input.entities.some(id => !allowed.some(r => r.id === id && r.kind === "page"))) throw Error("Entity references must be active pages in this scope.");
+        if (input.entities.length) metadata.entities = input.entities; else delete metadata.entities;
+      }
       const extra = [...(input.addEvidence ?? []), ...annotationEvidence(metadata)];
       for (const evidence of extra) inspectEvidence(path.join(this.config.root, scope), evidence);
       if (extra.length) metadata.evidence = [...new Map([...(metadata.evidence ?? []), ...extra].map(e => [canonical(e), e])).values()];
@@ -434,6 +488,7 @@ export class KnowledgeStorage {
       const match = /^(?:\uFEFF)?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(previous.raw)!;
       const doc = parseDocument(match[1]);
       for (const key of ["revision", "updated_at", ...Object.keys(input.annotations), ...(extra.length ? ["evidence"] : [])]) doc.set(key, doc.createNode((metadata as Record<string, unknown>)[key], { aliasDuplicateObjects: false }));
+      if (input.entities?.length) doc.set("entities", doc.createNode(input.entities)); else if (input.entities) doc.delete("entities");
       doc.set("annotation_change", { reason: input.reason, actor, request_id: input.requestId, at: metadata.updated_at });
       parseYaml(doc.toString());
       const raw = `---\n${doc.toString()}---\n${previous.body}`;
@@ -441,7 +496,7 @@ export class KnowledgeStorage {
       const record = encoded.record;
       if (Buffer.byteLength(record.raw) > RECORD_MAX_BYTES) throw Error("Annotation exceeds record limits.");
       if (new PublicationFiles(this.config.root).snapshot(scope) !== snapshot) throw Error("Edit conflict: vault changed during validation.");
-      return { previous, record, data, snapshot, artifacts: encoded.descriptors, requiredDescriptors: encoded.requiredDescriptors, annotation: true, annotationEvidence: extra };
+      return { previous, record, data, snapshot, artifacts: encoded.descriptors, requiredDescriptors: encoded.requiredDescriptors, annotation: true, annotationEvidence: extra, annotationReferences: input.entities };
     });
     return this.accept(input.requestId, intent, prepared, access, actor);
   }
@@ -721,6 +776,7 @@ export class KnowledgeStorage {
       const m = prepared.record.metadata;
       const references = [...(m.dependencies ?? []), ...(m.entities ?? []), ...[m.from, m.to, m.owner].filter((id): id is string => Boolean(id))];
       if (!prepared.batch && !prepared.annotation && !prepared.metadataOnly && (!prepared.lifecycle || "replacement" in prepared.lifecycle) && references.some(id => !stillActive.some(r => r.id === id))) throw Error("Reference unavailable or inactive in this scope.");
+      if (prepared.annotationReferences?.some(id => !stillActive.some(r => r.id === id && r.kind === "page"))) throw Error("Reference unavailable or inactive in this scope.");
       // Bind every descriptor used for validation and every resulting record.
       // New sidecars are journaled; reused sidecars remain explicit replay dependencies.
       for (const record of prepared.data.records) recordSourceDependencies(record, p => readSourceDescriptor(path.join(this.config.root, scope), p));

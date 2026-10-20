@@ -20,7 +20,7 @@ import type { StorageOperations } from "./storage-host.js";
 
 type Handlers = FeatureHandlers<typeof contract>;
 type StoreHandlers = Omit<Handlers, "stores_snapshot" | "stores_change" | "stores_change_status" | "agent_query" | "agent_action">;
-const WRITE_TOOLS = ["knowledge_remember", "knowledge_edit_body", "knowledge_reconcile_evidence", "knowledge_save_page", "knowledge_correct", "knowledge_withdraw", "knowledge_merge", "knowledge_unmerge", "knowledge_recall"];
+const WRITE_TOOLS = ["knowledge_remember", "knowledge_relink", "knowledge_edit_body", "knowledge_reconcile_evidence", "knowledge_save_page", "knowledge_correct", "knowledge_withdraw", "knowledge_merge", "knowledge_unmerge", "knowledge_recall"];
 const chatOnly = () => Error("Knowledge changes must be requested through chat and agent tools.");
 const operatorOnly = () => Error("Selecting an agent's store is an operator inspection; it is not available to agent tools.");
 
@@ -130,6 +130,7 @@ export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureE
         if (input.requestId === undefined && !flushId) return Promise.reject(Error("knowledge_remember requires requestId outside a host pre-compaction memory flush."));
         return agentChange("remember")({ ...input, requestId: input.requestId ?? deriveMemoryFlushRequestId(flushId!, input.items.map(i => i.text).join("\n")) }, context);
       },
+      relink: (input, context) => input.dryRun ? (context.source !== "tool" ? Promise.reject(chatOnly()) : call("relink")(input, context)) : agentChange("relink")(input, context),
       create_claim: authored("createClaim"),
       create_relationship: authored("createRelationship"),
       correct: agentChange("correct"),

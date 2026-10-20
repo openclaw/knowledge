@@ -43,7 +43,7 @@ const ID_TOKEN_RE = /(?<![A-Za-z0-9_-])[A-Za-z0-9][A-Za-z0-9_-]{7,95}(?![A-Za-z0
 const normalize = (value: string) => value.normalize("NFKC").trim().replace(/\s+/gu, " ").toLowerCase();
 
 /** True for a page type that names a person, company, concept, project or deal. */
-function isFactEntity(data: Snapshot, record: LoadedRecord): boolean {
+export function isFactEntity(data: Snapshot, record: LoadedRecord): boolean {
   const definition = data.ontology?.definitions.find(d => d.definition.name === record.type)?.definition;
   return definition?.primitive === "entity" || FACT_ENTITY_TYPES.has(record.type ?? "");
 }
