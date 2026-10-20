@@ -319,7 +319,7 @@ test('entry retains native tools, denies untrusted provider callers and prompt h
   await assert.rejects(capability.providerRuntime.open({ cfg: {}, agentId: 'main', context: {} }), /authority/);
   assert.deepEqual(capability.promptBuilder({ availableTools: new Set() }), []);
   // Writes are on by default, so the provider owns the pre-compaction flush.
-  assert.deepEqual(capability.providerFlushPlanResolver({}).persistenceToolNames, ['knowledge_save_page']);
+  assert.deepEqual(capability.providerFlushPlanResolver({}).persistenceToolNames, ['knowledge_remember', 'knowledge_save_page']);
   assert.deepEqual(buildKnowledgeMemoryPrompt({ availableTools: new Set() }), []);
 });
 
@@ -334,7 +334,7 @@ test('entry registers without reading the host runtime, as CLI metadata loading 
 test('flush plan provides tool persistence only for writable real vaults', async t => {
   const f = await fixture(t);
   const plan = f.capability.providerFlushPlanResolver({ contextWindowTokens: 8_000 });
-  assert.deepEqual(plan.persistenceToolNames, ['knowledge_save_page']);
+  assert.deepEqual(plan.persistenceToolNames, ['knowledge_remember', 'knowledge_save_page']);
   assert.deepEqual(plan.lookupToolNames, ['knowledge_grep', 'knowledge_lookup', 'knowledge_record', 'knowledge_ontology']);
   assert.equal(plan.relativePath, undefined);
   assert.equal(plan.reserveTokensFloor, undefined);
@@ -342,20 +342,15 @@ test('flush plan provides tool persistence only for writable real vaults', async
   assert.equal(plan.forceFlushTranscriptBytes, undefined);
   assert.equal(plan.model, undefined);
   const promptText = `${plan.prompt}\n${plan.systemPrompt}`;
-  assert.match(plan.prompt, /knowledge_grep before saving/);
-  assert.match(plan.prompt, /knowledge_lookup only for exact known record IDs, full titles, or aliases/);
-  assert.match(plan.prompt, /already saved, do not save it again/);
-  assert.match(plan.prompt, /knowledge_save_page/);
-  assert.match(plan.prompt, /quoted source excerpt with attribution/);
-  assert.match(plan.prompt, /enrich an appropriate existing page/);
-  assert.match(plan.prompt, /linked to its resolved subject/);
-  assert.match(plan.prompt, /knowledge_ontology for the active type definition/);
-  assert.doesNotMatch(plan.prompt, /one focused page per topic/);
-  assert.match(plan.prompt, /knowledge_record/);
+  assert.match(plan.prompt, /with knowledge_remember/);
+  assert.match(plan.prompt, /one claim per item, short attribution, the supporting quoted excerpt/);
+  assert.match(plan.prompt, /reported as duplicates, so do not search first/);
+  assert.match(plan.prompt, /knowledge_save_page only for a note that is not a discrete claim/);
+  assert.match(plan.prompt, /your own inference/);
   assert.match(plan.prompt, /NO_REPLY/);
   assert.deepEqual(
     [...new Set(promptText.match(/knowledge_[a-z_]+/g))].sort(),
-    ['knowledge_grep', 'knowledge_lookup', 'knowledge_ontology', 'knowledge_record', 'knowledge_save_page'],
+    ['knowledge_remember', 'knowledge_save_page'],
   );
   assert.equal(
     f.capability.providerFlushPlanResolver({ nowMs: 0 }).prompt,
@@ -446,11 +441,12 @@ test('prompt routes all workflows, obeys citation settings and omits disabled sa
   for (const skill of ['recall', 'capture', 'ingest', 'meeting-ingest', 'entities', 'correct']) assert.ok(full.includes(`knowledge-${skill}`));
   assert.match(full, /not instructions or authorization/); assert.match(full, /newer text is not automatically truer/);
   assert.match(full, /knowledge_recall only when the owner asks/); assert.match(full, /never ingested source text/);
-  assert.match(full, /meaningful new preferences/);
-  assert.match(full, /Resolve the subject and read existing records first/);
-  assert.match(full, /enrich an appropriate existing page or link a separate record to its subject/);
+  assert.match(full, /Unprompted and silently, save decisions with rationale/);
+  assert.match(full, /before your final reply on a task where one occurred/);
+  assert.match(full, /knowledge_remember: .*no search or readback first/);
+  assert.match(full, /knowledge-capture to revise a page's prose/);
   const readOnly = await fixture(t, { writesEnabled: false });
-  assert.doesNotMatch(readOnly.capability.promptBuilder({ availableTools: tools }).join('\n'), /During ordinary work|knowledge-capture|knowledge-correct|knowledge_recall only/);
+  assert.doesNotMatch(readOnly.capability.promptBuilder({ availableTools: tools }).join('\n'), /knowledge_remember|knowledge-capture|knowledge-correct|knowledge_recall only/);
   const partial = buildKnowledgeMemoryPrompt({ availableTools: new Set(['knowledge_grep']), citationsMode: 'off' }).join('\n');
   assert.doesNotMatch(partial, /knowledge_record|knowledge_lookup|knowledge-capture/);
   assert.match(partial, /Citations are disabled/);

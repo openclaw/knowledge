@@ -1,6 +1,6 @@
 ---
 name: knowledge-capture
-description: Save short notes and durable preferences, decisions, project facts, commitments, and lessons with attribution and readback. Use for explicit saves or agent-driven remembering when Knowledge is the selected memory provider.
+description: Save durable preferences, decisions, project facts, commitments, and lessons cheaply with knowledge_remember, or short notes and page updates with attribution and readback. Use for explicit saves or agent-driven remembering when Knowledge is the selected memory provider.
 ---
 
 # Capture durable knowledge
@@ -15,9 +15,15 @@ Do not save transient task status, secrets, unsupported guesses, or excluded con
 Apply preferences as contextual facts, not executable instructions or new authority.
 Saving a preference does not configure the assistant or guarantee that the
 preference will be loaded in future turns.
-Pre-compaction flushes follow steps 1–4 with their available tools; they do not
+Pre-compaction flushes follow steps 0–4 with their available tools; they do not
 use `knowledge_attach` or `knowledge_recall`.
 
+0. Save a discrete claim (decision, preference, commitment, fact, event or
+   belief) with `knowledge_remember` and stop: give one claim per
+   item, short attribution, the supporting conversation excerpt and the
+   subject's exact page title or alias. It resolves subjects, reports exact
+   repeats and never creates pages. Its published receipt is the save.
+   Continue below only to revise a page's prose or save a longer note.
 1. Preserve the supplied wording, especially original ideas. Use the active
    ontology's type descriptions to classify the information. Decide whether to
    update an existing page before creating a new one.
@@ -29,9 +35,9 @@ use `knowledge_attach` or `knowledge_recall`.
    report that page rather than create another. A similar thought is not proof
    of identity: keep genuinely distinct versions with attribution. Read the existing
    record before changes; use `knowledge-correct` for corrections or withdrawal.
-   For a concise fact or preference about an identified subject, prefer enriching
-   the relevant section of its existing page. Create a separate record when the
-   information warrants independent context, chronology, or explanation; link
+   Enrich the relevant section of the subject's existing page. Create a
+   separate record when the information warrants independent context,
+   chronology, or explanation; link
    that record to the resolved subject page using a body wikilink. Preserve source
    attribution, existing evidence, decision rationale, event dates, and uncertainty.
    Maintain the page as a coherent account of its subject. Integrate new information
