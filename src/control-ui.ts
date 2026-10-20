@@ -4,6 +4,7 @@ import { createFeatureClient, type FeatureOutput } from "openclaw/plugin-sdk/fea
 import { contract } from "./contract.js";
 import { evidenceView, originalDownload } from "./evidence-view.js";
 import { loadVocabulary } from "./inspection-client.js";
+import { coalesceChanges } from "./change-refresh.js";
 import { ontologyView } from "./ontology-view.js";
 import { icon, type IconName } from "./ui-icons.js";
 import { confidenceView, displayAliases, identityTag, assertionOrigin as origin, agentDisplayName } from "./knowledge-presentation.js";
@@ -1099,12 +1100,13 @@ export default defineControlUiPlugin({
         if (namesChanged && viewReady && connected) { root.querySelector(".knowledge-chat-handoff")?.remove(); void load(true); }
         if (connected !== context.host.connection.connected) { connected = context.host.connection.connected; ++suggestGeneration; toolbar.querySelector(".knowledge-suggestions")?.replaceChildren(); void refresh(); }
       });
-      const unwatch = feature.on("changed", () => void refresh());
-      const resync = setInterval(() => { if (context.host.connection.connected && !document.hidden) void refresh(); }, 30000);
+      const changes = coalesceChanges(() => void refresh(), () => context.presented !== false);
+      const unwatch = feature.on("changed", changes.changed);
+      const resync = setInterval(() => { if (context.host.connection.connected && changes.active()) void refresh(); }, 30000);
       const focusSearch = (event: KeyboardEvent) => { if (event.key !== "/" || event.ctrlKey || event.metaKey || event.altKey || event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || (event.target instanceof HTMLElement && event.target.isContentEditable)) return; const input = root.querySelector<HTMLInputElement>("input[type=search]"); if (input) { event.preventDefault(); input.focus(); } };
       document.addEventListener("keydown", focusSearch);
       renderToolbar(); renderAgentCopy(); prepareLoading(generation); void refresh();
-      return { update(next) { context = next; restoreLocation(next.props); }, dispose() { document.removeEventListener("keydown", focusSearch); disposed = true; ++generation; ++statusGeneration; ++suggestGeneration; clearTimeout(timer); clearInterval(resync); unwatch(); unsubscribe(); root.remove(); } };
+      return { update(next) { context = next; restoreLocation(next.props); changes.resume(); }, dispose() { document.removeEventListener("keydown", focusSearch); disposed = true; changes.dispose(); ++generation; ++statusGeneration; ++suggestGeneration; clearTimeout(timer); clearInterval(resync); unwatch(); unsubscribe(); root.remove(); } };
     } });
     return () => { removeSessionPanel(); removePage(); removeNavigation(); };
   },

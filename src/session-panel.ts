@@ -2,6 +2,7 @@ import type { ControlUiHost, ControlUiPanel } from "openclaw/plugin-sdk/control-
 import { createFeatureClient } from "openclaw/plugin-sdk/feature-contract";
 import { contract } from "./contract.js";
 import { viewingClient } from "./store-view-client.js";
+import { coalesceChanges } from "./change-refresh.js";
 import type { ActivityOutput } from "./session-activity.js";
 import { markdownView } from "./markdown-view.js";
 import { icon } from "./ui-icons.js";
@@ -114,15 +115,16 @@ export function registerSessionPanel(host: ControlUiHost) {
     let connected = host.connection.connected;
     const unsubscribe = host.subscribe(() => { const changed = sync(), reconnected = !connected && host.connection.connected; connected = host.connection.connected; if (changed || reconnected || !connected) void load(); });
     // Do not collapse loaded history on every poll. Reopening returns to the newest window.
-    const poll = setInterval(() => { if (!document.hidden && rows.length <= 40 && !selected) void load(); }, 10000);
-    const unwatch = client.on("changed", () => { if (rows.length <= 40 && !selected) void load(); });
+    const changes = coalesceChanges(() => { if (rows.length <= 40 && !selected) void load(); }, () => context.presented !== false);
+    const poll = setInterval(() => { if (changes.active() && rows.length <= 40 && !selected) void load(); }, 10000);
+    const unwatch = client.on("changed", changes.changed);
     void load();
     return { update(nextContext) {
       const opened = !context.presented && nextContext.presented;
       context = nextContext;
       // Host render updates are not data invalidations (e.g. streaming chat).
       if (sync() || opened) void load();
-    }, dispose() { disposed = true; ++generation; ++previewGeneration; clearInterval(poll); unsubscribe(); unwatch(); root.remove(); } };
+    }, dispose() { disposed = true; ++generation; ++previewGeneration; clearInterval(poll); changes.dispose(); unsubscribe(); unwatch(); root.remove(); } };
   } };
   return host.ui.registerPanel(panel);
 }

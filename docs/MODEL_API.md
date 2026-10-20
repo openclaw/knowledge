@@ -277,6 +277,12 @@ normal authorized scans perform reconciliation and Git checkpointing. They do no
 create a background identity with broader access or scan other conversations.
 Reconnect, manual refresh, and a 30-second visible-page fallback request current
 snapshots, covering missed/coalesced notifications and backend-only reloads.
+Every refresh reads through the store's single lane, where it delays the
+operator's own navigation, so open views coalesce change hints into one trailing
+refresh per 750 ms quiet period (at most 3 s after the first hint). While the
+document is hidden or the host is not presenting the view, hints are only
+remembered; becoming visible or presented again runs one refresh. A maintenance
+pass that links nothing does not emit a change hint.
 `status.live` reports `watching`, `unavailable`, or `stopped`; unavailable watchers
 are retried on the next authorized private status read. Conversation tools still
 reconcile their own partition on demand; they do not run private reconciliation.

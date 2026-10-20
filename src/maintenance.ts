@@ -82,13 +82,14 @@ export class Maintenance {
         for (const scope of partitions) {
           result.partitions++;
           const { runtime, access } = this.stores.openMaintenance(target.vaultId, scope, epoch);
-          let cursor: string | undefined;
+          let cursor: string | undefined, linked = 0;
           do {
             const out: RelinkOutput = await runtime.enqueue(access.assertCurrent, () => runtime.client.call("maintenanceRelink", access, { limit: RELINK_PAGE, ...(cursor ? { cursor } : {}) }));
-            result.scanned += out.scanned; result.linked += out.linked; result.ambiguous += out.ambiguous; result.noSubject += out.noSubject; result.failed += out.failed;
+            result.scanned += out.scanned; result.linked += out.linked; linked += out.linked; result.ambiguous += out.ambiguous; result.noSubject += out.noSubject; result.failed += out.failed;
             cursor = out.nextCursor ?? undefined;
           } while (cursor);
-          if (scope.visibility === "private") runtime.live.invalidate();
+          // A pass that linked nothing changed nothing; do not make open views refresh.
+          if (linked && scope.visibility === "private") runtime.live.invalidate();
         }
       } catch (e) {
         // Reload or reassignment ends the whole pass; anything else is this store's failure.

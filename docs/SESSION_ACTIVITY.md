@@ -43,7 +43,8 @@ ID. The default is newest first; Oldest first reverses the loaded window. Load
 more to inspect earlier windows. Cursor pages pin an upper sequence so new events
 do not duplicate or skip entries. Reopening the panel starts at the latest window.
 Ten-second polling runs only while presented, visible, connected, and on the newest
-window; browsing earlier activity is not collapsed by background refresh.
+window; browsing earlier activity is not collapsed by background refresh. Vault
+change hints are coalesced like the explorer's (see MODEL_API.md, Live state).
 Ordinary host render updates do not refetch activity. Reopening the panel does.
 Updates are automatic; there is no manual Refresh control. Inline previews and
 full-page navigation are unchanged.
