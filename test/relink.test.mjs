@@ -93,3 +93,12 @@ test('relink ignores claims that knowledge_remember did not save', async t => {
   assert.equal(out.scanned, 0);
   assert.equal(await f.entities(authored.id), undefined, 'Deliberately unlinked authored claims are not maintenance targets');
 });
+
+test('relink treats plural weekdays and time words as common words, not competing names', async t => {
+  const f = await fixture(t);
+  const rota = (await f.remember('The on-call rotation for Harbor Works moved to Tuesdays.')).items[0].id;
+  const harbor = await f.page('Harbor Works');
+  const run = await f.relink({});
+  assert.deepEqual([run.linked, run.ambiguous, run.noSubject], [1, 0, 0]);
+  assert.deepEqual(await f.entities(rota), [harbor.id]);
+});

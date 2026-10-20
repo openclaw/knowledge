@@ -37,9 +37,10 @@ const COMMON_WORDS = new Set([
   "next", "new", "old", "good", "bad", "great", "nice", "thing", "something", "anything",
 ]);
 
-/** True for frequent non-name words (weekdays, months, time words) that get capitalized. */
+/** True for frequent non-name words (weekdays, months, time words) that get capitalized, and their plurals ("Tuesdays"). */
 export function isCommonCapitalizedWord(token: string): boolean {
-  return COMMON_WORDS.has(token.toLowerCase());
+  const lc = token.toLowerCase();
+  return COMMON_WORDS.has(lc) || (lc.length > 3 && lc.endsWith("s") && COMMON_WORDS.has(lc.slice(0, -1)));
 }
 
 const HANDLE_RE = /@([A-Za-z0-9_]{2,})/g;
@@ -89,7 +90,7 @@ export function nameCandidates(text: string): NameCandidate[] {
   for (const c of seen.values()) {
     const lc = c.query.toLowerCase();
     // Multi-token runs are high-signal; single tokens get the strict filters.
-    if (!c.multiToken && (c.query.length < 2 || /^[0-9][0-9.,]*$/u.test(c.query) || STOPWORDS.has(lc) || (COMMON_WORDS.has(lc) && !c.midSentence))) continue;
+    if (!c.multiToken && (c.query.length < 2 || /^[0-9][0-9.,]*$/u.test(c.query) || STOPWORDS.has(lc) || (isCommonCapitalizedWord(lc) && !c.midSentence))) continue;
     out.push({ query: c.query, ...(!c.multiToken && !c.midSentence ? { sentenceStart: true as const } : {}) });
     if (out.length >= MAX_CANDIDATES) break;
   }
