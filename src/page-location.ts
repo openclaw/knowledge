@@ -4,7 +4,7 @@ export type KnowledgeLocation = {
   vault: string;
   tab: "recent" | "browse" | "search" | "settings";
   record: string;
-  section: "stores" | "vocab" | "status";
+  section: "stores" | "vocab" | "status" | "maintenance";
   kind: "page" | "claim" | "relationship";
   type: string;
   query: string;
@@ -31,7 +31,7 @@ export function readLocation(params: Readonly<Record<string, string>> = {}): Kno
   return {
     agent: text(params.agent, 64), vault: text(params.vault, 120),
     tab, record: text(params.record, 96),
-    section: params.section === "vocab" || params.section === "status" ? params.section : "stores",
+    section: params.section === "vocab" || params.section === "status" || params.section === "maintenance" ? params.section : "stores",
     kind: params.kind === "claim" || params.kind === "relationship" ? params.kind : "page",
     type: text(params.type, 64), query: text(params.q, 200), filter: text(params.filter, 200),
     history: params.history === "1", origin: ["source", "user_belief", "agent_inference"].includes(params.origin) ? params.origin : "",

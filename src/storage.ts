@@ -13,7 +13,7 @@ import { appendActivity, sessionActivity, returnedRecords, type ActivityOrigin, 
 import { verifyRecords } from "./verification.js";
 import { BatchInput, SourceCheckInput, VerifyInput, type SourceIdentity, type VerifyOutput } from "./ingestion-contract.js";
 import { recordPath } from "./record-path.js";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { connections } from "./connections.js";
 import { annotationEvidence, annotationProblems } from "./annotations.js";
 import { recentActivity, type RecentInput } from "./recent.js";
@@ -354,6 +354,15 @@ export class KnowledgeStorage {
     });
     const unlinked = items.filter(i => i.subject === "ambiguous" || i.subject === "missing").length, inferred = items.filter(i => i.subject === "inferred").length;
     return { items, receipt, message: `${items.filter(i => i.status === "inserted").length} saved, ${items.filter(i => i.status === "duplicate").length} already saved${inferred ? `, ${inferred} linked by inference from the text` : ""}${unlinked ? `, ${unlinked} unlinked because the subject did not match exactly one page` : ""}. A published receipt is a completed save.` };
+  }
+  /** Partitions present in this store: private and each conversation directory. */
+  partitions(): import("./access.js").Partition[] {
+    const found: import("./access.js").Partition[] = existsSync(path.join(this.config.root, "private")) ? [{ visibility: "private" }] : [];
+    const conversations = path.join(this.config.root, "conversations");
+    if (existsSync(conversations)) for (const entry of readdirSync(conversations, { withFileTypes: true })) {
+      if (entry.isDirectory() && /^[a-f0-9-]{36}$/.test(entry.name)) found.push({ visibility: "conversation", sessionId: entry.name });
+    }
+    return found;
   }
   /**
    * Link unlinked remembered claims to the one entity page each names, within

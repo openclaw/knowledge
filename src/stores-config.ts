@@ -20,18 +20,31 @@ export const PluginConfig = Type.Object({
   operatorRead: Type.Optional(Type.Boolean()),
   writesEnabled: Type.Optional(Type.Boolean()),
   stores: Type.Optional(StoresSection),
+  maintenance: Type.Optional(Type.Object({
+    enabled: Type.Optional(Type.Boolean({ description: "Run the scheduled maintenance pass over every configured store. Default true." })),
+    schedule: Type.Optional(Type.String({ minLength: 9, maxLength: 100, description: "Five-field cron expression. Default 30 3 * * * (03:30 daily)." })),
+    timezone: Type.Optional(Type.String({ minLength: 1, maxLength: 100, description: "IANA time zone for the schedule. Default: the Gateway host's time zone." })),
+  }, { additionalProperties: false })),
 }, { additionalProperties: false });
 export type PluginConfig = Static<typeof PluginConfig>;
-export type Policy = { operatorRead: boolean; writesEnabled: boolean };
+/** Scheduled maintenance settings; validated when scheduling, so a bad
+ * expression is reported in the UI instead of disabling the plugin. */
+export type MaintenanceSettings = { enabled: boolean; schedule: string; timezone: string };
+export type Policy = { operatorRead: boolean; writesEnabled: boolean; maintenance: MaintenanceSettings };
+export const DEFAULT_MAINTENANCE_SCHEDULE = "30 3 * * *";
 
 /** Config path owned by the no-reload rule and every membership write. */
 export const STORES_CONFIG_PATH = ["plugins", "entries", "knowledge", "config", "stores"] as const;
 
-/** Plugin-wide gates. Both default on so a fresh install works without authoring config. */
+/** Plugin-wide gates. All default on so a fresh install works without authoring config. */
 export function parsePolicy(config: Record<string, unknown> | undefined): Policy {
   const value = config ?? {};
   if (!Check(PluginConfig, value)) throw Error("Knowledge configuration is invalid; review plugins.entries.knowledge.config.");
-  return { operatorRead: value.operatorRead ?? true, writesEnabled: value.writesEnabled ?? true };
+  const maintenance = value.maintenance ?? {};
+  return { operatorRead: value.operatorRead ?? true, writesEnabled: value.writesEnabled ?? true, maintenance: {
+    enabled: maintenance.enabled ?? true, schedule: maintenance.schedule ?? DEFAULT_MAINTENANCE_SCHEDULE,
+    timezone: maintenance.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
+  } };
 }
 
 /** Read the authored `stores` section out of a full host config snapshot. */

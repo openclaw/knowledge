@@ -76,6 +76,13 @@ export function memoryPrincipal(context: MemoryCallerContext, requestedAgent: st
   };
 }
 
+/** Scheduled maintenance acts on one store partition with no session,
+ * operator or tool behind it. Only the plugin's own service code mints it
+ * (Stores.openMaintenance); no feature, tool or provider path resolves to it,
+ * and its writes are attributed to "maintenance", never an agent. */
+export const MAINTENANCE_AGENT = "knowledge-maintenance";
+export function maintenancePrincipal(scope: Partition): Principal { return { agentId: MAINTENANCE_AGENT, scope }; }
+
 /** Whether a feature caller may change store assignments (spec §7). */
 export function canChangeAssignments(context: FeatureInvocationContext): boolean {
   return context.source === "session-action" && Boolean(context.action.client?.connId) && Boolean(context.action.client?.scopes.includes("operator.admin"));

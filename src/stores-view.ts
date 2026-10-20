@@ -65,8 +65,8 @@ export function storeNotice(entry: StoreEntry | undefined, state: string, messag
   return panel;
 }
 
-export type SettingsSection = "stores" | "vocab" | "status";
-const SECTIONS: [SettingsSection, string, IconName][] = [["stores", "Stores & sharing", "users"], ["vocab", "Vocabulary", "book"], ["status", "Vault status", "activity"]];
+export type SettingsSection = "stores" | "vocab" | "status" | "maintenance";
+const SECTIONS: [SettingsSection, string, IconName][] = [["stores", "Stores & sharing", "users"], ["vocab", "Vocabulary", "book"], ["status", "Vault status", "activity"], ["maintenance", "Maintenance", "calendarClock"]];
 /** Settings shell: section navigation plus a content slot the caller fills. */
 export function settingsShell(section: SettingsSection, go: (section: SettingsSection) => void, back: () => void, heading: [string, string], issues = 0) {
   const root = el("div", undefined, "knowledge-settings");
@@ -280,4 +280,29 @@ export function vaultFacts(rows: [string, string | Node][]) {
   const grid = el("dl", undefined, "knowledge-surface knowledge-facts");
   for (const [key, value] of rows) { const item = el("div"); item.append(el("dt", key)); const dd = el("dd"); dd.append(value); item.append(dd); grid.append(item); }
   return grid;
+}
+
+type Maintenance = FeatureOutput<typeof contract, "maintenance_status">;
+/** Scheduled maintenance: schedule, next and last pass, and each store's result (spec §11). */
+export function maintenanceSection(status: Maintenance, when: (iso: string) => string) {
+  const root = el("div");
+  const schedule = status.configError ? `Not scheduled: ${status.configError}` : !status.writesEnabled ? "Off: Knowledge writes are disabled" : !status.enabled ? "Off" : `${status.schedule} · ${status.timezone}`;
+  const last = status.lastRun;
+  root.append(vaultFacts([
+    ["Jobs", status.jobs.map(job => job === "relink" ? "Link remembered claims to the one page they name" : job).join(", ")],
+    ["Schedule", schedule],
+    ["Next run", status.running ? "Running now" : status.nextRunAt ? when(status.nextRunAt) : "Not scheduled"],
+    ["Last run", last ? `${when(last.finishedAt)} · ${last.trigger === "catch-up" ? "caught up after a missed run" : "on schedule"} · ${last.linked} claim${last.linked === 1 ? "" : "s"} linked` : "Not run yet"],
+    ["Runs on", "Every store you have defined, each conversation partition inside it. Stores not created yet are skipped. Not listed on the Automations page."],
+  ]));
+  if (last) {
+    const section = el("section", undefined, "knowledge-findings"); section.append(el("h3", `Stores · ${last.vaults.length}`, "knowledge-eyebrow"));
+    if (!last.vaults.length) section.append(el("p", "No stores are defined.", "knowledge-muted"));
+    for (const vault of last.vaults) {
+      const counts = vault.outcome === "ok" ? `${vault.linked} linked · ${vault.ambiguous} ambiguous · ${vault.noSubject} no page named${vault.failed ? ` · ${vault.failed} changed, retried next run` : ""} · ${vault.scanned} checked in ${vault.partitions} partition${vault.partitions === 1 ? "" : "s"}` : vault.message ?? "";
+      section.append(el("p", `${vault.label} · ${vault.outcome === "ok" ? "Done" : vault.outcome === "skipped" ? "Skipped" : "Failed"} · ${counts}`));
+    }
+    root.append(section);
+  }
+  return root;
 }

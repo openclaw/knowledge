@@ -1,7 +1,7 @@
 import path from "node:path";
 import { listAgentIds, tryResolveDefaultAgentId } from "openclaw/plugin-sdk/agent-scope-runtime";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
-import { pinPrincipal, type Principal, type VaultAccess } from "./access.js";
+import { maintenancePrincipal, pinPrincipal, type Partition, type Principal, type VaultAccess } from "./access.js";
 import { RegistryClient } from "./registry-client.js";
 import { bindingState, type RegistrySnapshot } from "./store-registry.js";
 import { StoreRuntime } from "./store-runtime.js";
@@ -166,6 +166,41 @@ export class Stores {
     access.assertCurrent();
     return { kind: "ready", runtime, access, binding };
   }
+  /**
+   * Every store the operator has defined that maintenance may visit: each
+   * configured agent's effective store and every named store, deduplicated by
+   * physical store. Stores that are not ready are reported, never created.
+   */
+  async maintenanceTargets(): Promise<{ binding: string; label: string; vaultId?: string; state: Exclude<StoreState, "ready"> | "ready" }[]> {
+    const snapshot = await this.ensure(), membership = this.membership();
+    const bindings = new Set<string>([
+      ...this.agents().filter(agent => agentIdPattern.test(agent)).map(agent => effectiveBinding(membership, agent)).filter((b): b is NonNullable<typeof b> => Boolean(b)),
+      ...Object.keys(membership.section).map(key => `named:${key}`),
+    ]);
+    const seen = new Set<string>(), targets: Awaited<ReturnType<Stores["maintenanceTargets"]>> = [];
+    for (const binding of [...bindings].sort()) {
+      const [kind, key] = binding.split(/:(.*)/s) as [string, string];
+      const label = kind === "named" ? membership.section[key]?.label ?? key : `${key} (agent store)`;
+      const state = bindingState(snapshot, binding, false), vaultId = snapshot.bindings[binding];
+      if (vaultId && seen.has(vaultId)) continue;
+      if (vaultId) seen.add(vaultId);
+      targets.push({ binding, label, state, ...(vaultId ? { vaultId } : {}) });
+    }
+    return targets;
+  }
+  /** Maintenance access to one partition of a ready store. Never provisions.
+   * Fails once the service reloads, the store is reassigned or retired. */
+  openMaintenance(vaultId: string, scope: Partition, epoch = this.epoch): { runtime: StoreRuntime; access: VaultAccess } {
+    this.assertLive(epoch);
+    const bound = () => Object.values(this.registry.current?.bindings ?? {}).includes(vaultId);
+    if (!bound() || !this.registry.current?.stores[vaultId]) throw reassigned();
+    const runtime = this.runtime(vaultId);
+    const access: VaultAccess = { ...maintenancePrincipal(scope), assertCurrent: () => {
+      this.assertLive(epoch);
+      if (!bound() || runtime.retired) throw reassigned();
+    } };
+    return { runtime, access };
+  }
   // Concurrent first uses of one binding share one provisioning attempt.
   private provision(binding: string): Promise<RegistrySnapshot> {
     let attempt = this.provisioning.get(binding);
@@ -186,6 +221,8 @@ export class Stores {
     }
     return runtime;
   }
+  /** Stop runtimes that only maintenance started; stores serving agents keep running. */
+  releaseIdle() { return this.retireUnused(); }
   /** Running runtime for a store, without starting one. */
   running(vaultId: string) { return this.runtimes.get(vaultId); }
   /** Wait for every running store's queued work (memory-provider reload drain). */

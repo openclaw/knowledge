@@ -13,13 +13,14 @@ import { contract } from "./contract.js";
 import { featurePrincipal, type VaultAccess } from "./access.js";
 import { parsePolicy } from "./stores-config.js";
 import { Stores } from "./stores.js";
+import { Maintenance } from "./maintenance.js";
 import { createStoreOperations } from "./store-assignments.js";
 import type { StoreRuntime } from "./store-runtime.js";
 import type { StoreState } from "./stores-contract.js";
 import type { StorageOperations } from "./storage-host.js";
 
 type Handlers = FeatureHandlers<typeof contract>;
-type StoreHandlers = Omit<Handlers, "stores_snapshot" | "stores_change" | "stores_change_status" | "agent_query" | "agent_action">;
+type StoreHandlers = Omit<Handlers, "stores_snapshot" | "stores_change" | "stores_change_status" | "agent_query" | "agent_action" | "maintenance_status">;
 const WRITE_TOOLS = ["knowledge_remember", "knowledge_relink", "knowledge_edit_body", "knowledge_reconcile_evidence", "knowledge_save_page", "knowledge_correct", "knowledge_withdraw", "knowledge_merge", "knowledge_unmerge", "knowledge_recall"];
 const chatOnly = () => Error("Knowledge changes must be requested through chat and agent tools.");
 const operatorOnly = () => Error("Selecting an agent's store is an operator inspection; it is not available to agent tools.");
@@ -59,7 +60,10 @@ export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureE
       providerFlushPlanResolver: () => policy.writesEnabled ? buildKnowledgeMemoryFlushPlan() : null,
     });
   }
-  api.registerService?.({ id: "knowledge:live-state", start() { stores.start(); }, stop() { stores.stop(); } });
+  const maintenance = new Maintenance(stores, { info: m => api.logger?.info?.(m), warn: m => api.logger?.warn?.(m) });
+  // The host service scheduler owns maintenance timing for this service
+  // lifetime; stop() retires its jobs. No cron job or conversation hook.
+  api.registerService?.({ apiVersion: 2, id: "knowledge:live-state", async start(ctx) { stores.start(); if (ctx?.scheduler) await maintenance.start(ctx.scheduler); }, stop() { stores.stop(); } });
 
   /** Handlers bound to one operator viewing selection. Tools always resolve
    * their store from the host audience; `agent` only applies to operators. */
@@ -196,5 +200,10 @@ export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureE
     if (!Check(operation.output, output)) throw Error(`Invalid output from ${input.operation}.`);
     return output;
   };
-  return { ...defaults, ...createStoreOperations(stores), agent_query: proxy("query"), agent_action: proxy("action") } as Handlers;
+  // Operator inspection of the plugin-wide maintenance schedule and last pass.
+  const maintenance_status = async (_: unknown, context: FeatureInvocationContext) => {
+    if (context.source !== "session-action" || !policy.operatorRead || !context.action.client?.connId || !context.action.client.scopes.some(s => s === "operator.read" || s === "operator.write" || s === "operator.admin")) throw Error("Maintenance status is available to authorized operators only.");
+    return maintenance.status();
+  };
+  return { ...defaults, ...createStoreOperations(stores), agent_query: proxy("query"), agent_action: proxy("action"), maintenance_status } as Handlers;
 }

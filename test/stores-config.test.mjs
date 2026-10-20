@@ -30,7 +30,9 @@ test('revision covers only the stores section and ignores key order', () => {
 });
 
 test('policy gates default on and reject retired config shapes', () => {
-  assert.deepEqual(parsePolicy(undefined), { operatorRead: true, writesEnabled: true });
-  assert.deepEqual(parsePolicy({ writesEnabled: false }), { operatorRead: true, writesEnabled: false });
+  const maintenance = { enabled: true, schedule: '30 3 * * *', timezone: Intl.DateTimeFormat().resolvedOptions().timeZone };
+  assert.deepEqual(parsePolicy(undefined), { operatorRead: true, writesEnabled: true, maintenance });
+  assert.deepEqual(parsePolicy({ writesEnabled: false }), { operatorRead: true, writesEnabled: false, maintenance });
+  assert.deepEqual(parsePolicy({ maintenance: { schedule: '*/5 * * * *', timezone: 'UTC' } }).maintenance, { enabled: true, schedule: '*/5 * * * *', timezone: 'UTC' });
   assert.throws(() => parsePolicy({ vault: {} }), /invalid/);
 });

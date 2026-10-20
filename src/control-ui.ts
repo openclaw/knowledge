@@ -15,7 +15,7 @@ import { foldTimeline } from "./timeline-fold.js";
 import { readLocation, locationParams, locationKey } from "./page-location.js";
 import { temporalFilterForm, temporalQuery, temporalSelectionError, type TemporalSelection } from "./search-date-filters.js";
 import { viewingClient } from "./store-view-client.js";
-import { accessText, settingsShell, storeBar, storeDialog, storeLabel, storeNotice, storeOf, storesSection, vaultFacts, type SettingsSection } from "./stores-view.js";
+import { accessText, maintenanceSection, settingsShell, storeBar, storeDialog, storeLabel, storeNotice, storeOf, storesSection, vaultFacts, type SettingsSection } from "./stores-view.js";
 import "./control-ui.css";
 
 type Summary = FeatureOutput<typeof contract, "records">["records"][number];
@@ -208,6 +208,7 @@ export default defineControlUiPlugin({
           stores: ["Stores & sharing", "Each agent gets its own knowledge store unless you assign it to a shared one."],
           vocab: ["Vocabulary", `The kinds of pages and connections ${who} can save${entry ? ` in ${storeLabel(entry, displayName)}` : ""}.`],
           status: ["Vault status", entry ? `Showing ${storeLabel(entry, displayName)}, the store ${who} uses.` : `Showing ${who}’s store.`],
+          maintenance: ["Maintenance", "A scheduled pass that tidies every store. It never calls a model and never creates a store."],
         };
         const shell = settingsShell(settingsSection, section => { settingsSection = section; void load(); }, () => navigate("recent"), heading[settingsSection]);
         if (settingsSection === "stores") {
@@ -217,6 +218,9 @@ export default defineControlUiPlugin({
               change => base.invoke("stores_change", { requestId: crypto.randomUUID(), expectedRevision: storesSnapshot!.revision, agent: changing, change }),
               result => assignmentApplied(result, changing));
           }));
+        } else if (settingsSection === "maintenance") {
+          const status = await base.invoke("maintenance_status", {}); if (!live(n)) return;
+          shell.slot.append(maintenanceSection(status, at => `${new Date(at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}, ${time(at)}`));
         } else if (storeState !== "ready") {
           shell.slot.append(storeNotice(entry, storeState, storeMessage, who, displayName, () => openSettings("stores"), () => void refresh()));
         } else if (settingsSection === "vocab") {

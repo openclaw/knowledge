@@ -9,6 +9,7 @@ import { BatchInput, SourceCheckInput, SourceCheckOutput, VerifyInput, VerifyOut
 import { ConnectionsInput, ConnectionsOutput } from "./connections-contract.js";
 import { RecentInput, RecentOutput } from "./recent.js";
 import { RelinkInput, RelinkOutput } from "./relink-contract.js";
+import { MaintenanceStatus } from "./maintenance-contract.js";
 import { RememberInput, RememberOutput } from "./remember-contract.js";
 import { AttachInput, AttachOutput, AttachmentInput, AttachmentOutput } from "./attachment-contract.js";
 import { SearchInput, SearchOutput, LookupInput, LookupOutput } from "./retrieval-contract.js";
@@ -209,6 +210,10 @@ export const contract = defineFeatureContract({
       input: empty,
       output: Type.Object({ issues, total: Type.Integer(), truncated: Type.Boolean(), checkedAt: text(40), mergeCandidates: Type.Optional(Type.Array(MergeCandidate, { maxItems: 100 })) }),
       tool: { name: "knowledge_diagnostics", label: "Vault diagnostics" },
+    },
+    maintenance_status: {
+      kind: "query", description: "Operator view of the scheduled maintenance pass: schedule, next run, and the last pass per store.",
+      input: empty, output: MaintenanceStatus,
     },
     stores_snapshot: {
       kind: "query", description: "Operator settings: agents, effective store assignments and store inventory. Never creates storage.",

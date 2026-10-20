@@ -39,6 +39,7 @@ export const operations = {
   createRelationship: (s: Storage, a: Access, input: { value: In<Storage["createRelationship"]>; actor: string }) => s.createRelationship(input.value, a, input.actor),
   remember: (s: Storage, a: Access, input: In<Storage["remember"]>) => s.remember(input, a, "agent"),
   relink: (s: Storage, a: Access, input: In<Storage["relink"]>) => s.relink(input, a, "agent"),
+  partitions: (s: Storage) => s.partitions(),
   maintenanceRelink: (s: Storage, a: Access, input: In<Storage["relink"]>) => s.relink(input, a, "maintenance"),
   correct: (s: Storage, a: Access, input: In<Storage["correct"]>) => s.correct(input, a, "agent"),
   withdraw: (s: Storage, a: Access, input: In<Storage["withdraw"]>) => s.withdraw(input, a, "agent"),
