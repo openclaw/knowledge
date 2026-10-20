@@ -162,7 +162,7 @@ test('native feature adapter accepts full-size upload and download chunks', asyn
   const f = await fixture(t), actions = new Map();
   const { default: plugin } = await import('../dist/index.js');
   plugin.register({ ...f.api, id: "knowledge", registerService() {}, registerTool() {},
-    registerSessionAction(action) { actions.set(action.id, action); } });
+    session: { controls: { registerSessionAction(action) { actions.set(action.id, action); } } } });
   const invoke = async (name, payload) => {
     const response = await actions.get(name).handler({ ...f.owner.action, payload });
     assert.equal(response.ok, true, response.error);
@@ -186,7 +186,7 @@ test('native feature adapter accepts full-size upload and download chunks', asyn
 test('agent download JSON survives the dynamic-tool response budget with continuation intact', async t => {
   const f = await fixture(t), factories = new Map(), sessionId = randomUUID();
   const { default: plugin } = await import('../dist/index.js');
-  plugin.register({ ...f.api, id: 'knowledge', registerService() {}, registerSessionAction() {},
+  plugin.register({ ...f.api, id: 'knowledge', registerService() {}, session: { controls: { registerSessionAction() {} } },
     registerTool(factory, options) { factories.set(options.name, factory); } });
   const tool = factories.get('knowledge_attachment')({ agentId: 'main', sessionId,
     sessionKey: 'agent:main:download-budget', memoryAudience: { kind: 'owner-private', agentId: 'main' },

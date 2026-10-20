@@ -24,7 +24,7 @@ async function fixture(t) {
   function restart() {
     actions = new Map();
     plugin.register({ ...api, registerService() {}, registerTool() {},
-      registerSessionAction(action) { actions.set(action.id, action); } });
+      session: { controls: { registerSessionAction(action) { actions.set(action.id, action); } } } });
   }
   restart();
   async function call(name, payload = {}) {
