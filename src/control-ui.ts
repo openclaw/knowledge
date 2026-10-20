@@ -601,7 +601,7 @@ export default defineControlUiPlugin({
         }
         const claimSurface = el("div", undefined, "knowledge-surface knowledge-claim-groups"); claims.append(claimSurface);
         const connectionLoading = loadingPlaceholder("rows", "Loading connections…", 3); refs.append(connectionLoading);
-        const claimsLoading = loadingPlaceholder("cards", "Loading saved claims…", 2); if (r.kind === "page") claimSurface.append(claimsLoading);
+        const claimsLoading = loadingPlaceholder("cards", "Loading saved claims…", 2); if (r.kind === "page" && !merged) claimSurface.append(claimsLoading);
         // Claims and rail connections page independently. A single mixed stream
         // let a page of claims crowd out every relationship, so a person with
         // many claims showed no attendance. Dependents are omitted: they repeat
@@ -664,10 +664,6 @@ export default defineControlUiPlugin({
         const pageLoader = (loader: () => Promise<void>, control: () => HTMLButtonElement, section: HTMLElement) => () => { ++connectionPages; control().disabled = true; void loader().catch(error => { section.append(failure(error)); }).finally(() => { control().disabled = false; }); };
         const loadMore = button("More connections", pageLoader(moreConnections, () => loadMore, connections));
         const moreClaimsButton = button("More claims", pageLoader(moreClaims, () => moreClaimsButton, claims), "knowledge-quiet");
-<<<<<<< HEAD
-        if (merged) refs.remove();
-        else pending.push((async () => {
-=======
         // Each panel owns its failure and retry; a slow sibling keeps its placeholder.
         const readPanel = async (read: () => Promise<void>, placeholder: HTMLElement, section: HTMLElement, name: string) => {
           try { await read(); }
@@ -680,19 +676,14 @@ export default defineControlUiPlugin({
             }, "knowledge-quiet"));
           }
         };
-        pending.push(readPanel(async () => {
->>>>>>> 41542d7 (fix: keep Knowledge loading scoped to affected panes (kn-341))
+        if (merged) refs.remove();
+        else pending.push(readPanel(async () => {
           for (let page = 0; page < pages; page++) {
             await moreConnections();
             if (!live(n) || !loadMore.parentElement) break;
           }
-<<<<<<< HEAD
-        })());
-        if (r.kind === "page" && !merged) pending.push((async () => {
-=======
         }, connectionLoading, refs, "connections"));
-        if (r.kind === "page") pending.push(readPanel(async () => {
->>>>>>> 41542d7 (fix: keep Knowledge loading scoped to affected panes (kn-341))
+        if (r.kind === "page" && !merged) pending.push(readPanel(async () => {
           for (let page = 0; page < pages; page++) {
             await moreClaims();
             if (!live(n) || claimOffset === null) break;
