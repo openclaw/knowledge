@@ -453,6 +453,19 @@ test('prompt routes all workflows, obeys citation settings and omits disabled sa
   assert.match(buildKnowledgeMemoryPrompt({ availableTools: new Set(['knowledge_recall']) }).join('\n'), /owner asks.*recalled automatically/);
 });
 
+test('prompt names repository project keys only for remote keys, gated by the tools that use them', () => {
+  const tools = new Set(Object.values(contract.operations).flatMap(o => o.tool ? [o.tool.name] : []));
+  const prompt = (projectKey, available = tools) => buildKnowledgeMemoryPrompt({ availableTools: available, projectKey }).join('\n');
+  const full = prompt('github.com/acme/widget');
+  assert.match(full, /repository key is `github\.com\/acme\/widget`, an alias of its project page: pass it as the knowledge_remember subject for claims about this repository's work, and omit it for claims about anything else/);
+  assert.match(full, /If no page answers to `github\.com\/acme\/widget`.*add it as an alias.*knowledge-entities/);
+  for (const key of [undefined, '', 'path:/srv/workspace', 'github.com/a<b', 'github.com/a\nb', 'github.com/a`b']) assert.doesNotMatch(prompt(key), /repository key|answers to `/);
+  assert.doesNotMatch(prompt('github.com/acme/widget', new Set(['knowledge_grep'])), /repository key|answers to `/);
+  const rememberOnly = prompt('github.com/acme/widget', new Set(['knowledge_grep', 'knowledge_remember']));
+  assert.match(rememberOnly, /repository key/);
+  assert.doesNotMatch(rememberOnly, /answers to `/);
+});
+
 
 // Storage runs in a worker, so this drives the provider with a stub storage
 // client: its own fencing is what must reject failures and late results.

@@ -127,6 +127,16 @@ mode is explicit. The host exposes tools but no enabled-skill inventory, so skil
 references are conditional on availability and associated tools, not a guarantee
 that disabled skills were delivered.
 
+When the host supplies a repository `projectKey` (not a `path:` key), the prompt
+names it as the alias of the repository's project page and asks the agent to pass
+it as the `knowledge_remember` subject for claims about that repository's work, so
+those claims link by exact alias rather than name inference. Choosing that subject
+stays the agent's judgment: a repository run also produces claims about people and
+other projects, so Knowledge never applies the key as a default subject. Tool calls
+do not receive the key; only the prompt section does. With page tools available,
+the prompt also asks the agent to add the alias or create the project page when
+none answers to the key.
+
 Automatic injection uses only the summary explicitly approved through
 `knowledge_recall`; keyword search is not a trusted-instruction selection
 mechanism. Corrections require a new approval on the replacement record.
