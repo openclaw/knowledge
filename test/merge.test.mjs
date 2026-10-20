@@ -156,3 +156,12 @@ test('diagnostics report merge candidates; invalid merge metadata fails closed',
   assert.ok(issues.some(i => i.code === 'invalid-merge'));
   assert.equal((await f.call('lookup', { query: owned.id })).outcome, 'missing');
 });
+
+test('recurring meetings that share a title are merge candidates only on the same day', async t => {
+  const f = await fixture(t);
+  const meeting = day => f.page('Daily Standup', { type: 'meeting', fields: { occurred_at: day } });
+  const a = await meeting('2026-10-01T16:00:00Z'), b = await meeting('2026-10-01T16:30:00Z');
+  await meeting('2026-10-02T16:00:00Z');
+  const candidates = (await f.call('diagnostics', {})).mergeCandidates;
+  assert.deepEqual(candidates.map(g => [g.key, g.pages.map(p => p.id).sort()]), [['Daily Standup', [a.id, b.id].sort()]]);
+});

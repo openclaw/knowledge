@@ -76,12 +76,18 @@ export function linkTargets<T extends LoadedRecord>(records: readonly LoadedReco
   return { candidates: [...current, ...records.filter(r => redirects.has(r.id))], canonical: (id: string) => redirects.get(id) ?? id };
 }
 
+// The calendar day a page records, from occurred_at metadata or field; "" when undated.
+function occurredDay(r: LoadedRecord): string {
+  const occurred = r.metadata.occurred_at ?? r.metadata.fields?.occurred_at;
+  return typeof occurred === "string" ? occurred.slice(0, 10) : "";
+}
+
 export type MergeCandidate = { type: string; key: string; strength: "identity-key" | "title"; pages: { id: string; title: string }[] };
 /** Groups of current pages of one type that share an identity-key alias (strong) or a title (weak). Never merges. */
 export function mergeCandidates(current: LoadedRecord[], limit = 100): MergeCandidate[] {
   const groups = new Map<string, MergeCandidate>();
-  const add = (r: LoadedRecord, strength: MergeCandidate["strength"], key: string) => {
-    const group = `${r.type}\0${strength}\0${normalize(key)}`;
+  const add = (r: LoadedRecord, strength: MergeCandidate["strength"], key: string, day = "") => {
+    const group = `${r.type}\0${strength}\0${normalize(key)}\0${day}`;
     const entry = groups.get(group) ?? { type: r.type, key, strength, pages: [] };
     if (!entry.pages.some(p => p.id === r.id)) entry.pages.push({ id: r.id, title: r.title });
     groups.set(group, entry);
@@ -89,7 +95,8 @@ export function mergeCandidates(current: LoadedRecord[], limit = 100): MergeCand
   for (const r of current) {
     if (r.kind !== "page" || r.lifecycle !== "active") continue;
     for (const alias of r.metadata.aliases ?? []) if (IDENTITY_KEY.test(alias.trim())) add(r, "identity-key", alias.trim());
-    add(r, "title", r.title);
+    // Recurring meetings share a title; only pages from the same day can be one record.
+    add(r, "title", r.title, occurredDay(r));
   }
   const found = [...groups.values()].filter(g => g.pages.length > 1);
   // A title group adds nothing when an identity key already groups the same pages.
