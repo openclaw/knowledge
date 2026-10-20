@@ -28,8 +28,10 @@ export class RealVault {
       return { manifest: { format: value.format, vaultId: value.vaultId, generation: value.generation, publicationId: value.publicationId }, rootPath, dev: stat.dev, ino: stat.ino };
     } catch { throw unavailable(); }
   }
-  async run<T>(access: VaultAccess, operation: (vault: SampleVault) => Promise<T>): Promise<T> {
-    access.assertCurrent();
+  /** `checked` is for callers that asserted authority in the same synchronous
+   * span; each assertion is a blocking round trip to the main thread. */
+  async run<T>(access: VaultAccess, operation: (vault: SampleVault) => Promise<T>, checked = false): Promise<T> {
+    if (!checked) access.assertCurrent();
     const before = await this.identity(), key = checkpointKey(this.config.vaultId);
     const existing = await this.identities.lookup(key);
     if (!existing) {

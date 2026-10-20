@@ -10,8 +10,26 @@ import { compactEvidence, expandEvidence, mapMetadataEvidence, SOURCE_DESCRIPTOR
 
 /** Stamp a descriptor only through guarded scope-local parent directories. */
 export function sourceDescriptorStamp(root: string, relative: string): string {
-  try { new PublicationFiles(root).guard(relative); return fileStamp(root, relative); }
-  catch { return "error:unsafe-or-missing-descriptor"; }
+  return sourceDescriptorStamper(root)(relative);
+}
+
+/** Stamps descriptors for one pass (a scan or its cache check), guarding each
+ * parent directory once instead of once per descriptor. Stamps only detect
+ * change; every descriptor read is still guarded on its own. */
+export function sourceDescriptorStamper(root: string): (relative: string) => string {
+  let files: PublicationFiles | undefined;
+  const guarded = new Map<string, boolean>();
+  return relative => {
+    const parent = relative.slice(0, relative.lastIndexOf("/") + 1);
+    let safe = guarded.get(parent);
+    if (safe === undefined) {
+      try { files ??= new PublicationFiles(root); files.guard(`${parent}probe`); safe = true; } catch { safe = false; }
+      guarded.set(parent, safe);
+    }
+    const name = relative.slice(parent.length);
+    if (!safe || !name || name === "." || name === ".." || /[\\\x00-\x1f]/.test(name)) return "error:unsafe-or-missing-descriptor";
+    return fileStamp(root, relative);
+  };
 }
 
 /** Read only a bounded, regular sidecar in the caller-selected scope. */

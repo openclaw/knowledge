@@ -64,6 +64,9 @@ export class KnowledgeStorage {
   // Content hash per authored file, valid while its stamp is unchanged, so Git
   // observation re-reads only files that changed since the last scan.
   private readonly observedHashes = new Map<string, { stamp: string; hash: string }>();
+  // Source descriptors each record depends on, valid while the record keeps its
+  // hash and every descriptor keeps the settled stamp this scan observed.
+  private readonly observedSources = new Map<string, { hash: string; sources: [path: string, stamp: string, hash: string][] }>();
   private readonly git: GitHistory;
   constructor(readonly config: StoreConfig, private readonly store = new SqliteIdentityStore(config.statePath), private readonly hook: PublicationHook = () => {}, git?: GitHistory) {
     this.git = git ?? new GitHistory(config.root);
@@ -72,7 +75,7 @@ export class KnowledgeStorage {
   async run<T>(access: VaultAccess, operation: (vault: SampleVault) => Promise<T>): Promise<T> {
     access.assertCurrent();
     this.assertReadable();
-    return this.real.run(access, operation);
+    return this.real.run(access, operation, true);
   }
   async trackRead<T>(access: VaultAccess, operation: string, read: () => T | Promise<T>): Promise<T> {
     const result = await read();
@@ -968,9 +971,11 @@ export class KnowledgeStorage {
           result = { state: e instanceof GitUnavailable ? "unavailable" : "pending", message: (e as Error).message.slice(0, 500) };
         }
         db.prepare("UPDATE git_jobs SET state=?,commit_id=?,message=? WHERE sequence=?").run(result.state, result.commit ?? null, result.message, job.sequence!);
-        for (const row of db.prepare("SELECT request,receipt FROM mutations WHERE scope=? AND state='published'").all(scope)) {
+        // Match on the request key first: receipt is stored after the large plan
+        // column, so reading it for every publication walks every plan.
+        for (const row of db.prepare("SELECT request FROM mutations WHERE scope=? AND state='published'").all(scope)) {
           if (this.publicationToken(scope, String(row.request)) !== job.token) continue;
-          const receipt: Receipt = JSON.parse(String(row.receipt)); receipt.git = result;
+          const receipt: Receipt = JSON.parse(String(db.prepare("SELECT receipt FROM mutations WHERE scope=? AND request=?").get(scope, row.request!)!.receipt)); receipt.git = result;
           db.prepare("UPDATE mutations SET receipt=? WHERE scope=? AND request=?").run(JSON.stringify(receipt), scope, row.request!);
         }
         if (result.state !== "committed") break;
@@ -980,6 +985,18 @@ export class KnowledgeStorage {
   private recordObservation(db: DatabaseSync, scope: string, r: LoadedRecord, provenance: string, agentId?: string) {
     db.prepare("INSERT INTO history(scope,id,provenance,at,path,revision,hash,raw,agent_id) VALUES (?,?,?,?,?,?,?,?,?)").run(scope, r.id, provenance, new Date().toISOString(), r.path, r.revision, r.hash, r.raw, agentId ?? null);
     db.prepare("INSERT OR REPLACE INTO observations VALUES (?,?,?,?,?,?)").run(scope, r.id, r.path, r.hash, r.revision, r.raw);
+  }
+  /** Content hashes of the source descriptors one record cites. Reuses the last
+   * result while the record is unchanged and the scan saw each descriptor with
+   * the same settled stamp; descriptor bytes are then the bytes hashed before. */
+  private sourceDependencies(r: LoadedRecord, key: string, evidence: EvidenceInspector): [string, string, string][] {
+    const relative = `${key}/${r.path}`, known = this.observedSources.get(relative);
+    if (known?.hash === r.hash && known.sources.every(([p, stamp]) => evidence.stamps.get(p) === stamp && settledStamp(stamp))) return known.sources;
+    const sources = Object.entries(recordSourceDependencies(r, p => readSourceDescriptor(path.join(this.config.root, key), p)))
+      .map(([p, raw]): [string, string, string] => [p, evidence.stamps.get(p) ?? "", digest(raw)]);
+    if (sources.every(([, stamp]) => settledStamp(stamp))) this.observedSources.set(relative, { hash: r.hash, sources });
+    else this.observedSources.delete(relative);
+    return sources;
   }
   private observe(records: LoadedRecord[], access: VaultAccess, evidence: EvidenceInspector) {
     const scope = access.scope;
@@ -1006,9 +1023,11 @@ export class KnowledgeStorage {
           current.set(relative, hash);
         }
         for (const relative of this.observedHashes.keys()) if (relative.startsWith(`${key}/`) && !current.has(relative)) this.observedHashes.delete(relative);
+        const present = new Set(records.map(r => `${key}/${r.path}`));
+        for (const relative of this.observedSources.keys()) if (relative.startsWith(`${key}/`) && !present.has(relative)) this.observedSources.delete(relative);
         for (const r of records) {
           if (current.get(`${key}/${r.path}`) !== r.hash) throw Error("Vault changed during Git observation.");
-          for (const [p, raw] of Object.entries(recordSourceDependencies(r, p => readSourceDescriptor(path.join(this.config.root, key), p)))) current.set(`${key}/${p}`, digest(raw));
+          for (const [p, , hash] of this.sourceDependencies(r, key, evidence)) current.set(`${key}/${p}`, hash);
           for (const file of [...(r.metadata.evidence ?? []), ...annotationEvidence(r.metadata)]) {
             if (!file.path.startsWith("artifacts/")) continue;
             const relative = `${key}/${file.path}`;

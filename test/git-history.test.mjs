@@ -184,3 +184,21 @@ test('read-side Git observes safe malformed Markdown and ontology without follow
   assert.deepEqual(git(f.root, 'ls-tree', '-r', '--name-only', 'HEAD').split('\n'), ['private/.extra.md', 'private/broken.md', 'private/ontology.yaml']);
   assert.equal(f.service.history(f.access, {}).git.state, 'committed');
 });
+
+test('observation re-resolves source descriptors when an external edit adds a record citation', async t => {
+  const { describeSource } = await import('../dist/source-descriptors.js');
+  const f = await fixture(t), saved = await f.service.save({ ...draft(), source: { text: 'Evidence bytes\n', attribution: 'Source' } }, f.access, 'agent');
+  // Settle every stamp so observation caches this record's dependencies.
+  t.mock.method(Date, 'now', () => 4102444800000);
+  const { source: first, ...origin } = (await f.read(saved.id)).metadata.evidence[0];
+  await f.read(saved.id);
+  const second = describeSource({ ...origin, attribution: 'Second origin' });
+  assert.notEqual(second.id, first);
+  await writeFile(path.join(f.root, 'private', second.path), second.raw);
+  const file = path.join(f.root, 'private', saved.path), raw = await readFile(file, 'utf8');
+  // Add a citation and keep the first, so every cached descriptor stamp still matches.
+  assert.ok(raw.includes(`  - source: ${first}\n`));
+  await writeFile(file, raw.replace(`  - source: ${first}\n`, `  - source: ${second.id}\n  - source: ${first}\n`));
+  assert.deepEqual((await f.read(saved.id)).metadata.evidence.map(e => e.attribution), ['Second origin', 'Source']);
+  assert.ok(git(f.root, 'ls-tree', '-r', '--name-only', 'HEAD').split('\n').includes(`private/${second.path}`), 'new dependency observed despite the warm cache');
+});

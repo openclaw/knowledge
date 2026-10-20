@@ -14,8 +14,10 @@ export const markdown = new Marked({ gfm: true, async: false, renderer: {
   },
   renderer: token => `<a href="${escapeHtml(wikiHref(token.target))}">${escapeHtml(token.label)}</a>`,
 }] });
-// Link extraction parses Markdown; reuse a record's parse while its body is unchanged.
-const extracted = new WeakMap<object, { body: string; hrefs: string[] }>();
+// Link extraction parses Markdown; reuse a body's parse across scans, which
+// copy records. Bounded, oldest first, so edits cannot grow it without limit.
+const extracted = new Map<string, string[]>();
+const EXTRACTED_MAX = 20_000;
 export function extractLinks(body: string): string[] {
   // Generated backlinks must not recursively create their own backlinks.
   const tokens = markdown.lexer(body).filter((() => {
@@ -65,9 +67,12 @@ function linkIndex(records: LinkRecord[]): LinkIndex {
  * both counts once, and a link whose final page is not among `records` is missing. */
 export function resolveLinks(record: LinkRecord, records: LinkRecord[], canonical?: (id: string) => string): LinkResolution[] {
   const results: LinkResolution[] = [], index = linkIndex(records);
-  let parsed = extracted.get(record);
-  if (parsed?.body !== record.body) { parsed = { body: record.body, hrefs: extractLinks(record.body) }; extracted.set(record, parsed); }
-  const hrefs = parsed.hrefs;
+  let hrefs = extracted.get(record.body);
+  if (!hrefs) {
+    hrefs = extractLinks(record.body);
+    if (extracted.size >= EXTRACTED_MAX) extracted.delete(extracted.keys().next().value!);
+    extracted.set(record.body, hrefs);
+  }
   for (const href of hrefs) {
     const wiki = href.startsWith("#wiki=");
     if (!wiki && (/^(?:[a-z][a-z0-9+.-]*:|\/|#)/i.test(href) || !/\.md(?:#.*)?$/i.test(href))) continue;

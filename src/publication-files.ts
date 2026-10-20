@@ -118,13 +118,16 @@ export class PublicationFiles {
     const entries: [string, string][] = []; let count = 0;
     const walk = (relative: string, depth = 0) => {
       if (depth > 8) throw Error("Vault directory depth exceeds 8");
-      let names: string[];
-      try { names = fs.readdirSync(path.dirname(this.guard(`${relative}/.probe`))); }
+      // Guard each directory once; its entries are then lstat'ed in place and
+      // subdirectories are guarded again when walked.
+      let names: string[], directory: string;
+      try { directory = path.dirname(this.guard(`${relative}/.probe`)); names = fs.readdirSync(directory); }
       catch (e) { if ((e as NodeJS.ErrnoException).code === "ENOENT") return; throw e; }
       for (const name of names.sort()) {
         if (name === ".knowledge-history" || name.toLowerCase() === ".git" || name === "artifacts") continue;
         if (++count > MAX_ENTRIES) throw Error(`Vault exceeds ${MAX_ENTRIES.toLocaleString("en-US")} entries`);
-        const target = `${relative}/${name}`, full = this.guard(target), stat = fs.lstatSync(full, { bigint: true });
+        if (/[\\\x00-\x1f]/.test(name)) throw Error("Unsafe publication path");
+        const target = `${relative}/${name}`, stat = fs.lstatSync(path.join(directory, name), { bigint: true });
         if (stat.isSymbolicLink() || (stat.isFile() && stat.nlink !== 1n)) {
           if (tolerateUnsafe) continue; // Read-side Git observation never follows unsafe entries.
           throw Error("Unsafe publication directory entry");

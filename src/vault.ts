@@ -1,5 +1,5 @@
 import { RECORD_MAX_BYTES, AUXILIARY_MAX_BYTES } from "./limits.js";
-import { hydrateMetadata, readSourceDescriptor, sourceDescriptorStamp } from "./source-records.js";
+import { hydrateMetadata, readSourceDescriptor, sourceDescriptorStamper } from "./source-records.js";
 import { queryFreshness } from "./query-freshness.js";
 import { readEvidence } from "./evidence-read.js";
 import { EvidenceReadInput } from "./evidence-read-contract.js";
@@ -56,8 +56,8 @@ export class SampleVault {
   async scan(overlay?: Overlay): Promise<ScanResult> {
     if (overlay || !this.cache || this.empty) return (await this.load(overlay)).data;
     // Stamp before reading so a change during the scan forces the next rescan.
-    const tree = this.treeStamp(), hit = this.cache.entry;
-    if (tree && hit?.tree === tree && [...hit.evidence].every(([file, stamp]) => settledStamp(stamp) && (file.startsWith("artifacts/sources/") ? sourceDescriptorStamp(this.root, file) : fileStamp(this.root, file)) === stamp)) return hit.data;
+    const tree = this.treeStamp(), hit = this.cache.entry, descriptorStamp = sourceDescriptorStamper(this.root);
+    if (tree && hit?.tree === tree && [...hit.evidence].every(([file, stamp]) => settledStamp(stamp) && (file.startsWith("artifacts/sources/") ? descriptorStamp(file) : fileStamp(this.root, file)) === stamp)) return hit.data;
     const { data, evidence } = await this.load();
     if (tree) this.cache.entry = { tree, evidence: evidence.stamps, data: freeze(data) };
     else this.cache.entry = undefined;
@@ -87,6 +87,7 @@ export class SampleVault {
     // One read per retained file for this scan; observation reuses the same checks.
     if (this.cache) { this.cache.files ??= new Map(); this.cache.evidence ??= new Map(); }
     const evidence = new EvidenceInspector(this.root, overlay ? undefined : this.cache?.evidence);
+    const descriptorStamp = sourceDescriptorStamper(this.root);
     const parsed = overlay ? undefined : this.cache?.files, seen = new Set<string>();
     const directory = this.empty ? null : await safeRoot(this.root);
     const records: LoadedRecord[] = [];
@@ -115,7 +116,7 @@ export class SampleVault {
           // taken before reading, so a change during the read forces a reparse.
           seen.add(file);
           const stamp = fileStamp(this.root, file), known = parsed?.get(file);
-          if (known && known.stamp === stamp && settledStamp(stamp) && [...known.descriptors].every(([p, s]) => settledStamp(s) && sourceDescriptorStamp(this.root, p) === s)) {
+          if (known && known.stamp === stamp && settledStamp(stamp) && [...known.descriptors].every(([p, s]) => settledStamp(s) && descriptorStamp(p) === s)) {
             for (const [p, s] of known.descriptors) evidence.stamps.set(p, s);
             if (known.record) records.push({ ...known.record });
             else add(file, "invalid-record", known.issue!);
@@ -146,7 +147,7 @@ export class SampleVault {
               continue;
             }
             metadata = hydrateMetadata(metadata, p => {
-              const stamp = sourceDescriptorStamp(this.root, p);
+              const stamp = descriptorStamp(p);
               descriptors.set(p, stamp); evidence.stamps.set(p, stamp);
               try { return overlay?.artifacts[p] ?? readSourceDescriptor(this.root, p); }
               catch (error) {
