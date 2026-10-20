@@ -6,7 +6,7 @@ import { evidenceView, originalDownload } from "./evidence-view.js";
 import { loadVocabulary } from "./inspection-client.js";
 import { ontologyView } from "./ontology-view.js";
 import { icon, type IconName } from "./ui-icons.js";
-import { confidenceView, identityTag, assertionOrigin as origin, agentDisplayName } from "./knowledge-presentation.js";
+import { confidenceView, displayAliases, identityTag, assertionOrigin as origin, agentDisplayName } from "./knowledge-presentation.js";
 import { formatSourceDate, sourceDateNote } from "./temporal.js";
 import { captureReadingState } from "./reading-state.js";
 import { markdownView } from "./markdown-view.js";
@@ -390,7 +390,8 @@ export default defineControlUiPlugin({
         const occurred = r.occurredAt ?? meta?.occurred_at ?? (typeof meta?.fields?.occurred_at === "string" ? meta.fields.occurred_at : undefined);
         if (occurred) { heading.append(el("p", `Occurred ${formatSourceDate(occurred)}`, "knowledge-occurred")); const note = sourceDateNote(occurred); if (note) heading.append(el("p", note, "knowledge-muted")); }
         const facts = el("div", undefined, "knowledge-inline-facts"); facts.append(el("span", label(r.type)));
-        if (meta?.aliases?.length) { const aliases = el("span", "Also called ", "knowledge-aliases"); for (const alias of meta.aliases) aliases.append(chip(alias)); facts.append(aliases); }
+        const names = displayAliases(r.title, meta?.aliases ?? [], (result.mergedFrom ?? []).map(page => page.title));
+        if (names.length) { const aliases = el("span", "Also called ", "knowledge-aliases"); for (const alias of names) aliases.append(chip(alias)); facts.append(aliases); }
         facts.append(identityTag(meta?.identity?.status));
         const fieldNodes = new Map<string, HTMLElement>();
         for (const [name, value] of Object.entries(meta?.fields ?? {})) { if (name === "occurred_at" || value === "" || value == null) continue; const node = el("span", `${human(name)}: ${name === "occurred_at" && typeof value === "string" ? formatSourceDate(value) : typeof value === "object" ? JSON.stringify(value) : value}`); fieldNodes.set(name, node); facts.append(node); }
@@ -413,7 +414,9 @@ export default defineControlUiPlugin({
         const reason = change && typeof change === "object" && "reason" in change && typeof change.reason === "string" ? change.reason : undefined;
         // A current claim's correction reason belongs with its versions; history keeps the notice.
         const reasonInVersions = r.kind === "claim" && r.lifecycle === "active" && Boolean(meta?.supersedes);
-        if (reason && !reasonInVersions) main.append(el("p", reason, "knowledge-notice"));
+        // A merge reason explains the banner above it rather than warning again.
+        if (reason && r.lifecycle === "merged") main.append(el("p", `Reason: ${reason}`, "knowledge-muted knowledge-merge-reason"));
+        else if (reason && !reasonInVersions) main.append(el("p", reason, "knowledge-notice"));
         if (typeof lifecycle?.superseded_by === "string") main.append(button("View replacement →", () => open(lifecycle.superseded_by as string), "knowledge-quiet"));
         if (typeof lifecycle?.supersedes === "string" && r.kind !== "claim") main.append(button("View original assertion", () => open(lifecycle.supersedes as string), "knowledge-quiet"));
         let versionsNode: HTMLElement | undefined;
@@ -492,7 +495,10 @@ export default defineControlUiPlugin({
           }
           main.append(candidates);
         }
-        if (r.kind === "page") main.append(body);
+        const merged = r.lifecycle === "merged";
+        // A merged page's notes are history; keep them readable but out of the way.
+        if (r.kind === "page" && merged) { const notes = el("details", undefined, "knowledge-merged-notes"), summary = el("summary"); notes.dataset.readingKey = `merged-notes:${id}`; summary.append(disclosureLabel("Notes from before the merge", "Hide notes")); notes.append(summary, body); main.append(notes); }
+        else if (r.kind === "page") main.append(body);
         else {
           const statement = el("section", undefined, "knowledge-statement"), surface = el("div", undefined, "knowledge-surface knowledge-claim-groups");
           if (r.kind !== "claim") statement.append(el("h3", "Relationship & evidence"));
@@ -505,8 +511,11 @@ export default defineControlUiPlugin({
         const knownFrom = el("span"); if (r.type === "person") facts.append(knownFrom);
         const owned = el("section"); owned.append(el("h3", `Commitments owned · owner only, not about ${r.title}`));
         const claims = el("section"), connections = el("section"), learned = el("section");
-        if (r.kind === "page") { claims.append(el("h3", `What ${agentName() ?? "your agent"} knows`)); main.append(claims, owned); owned.hidden = true; }
-        connections.append(el("h3", "Connections")); learned.append(el("h3", "Learned in"), el("p", "Conversation not recorded.", "knowledge-muted")); aside.append(connections, learned);
+        if (r.kind === "page" && !merged) { claims.append(el("h3", `What ${agentName() ?? "your agent"} knows`)); main.append(claims, owned); owned.hidden = true; }
+        connections.append(el("h3", "Connections"));
+        // Claims and connections naming a merged page resolve to the survivor, so they're listed there.
+        if (merged) { const survivor = result.mergedInto, moved = el("p", "Connections now appear on ", "knowledge-muted"); if (survivor) moved.append(button(survivor.title, () => open(survivor.id), "knowledge-quiet")); else moved.append("the page this was merged into."); connections.append(moved); }
+        learned.append(el("h3", "Learned in"), el("p", "Conversation not recorded.", "knowledge-muted")); aside.append(connections, learned);
         const files = el("details", undefined, "knowledge-file-details"); files.dataset.readingKey = `files:${id}`; files.dataset.preserveSignature = `${r.hash}:${r.valid}`; const fileSummary = el("summary", "File details"); fileSummary.append(icon("chevronDown", 12)); files.append(fileSummary);
         const filePanel = el("div", undefined, "knowledge-surface knowledge-file-panel"), fileActions = el("div", undefined, "knowledge-file-actions");
         const dl = el("dl"); for (const [label, value] of [["File", r.path], ["ID", r.id], ["Revision", String(r.revision)]]) dl.append(el("dt", label), el("dd", value));
@@ -645,13 +654,14 @@ export default defineControlUiPlugin({
         const pageLoader = (loader: () => Promise<void>, control: () => HTMLButtonElement, section: HTMLElement) => () => { ++connectionPages; control().disabled = true; void loader().catch(error => { section.append(failure(error)); }).finally(() => { control().disabled = false; }); };
         const loadMore = button("More connections", pageLoader(moreConnections, () => loadMore, connections));
         const moreClaimsButton = button("More claims", pageLoader(moreClaims, () => moreClaimsButton, claims), "knowledge-quiet");
-        pending.push((async () => {
+        if (merged) refs.remove();
+        else pending.push((async () => {
           for (let page = 0; page < pages; page++) {
             await moreConnections();
             if (!live(n) || !loadMore.parentElement) break;
           }
         })());
-        if (r.kind === "page") pending.push((async () => {
+        if (r.kind === "page" && !merged) pending.push((async () => {
           for (let page = 0; page < pages; page++) {
             await moreClaims();
             if (!live(n) || claimOffset === null) break;

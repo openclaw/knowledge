@@ -1,6 +1,25 @@
 import type { Envelope } from './model.js';
 import { icon } from './ui-icons.js';
 import type { ControlUiAgent } from 'openclaw/plugin-sdk/control-ui';
+import { IDENTITY_KEY } from './merge.js';
+/**
+ * Aliases worth showing as other names. Lookup still uses every alias; this hides
+ * account keys such as `discord:123`, titles of pages merged into this one, and
+ * disambiguating labels like "Jacob (standup participant)" whose base name is
+ * already the title or another shown alias.
+ */
+export function displayAliases(title: string, aliases: readonly string[], mergedTitles: readonly string[]) {
+  const key = (name: string) => name.normalize('NFKC').trim().replace(/\s+/gu, ' ').toLowerCase();
+  const merged = new Set(mergedTitles.map(key));
+  const hidden = (alias: string) => IDENTITY_KEY.test(alias.trim()) || merged.has(key(alias));
+  // Unlabelled names are the bases a labelled variant is checked against.
+  const known = new Set([title, ...aliases.filter(alias => !hidden(alias) && !/\s\(.+\)$/u.test(alias.trim()))].map(key));
+  return aliases.filter(alias => {
+    if (hidden(alias)) return false;
+    const labelled = /^(.+?)\s+\(.+\)$/u.exec(alias.trim());
+    return !labelled || !known.has(key(labelled[1]));
+  });
+}
 export function agentDisplayName(id: string | undefined, agents: readonly ControlUiAgent[]) {
   if (!id) return undefined;
   const agent = agents.find(agent => agent.id === id);
