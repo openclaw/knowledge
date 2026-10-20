@@ -53,6 +53,7 @@ is added.
 | bulk job checkpoints | Itemized agent work log + uploads and bounded `knowledge_publish_batch` receipts; journal resume is publication, not extraction-job progress |
 | aliases/tags/dependencies | Supported collection replacement through `knowledge_save_page`; omitted fields preserve existing values |
 | claim correction/withdrawal | `knowledge_correct` atomically replaces and supersedes a claim/edge; `knowledge_withdraw` retracts an exact record; page prose uses revision-fenced `knowledge_save_page` |
+| duplicate entity pages | `knowledge_merge` redirects one page to another on read (gbrain `merged_into` plus phantom redirect, without moving claims); `knowledge_unmerge` undoes it; see [IDENTITY_MERGE.md](IDENTITY_MERGE.md) |
 | media extraction/OCR/transcription | Host capability if available; otherwise source retention and explicit partial result. Dedicated media skill deferred |
 | curation/dreaming / automatic inbound enrichment | No broad profile research or scheduling; selected-provider ordinary-turn remembering uses knowledge-capture, while the host pre-compaction flush performs one bounded durable capture pass when vault writes are enabled |
 | push-before-link | Returned local path/ID or verified host link; no private-vault GitHub push to manufacture a URL |

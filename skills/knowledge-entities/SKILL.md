@@ -45,14 +45,23 @@ Run this chain in order, stopping at the first evidence-supported resolution:
 A name, email domain, filled role field or repeated copies of one assertion are
 not independent identity proof. Keep ambiguous candidates separate. An attendee
 roster is evidence of possible presence, not a mapping to a voice. Add spelling
-variants as aliases only after identity is established; aliases do not merge IDs.
+variants as aliases only after identity is established.
+
+Identity keys: when a source gives a stable account identifier, add it to the
+person's page as a namespaced alias (`discord:<user id>`, `github:<login>`,
+`email:<address>`, `slack:<user id>`) and `knowledge_lookup` that key before
+creating a page. One key on two pages is a duplicate. When two pages are
+confirmed to be one entity, merge them with `knowledge_merge` (see
+`knowledge-correct`); do not write pointer pages or correct claims one by one.
 
 For chat authors, use provider-scoped stable author IDs to connect messages across
 display-name changes. Resolve handles against existing pages and retained identity
 evidence; display names, mentions and name similarity alone do not identify a real
 person. An explicit user identification is attributable evidence: use
-`knowledge-correct` to reconcile an earlier unresolved or mistaken profile, then
-reuse the established person's page for subsequent enrichment. Preserve original
+`knowledge-correct` to reconcile an earlier unresolved or mistaken profile (merging
+its page into the established one), then reuse the established person's page for
+subsequent enrichment. A lookup that answers with `redirectedFrom` found a merged
+page; use the returned page's ID. Preserve original
 author labels and quotes in retained sources. Do not create another profile for
 an already resolved handle.
 

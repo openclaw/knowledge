@@ -11,7 +11,7 @@ One UTF-8 Markdown file per page, claim, or relationship. The file begins with a
 - `format: knowledge-record-v1`, opaque `id`, positive integer `revision`.
 - `kind: page | claim | relationship`, `title`, `recorded_at`, `updated_at` (UTC ISO timestamps).
 - Explicit `scope: { visibility: sample }` for these synthetic fixtures only.
-- `lifecycle: active | superseded | withdrawn`. Saved records have no candidate/accepted state or approval workflow. Legacy `acceptance` frontmatter is ignored for discovery and removed on the next journaled page save.
+- `lifecycle: active | superseded | withdrawn | merged`. Saved records have no candidate/accepted state or approval workflow. Legacy `acceptance` frontmatter is ignored for discovery and removed on the next journaled page save.
 - Optional `aliases`, `tags`, and stable-ID `dependencies`.
 
 A page has a declared domain `type` and ontology-defined `fields`. If the type is absent, ordered ontology path prefixes provide a read-time classification without rewriting metadata. Entity types are pages, not duplicate entity records. A project encompasses initiatives and workstreams; optional `fields.status` is active/paused/completed/cancelled, independent of record lifecycle.
@@ -126,6 +126,13 @@ explicit lifecycle change. These fields are written by `knowledge_correct` and
 `knowledge_withdraw`, not supplied as arbitrary metadata on create/page save.
 Reasons and originals remain inspectable; durable operational guards prevent stale
 active Markdown from clearing supersession/withdrawal. See [CORRECTIONS.md](CORRECTIONS.md).
+
+## Identity merge metadata
+
+A page merged into another has `lifecycle: merged` and `merged_into: <survivor ID>`;
+the survivor lists `merged_from` entries recording what each merge added. Both are
+written only by `knowledge_merge` and `knowledge_unmerge`. Reads resolve references
+to a merged page to its survivor. See [IDENTITY_MERGE.md](IDENTITY_MERGE.md).
 
 ## Markdown navigation and filenames
 

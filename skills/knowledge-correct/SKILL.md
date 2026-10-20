@@ -39,6 +39,13 @@ record exists or treat a retraction as evidence for its opposite.
 - **Page prose correction:** use ordinary revision-fenced `knowledge_save_page`,
   preserving unrelated authored material and sources. Page corrections are
   revisions, not replacement entity identities.
+- **Two pages for one entity:** call `knowledge_merge` with the surviving page,
+  the duplicate, both pages' current revision/hash and a reason. Keep the page
+  with the fuller identity (real name, more connections) as the survivor; pass
+  `title` to rename it and `body` when the combined page should say more than
+  the survivor's current prose. The duplicate's ID, title, aliases, claims,
+  relationships and links then resolve to the survivor; nothing is corrected one
+  by one. Undo a mistaken merge with `knowledge_unmerge`.
 
 An explicit user correction can supply evidence: retain their exact statement
 with `knowledge_attach`, attribute it to the user, and reference its verified
@@ -52,9 +59,13 @@ Use `knowledge-entities` to find and read the handle profile, the established
 person and their connected records. Retain the user's exact identification as
 evidence. Update supported aliases and identity context on the existing pages;
 preserve unrelated content and describe the connection to the established person.
-Use that person's existing ID for future enrichment. Aliases do not consolidate
-record IDs, and Knowledge has no identity-merge operation: keep separate pages
-explicitly linked rather than withdrawing one to simulate a merge.
+Use that person's existing ID for future enrichment. When the handle already has
+its own page, merge it into the established person's page with `knowledge_merge`
+instead of writing a pointer page, withdrawing it, or correcting its claims one by
+one. Merge only on identity evidence (the user's statement, a self-introduction, a
+shared stable account ID), never on name similarity; `knowledge_diagnostics`
+`mergeCandidates` lists pages to check, not pages to merge. Retain the identity
+evidence with `knowledge_attach` and pass it as `evidence`.
 
 Inspect affected prose, claims, timelines and relationships within the correction
 scope. Correct mistaken attribution and unresolved identity where the new evidence

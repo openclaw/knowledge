@@ -214,7 +214,8 @@ Capture never schedules work. Unresolved speakers remain attributed source label
 
 These create tools do not deduplicate semantically or overwrite claims. Use
 `knowledge_correct` for a revision-fenced evidence-backed replacement and
-`knowledge_withdraw` for an explicit retraction; follow the knowledge-correct skill.
+`knowledge_withdraw` for an explicit retraction, and `knowledge_merge` when two pages
+are one entity; follow the knowledge-correct skill.
 Use the same publication/retry/readback rules above. Inspect typed metadata with
 `knowledge_record` and incoming/outgoing edges, reverse dependencies or entity
 claims with `knowledge_connections`; paginate and verify evidence. Do not report

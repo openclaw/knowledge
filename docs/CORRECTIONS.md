@@ -36,6 +36,9 @@ revision-fenced page edits, not replacement entity identities. A page whose
 inactive dependency blocks discovery can still be edited by exact ID to repair
 its dependencies; new references must satisfy ordinary active-scope checks.
 
+Duplicate pages for one entity are merged, not corrected: `knowledge_merge` and
+`knowledge_unmerge` are described in [IDENTITY_MERGE.md](IDENTITY_MERGE.md).
+
 ## Portable lifecycle and inspection
 
 Original contents and evidence remain intact. A correction advances the old
