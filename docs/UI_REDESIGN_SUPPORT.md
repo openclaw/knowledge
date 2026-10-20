@@ -6,7 +6,7 @@ Status: implementation specification, **not a claim that these APIs have shipped
 
 Baseline inspected: `d176fbf9f605d27e339da7c44986d27cb91bd454`.
 
-Design input: the supplied `Openclaw design system.zip`, particularly
+Design input: the supplied `Openclaw design system.zip` ([retrieval](DESIGN_REFERENCE.md)), particularly
 `ui_kits/control-ui/KnowledgeV2Screen.jsx`, `knowledge-v2.html`, and
 `docs/knowledge-redesign-report.md`. This document resolves the report's open
 questions, corrects its assumptions against the baseline, and specifies the

@@ -37,8 +37,10 @@ implement maintenance itself. No changes to LCM ownership or its context slot.
 
 ## 2. Design reference and implementation baseline
 
-Archive: [`Openclaw design system.zip`](../Openclaw%20design%20system.zip). Reviewed
-SHA-256: `fc05abfc67704378c6784b5cd083fa26fe179ab6745d19b8a98fa8a4e015d2c2`.
+Archive: `Openclaw design system.zip`, retained in Git history; see
+[DESIGN_REFERENCE.md](DESIGN_REFERENCE.md) to retrieve it. Reviewed
+SHA-256: `fc05abfc67704378c6784b5cd083fa26fe179ab6745d19b8a98fa8a4e015d2c2`
+(not a committed version; the reference doc explains the difference).
 
 Use these files **inside the archive**:
 

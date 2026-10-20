@@ -1,11 +1,11 @@
 # Knowledge
 
-This branch adds optional selection as the host memory provider on the unreleased
-provider-neutral OpenClaw branch. Native tools and the read-only UI remain intact.
-See [Memory provider integration](docs/MEMORY_PROVIDER.md) for activation, authority,
-capabilities, and limitations. Building does not switch the live memory slot.
-
 Evidence-backed knowledge vault and native explorer for OpenClaw.
+
+Knowledge is a memory plugin (`kind: memory`): the host can select it for
+`plugins.slots.memory`, alongside its native tools and read-only UI. See
+[Memory provider integration](docs/MEMORY_PROVIDER.md) for activation, authority,
+capabilities, and limitations. Building does not switch the live memory slot.
 
 **Current milestone:** agent-driven knowledge changes with exact-target correction/withdrawal and a read-only, entity-centered Control UI. Tools publish journaled pages, sourced claims/relationships and entity metadata; the UI inspects them and hands change requests to chat. Writes require `vault.writesEnabled: true`; sample mode remains read-only. Owner-direct turns can access the configured agent’s private records; shared turns are restricted to their own conversation partition.
 
@@ -59,25 +59,20 @@ Git commits use exact retained bytes, preserve unrelated changes and staged cont
 
 ## Develop
 
-Requires Node 24 and OpenClaw 2026.9.5. The SDK is experimental; use the checkout belonging to the running gateway, not just a matching version label. An older checkout can refuse a newer host state database; do not downgrade or alter that database to build this plugin. See [verification](docs/VERIFICATION.md).
+Requires Node 24. Build against the OpenClaw checkout that runs your gateway, not a published package or a matching version label: the plugin SDK is experimental, and `main` uses SDK surfaces newer than the latest published release (for example the memory prompt's `projectKey`, from openclaw/openclaw#115438). `openclaw` is a peer dependency only; the repository does not assume any sibling checkout path.
+
+Find the checkout behind the running gateway (`openclaw --version` prints its commit), make sure its plugin-SDK declarations are built, then install it into a fresh dependency directory:
 
 ```sh
-npm install
+rm -rf node_modules
+npm install --ignore-scripts --no-save --package-lock=false /path/to/gateway/openclaw
 npm run check
 npm test
 npm run build
 npm run validate
 ```
 
-For development against an existing built host checkout, start with a fresh dependency directory and use its SDK/CLI without changing the committed dependency declaration:
-
-```sh
-npm install --ignore-scripts --no-save --package-lock=false /path/to/openclaw
-npm run check
-npm test
-npm run build
-npm run validate
-```
+`npm install` alone pulls the published `openclaw` peer, which type-checks only when a release includes every SDK surface `main` uses. An older checkout can refuse a newer host state database; do not downgrade or alter that database to build this plugin. See [verification](docs/VERIFICATION.md).
 
 Use the CLI belonging to the actual running gateway. Inspect existing configuration before installation; preserve other plugins. Enable **Settings → Labs → Custom plugin UI** if needed (no gateway restart required).
 

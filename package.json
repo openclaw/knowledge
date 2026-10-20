@@ -47,7 +47,6 @@
     "yaml": "2.9.0"
   },
   "devDependencies": {
-    "openclaw": "file:../openclaw",
     "esbuild": "0.28.2",
     "typescript": "5.9.3",
     "@types/node": "26.5.1"

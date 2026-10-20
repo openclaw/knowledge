@@ -2,7 +2,7 @@
 
 Date: 2026-09-23  
 Audience: product design and implementation  
-Design reference: `Openclaw design system.zip`, Knowledge v3
+Design reference: `Openclaw design system.zip`, Knowledge v3 ([retrieval](DESIGN_REFERENCE.md))
 
 ## The brief
 

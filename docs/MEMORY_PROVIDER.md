@@ -1,25 +1,26 @@
 # Knowledge as a memory provider
 
-This branch targets OpenClaw's unreleased provider-neutral memory runtime. It
-registers `providerRuntime` through the public `MemoryPluginCapability` contract
+Knowledge targets OpenClaw's provider-neutral memory runtime. It registers `providerRuntime` through the public `MemoryPluginCapability` contract
 from `openclaw/plugin-sdk/memory-host-core`; it does not import the private-local
 `memory-host-search` facade or host internals. Local types are derived from
 `NonNullable<MemoryPluginCapability["providerRuntime"]>` in
 `src/memory-provider-types.ts`.
 
-The local development dependency points at `../openclaw-memory-runtime`; this is
-a branch integration requirement, not a claim about a published release. Build
-that checkout's SDK declarations before `npm run check` / `npm run build`. An
-older host ignores `providerRuntime`, so it can still load Knowledge's native
-surfaces but cannot use Knowledge as the shared memory provider. The package's
-existing peer range does not establish provider-runtime support.
+The provider runtime contract is present in published OpenClaw (checked against
+2026.10.5). Building `main` still needs the running gateway's checkout, because
+the memory prompt uses `projectKey`, which no published release includes yet;
+see the README's Develop section. On a host without `projectKey` the prompt simply
+omits the repository-key guidance. An older host ignores `providerRuntime`, so it
+can still load Knowledge's native surfaces but cannot use Knowledge as the shared
+memory provider. The package's peer range does not establish provider-runtime
+support.
 
 ## Ownership and activation
 
 `openclaw.plugin.json` declares `kind: memory`. The host must select `knowledge`
-for `plugins.slots.memory` and enable/configure the plugin to activate this branch.
-An unselected memory plugin can be disabled by the host slot gate; this branch
-is not a simultaneous standalone companion mode. Its existing native tools,
+for `plugins.slots.memory` and enable/configure the plugin to activate it.
+An unselected memory plugin can be disabled by the host slot gate; Knowledge
+has no simultaneous standalone companion mode. Its existing native tools,
 read-only UI, and memory adapter are registered together, sharing one storage
 instance and one serialized operation lane. No second publisher, watcher or
 write API is created. Per-request close releases a lease, not the service.

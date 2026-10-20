@@ -1,8 +1,8 @@
 # Knowledge: v1 Scope
 
 **Date:** 2026-09-18
-**Updated:** 2026-09-23
-**Status:** V1 scope baseline; not implemented. Follow-ups are candidates, not release commitments.
+**Updated:** 2026-10-20
+**Status:** V1 scope baseline. The foundation milestones (§9) and most v1 capabilities are implemented; v1 acceptance (§7) is not complete. Full backup/restore (criterion 7) is not implemented, and the ingestion skills still need real-content agent acceptance. The README's capability table is the current implementation status. Follow-ups are candidates, not release commitments.
 
 ## Product direction update — 2026-09-23
 
@@ -19,8 +19,7 @@ withdrawal ship as agent operations, without browser forms or dialogs. See
 Knowledge is a native OpenClaw plugin, informed by gbrain's knowledge model and workflows—not a compatible reimplementation or an attempt to reproduce its full feature set.
 
 Knowledge replaces memory-wiki's knowledge-vault role without depending on it.
-The provider-neutral-memory branch also supports selection as OpenClaw's memory
-provider, with shared read/search/health and ordinary-turn remembering guidance.
+Knowledge also supports selection as OpenClaw's memory provider, with shared read/search/health and ordinary-turn remembering guidance.
 It does not take the context-engine slot. Replacement does not imply feature
 parity, automatic migration, dreaming, startup replacement, or pre-compaction
 saves. See [MEMORY_PROVIDER.md](MEMORY_PROVIDER.md) for capability boundaries.
@@ -130,7 +129,7 @@ Use memory-wiki as a source of suitable engineering and regression cases, not as
 
 Prefer supported OpenClaw SDK helpers; otherwise adapt small modules with their relevant tests and attribution. Do not import memory-wiki internals. Knowledge must own its authoritative editable-record format, external-edit reconciliation, access enforcement, correction/withdrawal semantics, and recoverable file/SQLite publication contract.
 
-Memory-wiki's compiled-page authority model, complete claim schema, search service, memory bridges, and automation are not v1 requirements. Shared-memory read integration is implemented on the provider-neutral-memory branch; migration tooling remains a follow-up. Reuse must not expand the product scope.
+Memory-wiki's compiled-page authority model, complete claim schema, search service, memory bridges, and automation are not v1 requirements. Shared-memory read integration is implemented; migration tooling remains a follow-up. Reuse must not expand the product scope.
 
 ### 5.2 Introspection is part of feature delivery
 
@@ -231,7 +230,7 @@ These decisions must not silently expand the release. Prefer the smallest implem
 
 ## 9. Foundation milestones
 
-Build a working Knowledge explorer alongside the data foundation, not a complete storage engine followed by a UI. These milestones establish the foundation, not completion of all v1 workflows.
+Build a working Knowledge explorer alongside the data foundation, not a complete storage engine followed by a UI. These milestones establish the foundation, not completion of all v1 workflows. All three slices are delivered; the UI-editing parts of Slices 2 and 3 were superseded by the read-only inspector direction (see the 2026-09-23 product direction update), so writes go through agent tools.
 
 | Slice | Deliverable | Completion check |
 |---|---|---|
@@ -247,7 +246,7 @@ Implemented local composition, the reviewed gbrain-based default, shared resolve
 
 ## Real-vault read foundation milestone — 2026-09-22
 
-Implemented one configured agent vault, trusted private/conversation read access, guarded filesystem reads, and a durable SQLite identity checkpoint. See [REAL_VAULT.md](REAL_VAULT.md) for the implemented contract and limitations. Writes remain disabled. Next is Slice 2: shared UI/agent create/edit with journaled publication, revision/hash conflicts, retry-safe receipts/history, and retained text evidence. Ingestion follows the writable foundation.
+Implemented one configured agent vault, trusted private/conversation read access, guarded filesystem reads, and a durable SQLite identity checkpoint. See [REAL_VAULT.md](REAL_VAULT.md) for the implemented contract and limitations. At this milestone writes were still disabled; Slice 2 (journaled agent writes, revision/hash conflicts, retry-safe receipts/history, retained evidence) and ingestion were delivered afterwards.
 
 ## Stores and sharing — 2026-09-28
 
