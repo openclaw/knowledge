@@ -3,7 +3,12 @@ import assert from 'node:assert/strict';
 import { Check } from 'typebox/value';
 import { SampleVault } from '../dist/vault.js';
 import { contract } from '../dist/contract.js';
-import { isPluginJsonValue } from '../node_modules/openclaw/src/plugins/host-hook-json.ts';
+// The host's JSON boundary lives in OpenClaw source; a published-package install skips only that check.
+const { isPluginJsonValue } = await import('../node_modules/openclaw/src/plugins/host-hook-json.ts').catch(error => {
+  if (['ERR_MODULE_NOT_FOUND', 'ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING'].includes(error?.code)) return {};
+  throw error;
+});
+test('real host JSON boundary is checked', { skip: !isPluginJsonValue && 'needs an OpenClaw source checkout as node_modules/openclaw' }, () => {});
 
 async function fixture(count, evidenceCount, body, quote = '') {
   const vault = new SampleVault(), data = await vault.scan();
@@ -17,7 +22,7 @@ async function fixture(count, evidenceCount, body, quote = '') {
 }
 function valid(result) {
   assert.ok(Check(contract.operations.records.output,result),'records contract');
-  assert.ok(isPluginJsonValue(result),'actual host nested-value and byte limits');
+  if (isPluginJsonValue) assert.ok(isPluginJsonValue(result),'actual host nested-value and byte limits');
   return result;
 }
 for (const [name,evidenceCount,body] of [['nodes',20,'Synthetic claim.'],['utf8 bytes',1,'界'.repeat(4000)]]) {

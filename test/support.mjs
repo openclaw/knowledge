@@ -53,6 +53,8 @@ export function hostApi(base, { agents = ['main'], stores = {}, policy = {}, lag
     publish() { if (host.pending) { host.config = host.pending; host.pending = undefined; } } };
 }
 
+/** Session-action registration for both host API shapes: grouped (OpenClaw main) and flat (published 2026.10.x). */
+export const sessionActions = (register = () => {}) => ({ registerSessionAction: register, session: { controls: { registerSessionAction: register } } });
 /** Owner-direct tool context for an agent. */
 export const toolContext = (api, agentId = 'main', audience = { kind: 'owner-private', agentId }) =>
   ({ source: 'tool', api, tool: { agentId, memoryAudience: audience, assertInvocationCurrent() {}, assertMemoryAudienceCurrent() {} } });

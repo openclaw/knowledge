@@ -7,11 +7,11 @@ from `openclaw/plugin-sdk/memory-host-core`; it does not import the private-loca
 `src/memory-provider-types.ts`.
 
 The provider runtime contract is present in published OpenClaw (checked against
-2026.10.5). Building `main` still needs the running gateway's checkout, because
-the memory prompt uses `projectKey`, which no published release includes yet;
-see the README's Develop section. On a host without `projectKey` the prompt simply
-omits the repository-key guidance. An older host ignores `providerRuntime`, so it
-can still load Knowledge's native surfaces but cannot use Knowledge as the shared
+2026.10.5), and Knowledge builds against that package. Newer hosts also pass the
+memory prompt a `projectKey`, which published types do not yet declare; Knowledge
+reads it when present, and on a host without it the prompt simply omits the
+repository-key guidance. See the README's Develop section. An older host ignores
+`providerRuntime`, so it can still load Knowledge's native surfaces but cannot use Knowledge as the shared
 memory provider. The package's peer range does not establish provider-runtime
 support.
 

@@ -4,7 +4,12 @@ import { DatabaseSync } from 'node:sqlite';
 import { Check } from 'typebox/value';
 import { recentActivity, RecentOutput } from '../dist/recent.js';
 // Exercise the installed host's actual boundary, not a copy of our budget helper.
-import { isPluginJsonValue } from '../node_modules/openclaw/src/plugins/host-hook-json.ts';
+// The host's JSON boundary lives in OpenClaw source; a published-package install skips only that check.
+const { isPluginJsonValue } = await import('../node_modules/openclaw/src/plugins/host-hook-json.ts').catch(error => {
+  if (['ERR_MODULE_NOT_FOUND', 'ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING'].includes(error?.code)) return {};
+  throw error;
+});
+test('real host JSON boundary is checked', { skip: !isPluginJsonValue && 'needs an OpenClaw source checkout as node_modules/openclaw' }, () => {});
 
 function fixture(t, groups, count, evidenceCount = 10, body = 'Synthetic claim.', quote = '') {
   const db = new DatabaseSync(':memory:'); t.after(() => db.close());
@@ -30,7 +35,7 @@ function fixture(t, groups, count, evidenceCount = 10, body = 'Synthetic claim.'
 function valid(value) {
   const json=JSON.parse(JSON.stringify(value));
   assert.ok(Check(RecentOutput,json),'Recent schema');
-  assert.ok(isPluginJsonValue(json),'real host JSON limit');
+  if (isPluginJsonValue) assert.ok(isPluginJsonValue(json),'real host JSON limit');
   return json;
 }
 

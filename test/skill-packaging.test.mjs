@@ -48,7 +48,9 @@ test('npm payload includes all skill entrypoints, references and upstream attrib
   // No lifecycle writes or network required to inspect the shipping payload.
   const result = JSON.parse(execFileSync('npm', ['pack', '--dry-run', '--ignore-scripts', '--json'],
     { cwd: root, encoding: 'utf8' }));
-  const files = new Set(result[0].files.map(f => f.path));
+  // npm returns an array, or an object keyed by package name when run inside an npm script.
+  const [pack] = Array.isArray(result) ? result : Object.values(result);
+  const files = new Set(pack.files.map(f => f.path));
   for (const name of names) {
     assert.ok(files.has(`skills/${name}/SKILL.md`));
     if (name === 'knowledge-automation') continue;

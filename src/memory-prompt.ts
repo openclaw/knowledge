@@ -3,7 +3,10 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 type Prompt = NonNullable<Parameters<OpenClawPluginApi["registerMemoryCapability"]>[0]["promptBuilder"]>;
 
 /** Tool-filtered guidance; skill procedures stay in the shipped skill bundles. */
-export const buildKnowledgeMemoryPrompt: Prompt = ({ availableTools: tools, citationsMode, projectKey }) => {
+export const buildKnowledgeMemoryPrompt: Prompt = (params) => {
+  const { availableTools: tools, citationsMode } = params;
+  // Newer hosts pass projectKey; published SDK types do not declare it yet. Without it, the repository-key guidance is omitted.
+  const projectKey = (params as { projectKey?: unknown }).projectKey;
   const lookup = tools.has("knowledge_lookup"), grep = tools.has("knowledge_grep"), record = tools.has("knowledge_record"), recall = tools.has("knowledge_recall");
   const reads = lookup || grep || record;
   if (!reads && !recall) return [];
@@ -15,7 +18,7 @@ export const buildKnowledgeMemoryPrompt: Prompt = ({ availableTools: tools, cita
   if ([...tools].some(t => /^(lcm_|sessions_search$|sessions_history$)/.test(t))) lines.push("Use the configured conversation-history workflow for transcript recall.");
   if (tools.has("knowledge_remember")) lines.push("Unprompted and silently, save decisions with rationale, preferences, corrections to your work, commitments, project-state changes and explicit remember requests with knowledge_remember: before your final reply on a task where one occurred, one call with one claim per item, short attribution, the supporting conversation excerpt, and a subject only when you know its exact page title or alias (otherwise omit it; one named entity page is inferred). Its published receipt is the save; no search or readback first. Skip transient details, guesses, your own inference, secrets, and anything marked ‘don’t save.’ Recording a commitment does not execute it.");
   // Path-only keys name a directory, not a project; markup-shaped keys never reach the prompt.
-  const repoKey = projectKey && !projectKey.startsWith("path:") && !/[\r\n<>`]/.test(projectKey) ? projectKey : undefined;
+  const repoKey = typeof projectKey === "string" && projectKey && !projectKey.startsWith("path:") && !/[\r\n<>`]/.test(projectKey) ? projectKey : undefined;
   if (repoKey && tools.has("knowledge_remember")) lines.push(`This run's repository key is \`${repoKey}\`, an alias of its project page: pass it as the knowledge_remember subject for claims about this repository's work, and omit it for claims about anything else.`);
   if (record && tools.has("knowledge_save_page") && tools.has("knowledge_status") && tools.has("knowledge_ontology") && (lookup || grep)) {
     lines.push("Use knowledge-capture to revise a page's prose or to save a note or lesson that is not a discrete claim.");

@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { Check } from 'typebox/value';
 import plugin from '../dist/index.js';
-import { apiFor } from './support.mjs';
+import { apiFor, sessionActions } from './support.mjs';
 import { contract } from '../dist/contract.js';
 
 // A public feature/session-action adapter over the real storage implementation.
@@ -24,7 +24,7 @@ async function fixture(t) {
   function restart() {
     actions = new Map();
     plugin.register({ ...api, registerService() {}, registerTool() {},
-      session: { controls: { registerSessionAction(action) { actions.set(action.id, action); } } } });
+      ...sessionActions(action => { actions.set(action.id, action); }) });
   }
   restart();
   async function call(name, payload = {}) {

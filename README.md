@@ -60,20 +60,25 @@ Git commits use exact retained bytes, preserve unrelated changes and staged cont
 
 ## Develop
 
-Requires Node 24. Build against the OpenClaw checkout that runs your gateway, not a published package or a matching version label: the plugin SDK is experimental, and `main` uses SDK surfaces newer than the latest published release (for example the memory prompt's `projectKey`, from openclaw/openclaw#115438). `openclaw` is a peer dependency only; the repository does not assume any sibling checkout path.
-
-Find the checkout behind the running gateway (`openclaw --version` prints its commit), make sure its plugin-SDK declarations are built, then install it into a fresh dependency directory:
+Requires Node 24 and OpenClaw 2026.10.5 or newer, the oldest release this repository is checked against. The plugin SDK is experimental. `openclaw` is a peer dependency; the published package supplies types and the SDK for tests.
 
 ```sh
-rm -rf node_modules
-npm install --ignore-scripts --no-save --package-lock=false /path/to/gateway/openclaw
+npm install --ignore-scripts
 npm run check
 npm test
 npm run build
 npm run validate
 ```
 
-`npm install` alone pulls the published `openclaw` peer, which type-checks only when a release includes every SDK surface `main` uses. An older checkout can refuse a newer host state database; do not downgrade or alter that database to build this plugin. See [verification](docs/VERIFICATION.md).
+`build`, `validate` and `pack` run the `openclaw` CLI on your `PATH` (the running gateway's) through `scripts/host-cli.mjs`, not the package copy in `node_modules/.bin`: those commands open the host state database, and an older CLI refuses a newer schema. Set `OPENCLAW_HOST_CLI` to choose a different CLI. Do not downgrade or alter the state database to build this plugin.
+
+Gateways built from OpenClaw `main` can be newer than the published package. Knowledge works with both:
+
+- The memory prompt uses the host's `projectKey` when supplied; published types do not declare it, and hosts without it omit the repository-key guidance.
+- Test hosts register session actions through both the grouped `api.session.controls` API (current `main`) and the flat `api.registerSessionAction` (published 2026.10.x).
+- The Browse and Recent budget tests also check the host's JSON boundary, which only OpenClaw source provides. With the published package, `npm test` reports that check as skipped. To run it, install an OpenClaw source checkout with built plugin-SDK declarations instead: `rm -rf node_modules && npm install --ignore-scripts --no-save --package-lock=false /path/to/openclaw`.
+
+See [verification](docs/VERIFICATION.md).
 
 Use the CLI belonging to the actual running gateway. Inspect existing configuration before installation; preserve other plugins. Enable **Settings → Labs → Custom plugin UI** if needed (no gateway restart required).
 

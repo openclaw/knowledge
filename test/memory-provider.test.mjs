@@ -10,7 +10,7 @@ import { deriveMemoryFlushRequestId } from '../dist/service.js';
 import { buildKnowledgeMemoryPrompt } from '../dist/memory-prompt.js';
 import { contract } from '../dist/contract.js';
 import plugin from '../dist/index.js';
-import { apiFor, hostApi } from './support.mjs';
+import { apiFor, hostApi, sessionActions } from './support.mjs';
 
 async function fixture(t, overrides = {}) {
   const base = await mkdtemp(path.join(os.tmpdir(), 'knowledge-memory-'));
@@ -308,7 +308,7 @@ test('retirement drains the shared lane, rollback resumes, close-all fences reta
 test('entry retains native tools, denies untrusted provider callers and prompt honors missing capabilities', async t => {
   const base = await mkdtemp(path.join(os.tmpdir(), 'knowledge-entry-')); t.after(() => rm(base, { recursive: true, force: true }));
   let capability; const names = [], services = [];
-  plugin.register({ ...hostApi(base).api, registerMemoryCapability(c) { capability = c; }, registerService(s) { services.push(s); }, session: { controls: { registerSessionAction() {} } }, registerTool(_f, options) { names.push(options.name); } });
+  plugin.register({ ...hostApi(base).api, registerMemoryCapability(c) { capability = c; }, registerService(s) { services.push(s); }, ...sessionActions(), registerTool(_f, options) { names.push(options.name); } });
   assert.equal(names.length, Object.values(contract.operations).filter(o => o.tool).length);
   assert.deepEqual(capability.recallToolNames, ['knowledge_grep', 'knowledge_lookup', 'knowledge_record']);
   assert.ok(capability.recallToolNames.every(name => names.includes(name)));
@@ -327,7 +327,7 @@ test('entry registers without reading the host runtime, as CLI metadata loading 
   // The host's CLI-metadata runtime throws on any property read.
   const runtime = new Proxy({}, { get(_t, key) { throw new Error(`runtime.${String(key)} is unavailable during registration`); } });
   let capability;
-  plugin.register({ id: 'knowledge', pluginConfig: {}, runtime, registerMemoryCapability(c) { capability = c; }, registerService() {}, session: { controls: { registerSessionAction() {} } }, registerTool() {} });
+  plugin.register({ id: 'knowledge', pluginConfig: {}, runtime, registerMemoryCapability(c) { capability = c; }, registerService() {}, ...sessionActions(), registerTool() {} });
   assert.ok(capability.providerRuntime);
 });
 
@@ -416,7 +416,7 @@ test('flush save follows delegated owner-private and conversation audiences', as
 test('grep and lookup expose empty and usable evidence for Active Memory', async t => {
   const f = await fixture(t);
   const factories = new Map();
-  plugin.register({ ...f.api, session: { controls: { registerSessionAction() {} } }, registerTool(factory, options) { factories.set(options.name, factory); } });
+  plugin.register({ ...f.api, ...sessionActions(), registerTool(factory, options) { factories.set(options.name, factory); } });
   // The feature adapter must expose the page count in both transcript details and JSON text.
   const assertCount = async (name, input, count, total) => {
     const tool = factories.get(name)(f.tool.tool), result = await tool.execute(randomUUID(), input);

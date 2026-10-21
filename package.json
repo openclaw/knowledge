@@ -4,9 +4,9 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "build": "npm run skills:sync && tsc -p tsconfig.json && openclaw plugins build",
-    "validate": "openclaw plugins validate --json",
-    "pack": "openclaw plugins pack --json",
+    "build": "npm run skills:sync && tsc -p tsconfig.json && node scripts/host-cli.mjs plugins build",
+    "validate": "node scripts/host-cli.mjs plugins validate --json",
+    "pack": "node scripts/host-cli.mjs plugins pack --json",
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "tsc -p tsconfig.json && node --test test/*.test.mjs",
     "skills:sync": "node scripts/sync-skill-references.mjs",
@@ -39,7 +39,7 @@
     "docs/MAINTENANCE.md"
   ],
   "peerDependencies": {
-    "openclaw": ">=2026.9.5"
+    "openclaw": ">=2026.10.5"
   },
   "dependencies": {
     "dompurify": "3.4.15",
@@ -58,10 +58,10 @@
     ],
     "controlUi": "./src/control-ui.ts",
     "compat": {
-      "pluginApi": ">=2026.9.5"
+      "pluginApi": ">=2026.10.5"
     },
     "build": {
-      "openclawVersion": "2026.9.5"
+      "openclawVersion": "2026.10.5"
     }
   },
   "description": "Evidence-backed knowledge vault and native OpenClaw explorer",
