@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # CI has no running gateway or existing host state.
+      OPENCLAW_HOST_CLI: ${{ github.workspace }}/node_modules/.bin/openclaw
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install the supported host baseline
+        run: npm install --ignore-scripts --no-save --package-lock=false openclaw@2026.10.5
+      - run: npm run check
+      - run: npm test
+      - run: npm run build
+      - run: npm run validate

@@ -53,6 +53,13 @@ test('cron expressions evaluate in the configured time zone and skip impossible 
   const repeat = parseCron('30 1 * * *', 'America/Los_Angeles'), first = nextRun(repeat, Date.parse('2026-11-01T07:00:00Z'));
   assert.equal(new Date(first).toISOString(), '2026-11-01T08:30:00.000Z');
   assert.equal(new Date(nextRun(repeat, first)).toISOString(), '2026-11-02T09:30:00.000Z');
+  // Spring forward makes that civil day 23h. A restricted day must still be tested at local midnight.
+  assert.equal(new Date(nextRun(parseCron('0 0 * * 1', 'America/Los_Angeles'), Date.parse('2026-03-07T08:00:00Z'))).toISOString(), '2026-03-09T07:00:00.000Z');
+  assert.equal(new Date(nextRun(parseCron('15 0 * * 1-5', 'America/Los_Angeles'), Date.parse('2026-03-07T08:00:00Z'))).toISOString(), '2026-03-09T07:15:00.000Z');
+  assert.equal(new Date(nextRun(parseCron('0 0 9 * *', 'America/Los_Angeles'), Date.parse('2026-03-08T07:00:00Z'))).toISOString(), '2026-03-09T07:00:00.000Z');
+  assert.equal(new Date(nextRun(parseCron('0 0 * * 1', 'Europe/Paris'), Date.parse('2026-03-28T23:00:00Z'))).toISOString(), '2026-03-29T22:00:00.000Z');
+  // Fall back does not skip the next Monday midnight.
+  assert.equal(new Date(nextRun(parseCron('0 0 * * 1', 'America/Los_Angeles'), Date.parse('2026-10-31T07:00:00Z'))).toISOString(), '2026-11-02T08:00:00.000Z');
   assert.equal(new Date(nextRun(parseCron('*/15 9-17 * * 1-5', 'UTC'), Date.parse('2026-10-24T12:00:00Z'))).toISOString(), '2026-10-26T09:00:00.000Z');
   assert.throws(() => parseCron('61 * * * *', 'UTC'), /Invalid cron field/);
   assert.throws(() => parseCron('* * * *', 'UTC'), /five fields/);
