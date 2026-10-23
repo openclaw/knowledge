@@ -52,6 +52,8 @@ only while `writesEnabled` is true (also the default).
 }
 ```
 
+Schedules use local civil time in the configured zone. A spring-forward change on a skipped day does not discard matching midnight slots on the following day. A configured time that does not exist during the forward jump is skipped.
+
 An invalid schedule or time zone does not disable the plugin. The pass is not
 scheduled, a warning is logged, and Settings shows the error.
 
