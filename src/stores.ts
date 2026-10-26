@@ -3,12 +3,13 @@ import { listAgentIds, tryResolveDefaultAgentId } from "openclaw/plugin-sdk/agen
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 import { maintenancePrincipal, pinPrincipal, type Partition, type Principal, type VaultAccess } from "./access.js";
 import { RegistryClient } from "./registry-client.js";
+import { KnowledgeRestartError } from "./restart-error.js";
 import { bindingState, type RegistrySnapshot } from "./store-registry.js";
 import { StoreRuntime } from "./store-runtime.js";
 import { agentIdPattern, canonicalJson, effectiveBinding, parseMembership, readStoresSection, storesRevision, type Membership, type Policy } from "./stores-config.js";
 import type { StoreState } from "./stores-contract.js";
 
-const reloaded = () => Error("Knowledge service was reloaded; retry the original request.");
+const reloaded = () => new KnowledgeRestartError("service-reloaded", "Knowledge service was reloaded; retry the original request.");
 const reassigned = () => Error("This agent's knowledge store assignment changed; retry the original request.");
 const denied = () => Error("Knowledge access unavailable: trusted agent/session authority is required.");
 /** A store resolved for use, or the reason it cannot be used yet. */

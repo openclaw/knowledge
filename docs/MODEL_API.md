@@ -289,7 +289,14 @@ reconcile their own partition on demand; they do not run private reconciliation.
 
 Service stop closes watchers/timers and fences old and in-flight access. A retry
 uses the original request ID against the replacement service; accepted publication
-recovery and explicit conflict handling remain unchanged. Full backup/restore is
+recovery and explicit conflict handling remain unchanged. Service stop resolves
+only after maintenance has stopped and the store and registry workers have
+exited. Where the host provides `api.lifecycle.onDispose`, instance disposal
+does the same and is final: no worker starts afterwards. Errors caused only by a
+stop or restart keep their message and carry `code: "UNAVAILABLE"`,
+`retryable: true` and a `reason` (`service-reloaded`, `runtime-retired`,
+`storage-stopped` or `registry-stopped`) for in-process callers; tool and
+session-action results still carry the message only. Full backup/restore is
 not implemented by this lifecycle work.
 
 ## File attachments

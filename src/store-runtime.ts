@@ -1,8 +1,9 @@
 import { LiveState } from "./live-state.js";
+import { KnowledgeRestartError } from "./restart-error.js";
 import { StorageClient } from "./storage-client.js";
 import type { StoreConfig } from "./real-vault.js";
 
-const retired = () => Error("Knowledge store runtime was retired; retry the original request.");
+const retired = () => new KnowledgeRestartError("runtime-retired", "Knowledge store runtime was retired; retry the original request.");
 
 /** Everything one physical store owns at runtime: its storage worker, its
  * serialized lane and its live-state watcher. Every agent using the store

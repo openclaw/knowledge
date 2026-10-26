@@ -280,7 +280,7 @@ async function runningStores(t) {
   await opened.runtime.enqueue(opened.access.assertCurrent, () => opened.runtime.client.call('catalog', opened.access));
   const workers = { storage: opened.runtime.client.worker, registry: stores.registry.worker };
   assert.ok(workers.storage.threadId > 0 && workers.registry.threadId > 0, 'both workers are running');
-  return { f, stores, workers };
+  return { f, stores, workers, opened };
 }
 
 test('service stop resolves only after the store and registry workers have exited', async t => {
@@ -311,6 +311,21 @@ test('the plugin instance disposes Knowledge through api.lifecycle.onDispose', a
   await services[0].stop();
   await disposers[0]();
   await assert.rejects(service.records({}, toolContext(host.api)), /reloaded/);
+});
+
+test('restart failures carry a stable retryable code and their reason', async t => {
+  const { stores, opened } = await runningStores(t);
+  const restart = reason => error => error.code === 'UNAVAILABLE' && error.retryable === true && error.reason === reason;
+  const { runtime, access } = opened;
+  const inFlight = runtime.client.call('catalog', access);
+  const stopped = runtime.client.close();
+  await assert.rejects(inFlight, restart('storage-stopped'));
+  await stopped;
+  await runtime.retire();
+  await assert.rejects(runtime.enqueue(() => {}, async () => {}), restart('runtime-retired'));
+  await stores.dispose();
+  assert.throws(() => stores.assertLive(stores.incarnation), restart('service-reloaded'));
+  await assert.rejects(stores.registry.call('snapshot'), restart('registry-stopped'));
 });
 
 test('operator proxy is operator-only and validates inner operations', async t => {

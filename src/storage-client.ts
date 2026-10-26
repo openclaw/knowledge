@@ -2,6 +2,7 @@ import { Worker } from "node:worker_threads";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import type { VaultAccess } from "./access.js";
+import { KnowledgeRestartError } from "./restart-error.js";
 import type { StoreConfig } from "./real-vault.js";
 import type { StorageOperations } from "./storage-host.js";
 import { AUTHORITY_REVOKED, type HostMessage, type WorkerMessage } from "./storage-protocol.js";
@@ -45,7 +46,7 @@ export class StorageClient {
    * the next call starts a new worker. */
   async close() {
     const worker = this.worker; this.worker = undefined;
-    this.fail(Error("Knowledge storage stopped; retry the original request."));
+    this.fail(new KnowledgeRestartError("storage-stopped", "Knowledge storage stopped; retry the original request."));
     await worker?.terminate();
   }
   private start(): Worker {

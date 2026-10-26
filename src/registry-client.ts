@@ -1,9 +1,10 @@
 import { Worker } from "node:worker_threads";
 import { sdkUrls } from "./storage-client.js";
+import { KnowledgeRestartError } from "./restart-error.js";
 import type { RegistryOperations, RegistryRequest, RegistryResponse } from "./registry-host.js";
 import type { RegistrySnapshot } from "./store-registry.js";
 
-const stopped = () => Error("Knowledge store registry stopped; retry the original request.");
+const stopped = () => new KnowledgeRestartError("registry-stopped", "Knowledge store registry stopped; retry the original request.");
 type Pending = { resolve(value: unknown): void; reject(error: unknown): void };
 /** Registry failure that needs operator recovery, not a retry. */
 export class RegistryUnavailable extends Error {}
