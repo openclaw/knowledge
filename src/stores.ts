@@ -241,7 +241,7 @@ export class Stores {
   stop(): Promise<void> {
     ++this.epoch; this.current = false;
     const runtimes = [...this.runtimes.values()]; this.runtimes.clear();
-    const stopped = Promise.all(runtimes.map(runtime => runtime.retire())).then(() => this.current ? undefined : this.registry.close());
+    const stopped = Promise.allSettled(runtimes.map(runtime => runtime.retire())).then(() => this.current ? undefined : this.registry.close());
     this.stopping.add(stopped);
     const settled = () => { this.stopping.delete(stopped); };
     stopped.then(settled, settled);
