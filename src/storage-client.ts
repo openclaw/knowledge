@@ -41,11 +41,12 @@ export class StorageClient {
       worker.postMessage({ type: "call", id, op, input: input[0], scope: access.scope, agentId: access.agentId, activity: access.activity } satisfies HostMessage);
     });
   }
-  /** Stop the worker. Outstanding calls fail; the next call starts a new worker. */
-  close() {
+  /** Stop the worker and resolve once it has exited. Outstanding calls fail;
+   * the next call starts a new worker. */
+  async close() {
     const worker = this.worker; this.worker = undefined;
     this.fail(Error("Knowledge storage stopped; retry the original request."));
-    void worker?.terminate();
+    await worker?.terminate();
   }
   private start(): Worker {
     if (this.worker) return this.worker;

@@ -38,9 +38,10 @@ export class StoreRuntime {
   /** Settles once every operation queued so far has finished or failed. */
   drain(): Promise<void> { return this.pending; }
 
-  /** Stop accepting work, let queued work settle, then release the worker. */
+  /** Stop accepting work, let queued work settle, then release the worker.
+   * Resolves once the worker has exited. */
   retire(): Promise<void> {
-    this.retiredAt ??= this.pending.then(() => { this.live.stop(); this.client.close(); });
+    this.retiredAt ??= this.pending.then(() => { this.live.stop(); return this.client.close(); });
     return this.retiredAt;
   }
 }

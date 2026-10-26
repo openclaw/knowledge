@@ -63,7 +63,11 @@ export function createKnowledgeService(api: OpenClawPluginApi, events?: FeatureE
   const maintenance = new Maintenance(stores, { info: m => api.logger?.info?.(m), warn: m => api.logger?.warn?.(m) });
   // The host service scheduler owns maintenance timing for this service
   // lifetime; stop() retires its jobs. No cron job or conversation hook.
-  api.registerService?.({ apiVersion: 2, id: "knowledge:live-state", async start(ctx) { stores.start(); if (ctx?.scheduler) await maintenance.start(ctx.scheduler); }, stop() { stores.stop(); } });
+  api.registerService?.({ apiVersion: 2, id: "knowledge:live-state", async start(ctx) { stores.start(); if (ctx?.scheduler) await maintenance.start(ctx.scheduler); }, stop() { return stores.stop(); } });
+  // Instance disposal runs after the host drains admitted calls. Knowledge ends
+  // for good and resolves only once its workers have exited, so a replacement
+  // generation never opens a store the old one still holds.
+  api.lifecycle?.onDispose?.(() => stores.dispose());
 
   /** Handlers bound to one operator viewing selection. Tools always resolve
    * their store from the host audience; `agent` only applies to operators. */

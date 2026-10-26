@@ -3,6 +3,7 @@ import { sdkUrls } from "./storage-client.js";
 import type { RegistryOperations, RegistryRequest, RegistryResponse } from "./registry-host.js";
 import type { RegistrySnapshot } from "./store-registry.js";
 
+const stopped = () => Error("Knowledge store registry stopped; retry the original request.");
 type Pending = { resolve(value: unknown): void; reject(error: unknown): void };
 /** Registry failure that needs operator recovery, not a retry. */
 export class RegistryUnavailable extends Error {}
@@ -13,6 +14,7 @@ export class RegistryClient {
   private worker?: Worker;
   private readonly pending = new Map<number, Pending>();
   private nextId = 0;
+  private disposed = false;
   /** Latest published registry facts; undefined until the first load. */
   current?: RegistrySnapshot;
   /** Set when the registry cannot be opened; every store is then unavailable. */
@@ -37,13 +39,18 @@ export class RegistryClient {
     try { this.failure = undefined; return await this.call("snapshot"); }
     catch (e) { if (e instanceof RegistryUnavailable) this.failure = e; throw e; }
   }
-  close() {
+  /** Stop the worker and resolve once it has exited. Outstanding calls fail;
+   * the next call starts a new worker unless the client was disposed. */
+  async close() {
     const worker = this.worker; this.worker = undefined;
-    this.fail(Error("Knowledge store registry stopped; retry the original request."));
-    void worker?.terminate();
+    this.fail(stopped());
+    await worker?.terminate();
   }
+  /** Close for good: no later call starts a worker. */
+  dispose() { this.disposed = true; return this.close(); }
   private start(): Worker {
     if (this.worker) return this.worker;
+    if (this.disposed) throw stopped();
     const worker = new Worker(new URL("./registry-worker.js", import.meta.url), { workerData: { sdk: sdkUrls(), stateRoot: this.stateRoot() } });
     worker.unref();
     worker.on("message", (message: RegistryResponse) => {

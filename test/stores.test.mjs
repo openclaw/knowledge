@@ -269,6 +269,50 @@ test('the cutover fences old-assignment access before applying and after', async
   assert.equal(next.kind, 'unprovisioned', 'the new assignment resolves to the named store');
 });
 
+// Plugin reload starts the next generation as soon as stop/dispose resolve, so
+// both must wait for the old generation's workers to exit.
+async function runningStores(t) {
+  const f = await fixture(t);
+  await f.save('main', 'Seed');
+  const stores = new Stores(f.api, { operatorRead: false, writesEnabled: true }, () => {});
+  const opened = await stores.open(() => ({ agentId: 'main', scope: { visibility: 'private' } }), { provision: false });
+  assert.equal(opened.kind, 'ready');
+  await opened.runtime.enqueue(opened.access.assertCurrent, () => opened.runtime.client.call('catalog', opened.access));
+  const workers = { storage: opened.runtime.client.worker, registry: stores.registry.worker };
+  assert.ok(workers.storage.threadId > 0 && workers.registry.threadId > 0, 'both workers are running');
+  return { f, stores, workers };
+}
+
+test('service stop resolves only after the store and registry workers have exited', async t => {
+  const { stores, workers } = await runningStores(t);
+  await stores.stop();
+  assert.equal(workers.storage.threadId, -1, 'storage worker exited');
+  assert.equal(workers.registry.threadId, -1, 'registry worker exited');
+});
+
+test('disposal waits for workers and is terminal: later calls never start a worker', async t => {
+  const { stores, workers } = await runningStores(t);
+  await stores.dispose();
+  assert.equal(workers.storage.threadId, -1, 'storage worker exited');
+  assert.equal(workers.registry.threadId, -1, 'registry worker exited');
+  await assert.rejects(stores.registry.call('snapshot'), /registry stopped/);
+  assert.equal(stores.registry.worker, undefined, 'no registry worker restarted');
+});
+
+test('the plugin instance disposes Knowledge through api.lifecycle.onDispose', async t => {
+  const base = await mkdtemp(path.join(os.tmpdir(), 'knowledge-stores-'));
+  t.after(() => rm(base, { recursive: true, force: true }));
+  const disposers = [], services = [];
+  const host = hostApi(base, { policy: { operatorRead: true, writesEnabled: true }, extra: { registerService: s => services.push(s), lifecycle: { onDispose: d => { disposers.push(d); return () => {}; } } } });
+  const service = createKnowledgeService(host.api);
+  await services[0].start({});
+  await service.save_page({ requestId: randomUUID(), title: 'Seed', type: 'note', body: 'Seed body.' }, toolContext(host.api));
+  assert.equal(disposers.length, 1, 'one disposer registered');
+  await services[0].stop();
+  await disposers[0]();
+  await assert.rejects(service.records({}, toolContext(host.api)), /reloaded/);
+});
+
 test('operator proxy is operator-only and validates inner operations', async t => {
   const f = await fixture(t);
   await f.save('research', 'Visible to operator');

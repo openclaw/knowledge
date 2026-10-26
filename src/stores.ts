@@ -33,6 +33,8 @@ export class Stores {
   activeChange?: string;
   private epoch = 0;
   private current = true;
+  // Stops whose workers may still be exiting; disposal waits for all of them.
+  private readonly stopping = new Set<Promise<void>>();
   constructor(readonly api: Host, readonly policy: Policy, private readonly changed: () => void) {
     this.registry = new RegistryClient(() => path.join(api.runtime.state.resolveStateDir(), "knowledge"));
   }
@@ -231,12 +233,24 @@ export class Stores {
   /** Current service incarnation; leases compare against it. */
   get incarnation() { return this.epoch; }
   assertLive(epoch: number) { if (!this.current || epoch !== this.epoch) throw reloaded(); }
-  /** Plugin service lifecycle. Stopping retires every runtime after queued work settles. */
+  /** Plugin service lifecycle. Stopping fences the current incarnation, retires
+   * every runtime after queued work settles, then closes the registry unless the
+   * service restarted meanwhile. Resolves once those workers have exited. */
   start() { ++this.epoch; this.current = true; }
-  stop() {
+  stop(): Promise<void> {
     ++this.epoch; this.current = false;
     const runtimes = [...this.runtimes.values()]; this.runtimes.clear();
-    void Promise.all(runtimes.map(runtime => runtime.retire())).finally(() => { if (!this.current) this.registry.close(); });
+    const stopped = Promise.all(runtimes.map(runtime => runtime.retire())).then(() => this.current ? undefined : this.registry.close());
+    this.stopping.add(stopped);
+    const settled = () => { this.stopping.delete(stopped); };
+    stopped.then(settled, settled);
+    return stopped;
+  }
+  /** Plugin instance disposal: stop for good once every earlier stop has
+   * finished. No worker starts afterwards; resolves once all have exited. */
+  async dispose(): Promise<void> {
+    await Promise.all([this.stop(), ...this.stopping]);
+    await this.registry.dispose();
   }
 }
 
