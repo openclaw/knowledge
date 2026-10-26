@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -105,6 +105,17 @@ test('a scheduled pass links across every store and partition, skips unprovision
   await later.fire('knowledge-maintenance');
   const caught = await restarted.maintenance_status({}, operatorContext(f.host.api));
   assert.deepEqual([caught.lastRun.trigger, caught.lastRun.slot, caught.nextRunAt], ['catch-up', '2026-10-20T13:00:00.000Z', '2026-10-20T14:00:00.000Z']);
+});
+
+test('stopping the service ends maintenance: a pass in flight neither re-arms nor writes state afterwards', async t => {
+  const f = await fixture(t), scheduler = fakeScheduler(Date.parse('2026-10-20T10:20:00Z')), service = await f.boot(scheduler);
+  await remember(service, toolContext(f.host.api, 'main'), 'Atlas Labs moved its launch to March.');
+  const file = path.join(f.host.stateRoot, 'maintenance.json'), before = await readFile(file, 'utf8');
+  const pass = scheduler.fire('knowledge-maintenance');
+  await f.lifecycles[0].stop();
+  await pass;
+  assert.equal(scheduler.jobs.size, 0, 'no job is armed on the stopped scheduler');
+  assert.equal(await readFile(file, 'utf8'), before, 'the stopped service writes no maintenance state');
 });
 
 test('disabled maintenance, invalid schedules and write-disabled installs schedule nothing', async t => {
